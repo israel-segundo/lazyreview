@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %} — Why lazyreview?{% endblock %}
+{% block content %}
+<article class="mx-auto max-w-2xl space-y-8">
+  <section class="space-y-3">
+    <h2 class="text-lg font-semibold">What is this?</h2>
+    <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
+      lazyreview is a local tool for managing agentic pull-request reviews. It keeps
+      track of the PRs waiting on you, kicks off review runs with your preferred agent
+      and model, stores the findings, and helps you consolidate feedback before anything
+      hits GitHub. The work stays on your machine — clones, logs, and history included —
+      so you can review at your own pace without babysitting a chat session.
+    </p>
+  </section>
+
+  <section class="space-y-3">
+    <h2 class="text-lg font-semibold">Why “lazyreview”?</h2>
+    <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
+      I’m a fan of
+      <a class="text-blue-600 hover:underline dark:text-blue-400" href="https://github.com/jesseduffield/lazygit" target="_blank" rel="noopener">lazygit</a>,
+      <a class="text-blue-600 hover:underline dark:text-blue-400" href="https://github.com/LazyVim/LazyVim" target="_blank" rel="noopener">lazyvim</a>,
+      and
+      <a class="text-blue-600 hover:underline dark:text-blue-400" href="https://github.com/jesseduffield/lazydocker" target="_blank" rel="noopener">lazydocker</a>
+      — tools that take a tedious everyday workflow and make it feel light without
+      stripping away power. This project is a nod to that family: same spirit, applied to
+      code review with AI agents. Less ceremony in the loop, more time actually reading
+      the diff.
+    </p>
+  </section>
+</article>
+{% endblock %}

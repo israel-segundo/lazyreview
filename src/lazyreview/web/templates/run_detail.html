@@ -1,0 +1,351 @@
+{% extends "base.html" %}
+{% from "macros.html" import agent_label, commit_hash %}
+{% block title %} — Run #{{ run.id }}{% endblock %}
+{% block content %}
+{% set status_labels = {
+  'queued': 'not started',
+  'running': 'running',
+  'failed': 'failed',
+  'cancelled': 'cancelled',
+  'succeeded': 'completed',
+} %}
+{% set status_classes = {
+  'queued': 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  'running': 'bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200',
+  'failed': 'bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200',
+  'cancelled': 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200',
+  'succeeded': 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200',
+} %}
+{% set findings_total = (run.findings_sev1 or 0) + (run.findings_sev2 or 0) + (run.findings_sev3 or 0) %}
+
+<div class="space-y-6" x-data="runDetail({{ run.id }})">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      {% if pr %}
+      <a href="/prs/{{ pr.id }}" class="text-sm text-blue-600 hover:underline dark:text-blue-400">← {{ pr.owner }}/{{ pr.repo }}#{{ pr.number }}</a>
+      {% endif %}
+      <h1 class="mt-2 text-2xl font-semibold tracking-tight">Run #{{ run.id }}</h1>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2"
+           x-show="status === 'queued' || status === 'running'"
+           {% if run.status not in ['queued', 'running'] %}x-cloak style="display:none"{% endif %}>
+        <span class="text-sm text-slate-600 dark:text-slate-400">Auto-refresh</span>
+        <button type="button"
+                role="switch"
+                :aria-checked="autoRefresh.toString()"
+                @click="toggleAutoRefresh()"
+                class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full bg-slate-300 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-slate-600"
+                :class="autoRefresh ? 'bg-blue-600 dark:bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'">
+          <span class="pointer-events-none inline-block h-5 w-5 translate-x-0.5 rounded-full bg-white shadow transition duration-200"
+                :class="autoRefresh ? 'translate-x-5' : 'translate-x-0.5'"></span>
+        </button>
+      </div>
+      <button type="button"
+              @click="deleteRun()"
+              :disabled="deleting"
+              class="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 dark:bg-red-700 dark:hover:bg-red-600">
+        <span x-text="deleting ? 'Deleting…' : 'Delete run'"></span>
+      </button>
+    </div>
+  </div>
+
+  <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <h2 class="text-lg font-semibold">Details</h2>
+    <dl class="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+      <div>
+        <dt class="text-xs uppercase tracking-wide text-slate-500">Status</dt>
+        <dd class="mt-1">
+          <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium {{ status_classes.get(run.status, 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300') }}"
+                :class="statusChipClass()">
+            <svg x-show="status === 'running'" class="h-3.5 w-3.5 animate-spin {% if run.status != 'running' %}hidden{% endif %}"
+                 xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true"
+                 :class="status === 'running' ? '' : 'hidden'">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span x-text="statusLabel()">{{ status_labels.get(run.status, run.status) }}</span>
+          </span>
+          {% if run.deprecated %}
+          <span class="ml-1.5 inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">obsolete</span>
+          {% endif %}
+          {% if run.consolidated %}
+          <span class="ml-1.5 inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-900 dark:bg-violet-900/40 dark:text-violet-200">consolidated</span>
+          {% endif %}
+        </dd>
+      </div>
+      <div class="sm:col-span-2">
+        <dt class="text-xs uppercase tracking-wide text-slate-500">Agent / Model / Effort</dt>
+        <dd class="mt-0.5 font-medium">
+          {{ agent_label(run.agent) }}
+          <span class="text-slate-400" aria-hidden="true"> · </span>
+          {{ run.model }}
+          {% if run.effort %}
+          <span class="text-slate-400" aria-hidden="true"> · </span>
+          {{ run.effort }}
+          {% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt class="text-xs uppercase tracking-wide text-slate-500">Skill</dt>
+        <dd class="mt-0.5 font-mono text-xs">{{ run.skill or '—' }}</dd>
+      </div>
+      <div>
+        <dt class="text-xs uppercase tracking-wide text-slate-500">Head</dt>
+        <dd class="mt-0.5">{{ commit_hash(run) }}</dd>
+      </div>
+      <div>
+        <dt class="text-xs uppercase tracking-wide text-slate-500">Started</dt>
+        <dd class="mt-0.5 text-xs">{{ run.started_at.replace('T', ' ')[:19] if run.started_at else '—' }}</dd>
+      </div>
+      <div>
+        <dt class="text-xs uppercase tracking-wide text-slate-500">Finished</dt>
+        <dd class="mt-0.5 text-xs" x-text="finishedLabel()">{{ run.finished_at.replace('T', ' ')[:19] if run.finished_at else '—' }}</dd>
+      </div>
+      <div>
+        <dt class="text-xs uppercase tracking-wide text-slate-500">Duration</dt>
+        <dd class="mt-0.5">{{ run.duration_ms|duration }}</dd>
+      </div>
+      <div>
+        <dt class="text-xs uppercase tracking-wide text-slate-500">Tokens</dt>
+        <dd class="mt-0.5">{{ run.total_tokens or '—' }}
+          {% if run.input_tokens or run.output_tokens %}
+          <span class="text-slate-500">(in {{ run.input_tokens or 0 }} / out {{ run.output_tokens or 0 }})</span>
+          {% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt class="text-xs uppercase tracking-wide text-slate-500">Cost</dt>
+        <dd class="mt-0.5 font-medium">{{ run.cost_usd|cost }}</dd>
+      </div>
+      <div>
+        <dt class="text-xs uppercase tracking-wide text-slate-500">Findings</dt>
+        <dd class="mt-0.5">
+          {% if findings_total > 0 %}
+          H{{ run.findings_sev1 }} · M{{ run.findings_sev2 }} · L{{ run.findings_sev3 }}
+          {% else %}—{% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt class="text-xs uppercase tracking-wide text-slate-500">Artifacts</dt>
+        <dd class="mt-0.5">
+          {{ artifacts|length }} file{% if artifacts|length != 1 %}s{% endif %}
+          ·
+          <a href="#artifacts" class="text-blue-600 hover:underline dark:text-blue-400">go to section</a>
+        </dd>
+      </div>
+      <div class="sm:col-span-2 lg:col-span-3">
+        <dt class="text-xs uppercase tracking-wide text-slate-500">Workdir</dt>
+        <dd class="mt-0.5 truncate font-mono text-xs" title="{{ run.workdir_path or '' }}">{{ run.workdir_path or '—' }}</dd>
+      </div>
+    </dl>
+  </section>
+
+  <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <div class="flex items-center justify-between gap-3">
+      <h2 class="text-lg font-semibold">Log stream</h2>
+      <span class="text-xs text-slate-500" x-show="status === 'queued' || status === 'running'" x-cloak>Live · polling every 1.5s</span>
+    </div>
+    <div class="mt-3 border-b border-slate-200 dark:border-slate-700">
+      <nav class="-mb-px flex gap-4" role="tablist">
+        <button type="button" role="tab"
+                @click="logTab = 'stdout'"
+                :aria-selected="(logTab === 'stdout').toString()"
+                class="border-b-2 px-1 pb-2 text-sm font-medium transition-colors"
+                :class="logTab === 'stdout'
+                  ? 'border-blue-600 text-blue-700 dark:border-blue-400 dark:text-blue-300'
+                  : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'">
+          STDOUT
+        </button>
+        <button type="button" role="tab"
+                @click="logTab = 'stderr'"
+                :aria-selected="(logTab === 'stderr').toString()"
+                class="inline-flex items-center gap-1.5 border-b-2 px-1 pb-2 text-sm font-medium transition-colors"
+                :class="logTab === 'stderr'
+                  ? 'border-blue-600 text-blue-700 dark:border-blue-400 dark:text-blue-300'
+                  : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'">
+          <svg x-show="hasStderr()"
+               {% if not (initial_stderr or '')|trim %}x-cloak{% endif %}
+               class="h-4 w-4 text-red-600 dark:text-red-400 {% if not (initial_stderr or '')|trim %}hidden{% endif %}"
+               xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+               :class="hasStderr() ? '' : 'hidden'">
+            <path fill-rule="evenodd" d="M9.401 3.003c1.155-2 4.043-2 5.197 0l7.355 12.748c1.154 2-.29 4.5-2.599 4.5H4.645c-2.309 0-3.752-2.5-2.598-4.5L9.4 3.003ZM12 8.25a.75.75 0 0 1 .75.75v3.75a.75.75 0 0 1-1.5 0V9a.75.75 0 0 1 .75-.75Zm0 8.25a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Z" clip-rule="evenodd" />
+          </svg>
+          STDERR
+        </button>
+      </nav>
+    </div>
+    <div class="mt-3">
+      <pre x-show="logTab === 'stdout'"
+           x-ref="stdout"
+           class="h-[36rem] max-h-[85vh] min-h-[12rem] resize-y overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+           x-text="stdout || '(empty)'">{{ initial_stdout or '(empty)' }}</pre>
+      <pre x-show="logTab === 'stderr'" {% if run.status != 'failed' %}x-cloak{% endif %}
+           x-ref="stderr"
+           class="h-[36rem] max-h-[85vh] min-h-[12rem] resize-y overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+           x-text="stderr || '(empty)'">{{ initial_stderr or '(empty)' }}</pre>
+    </div>
+  </section>
+
+  <section id="artifacts">
+    <h2 class="text-lg font-semibold">Artifacts</h2>
+    {% if artifacts %}
+    <ul class="mt-2 list-disc space-y-1 pl-5 text-sm">
+      {% for name in artifacts %}
+      <li>
+        <a class="text-blue-600 hover:underline dark:text-blue-400"
+           href="/api/runs/{{ run.id }}/artifacts/{{ name }}">{{ name }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="mt-2 text-sm text-slate-500">No artifacts yet.</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2 class="text-lg font-semibold">Findings</h2>
+    <div class="mt-3 space-y-3">
+      {% for f in findings %}
+      <article class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <div class="flex items-start justify-between gap-3">
+          <h3 class="font-medium">{{ f.external_id }} — {{ f.title }}</h3>
+          <span class="shrink-0 rounded-full px-2 py-0.5 text-xs
+            {% if f.severity == 1 %}bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200
+            {% elif f.severity == 2 %}bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200
+            {% else %}bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300{% endif %}">
+            {% if f.severity == 1 %}High{% elif f.severity == 2 %}Medium{% else %}Low{% endif %}
+          </span>
+        </div>
+        {% if f.path %}<p class="mt-1 font-mono text-xs text-slate-500">{{ f.path }}{% if f.line %}:{{ f.line }}{% endif %}</p>{% endif %}
+        <pre class="mt-2 whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-300">{{ f.body }}</pre>
+      </article>
+      {% else %}
+      <p class="text-sm text-slate-500">
+        {% if run.status in ['queued', 'running'] %}
+        Run in progress — findings will appear when the agent finishes.
+        {% else %}
+        No findings parsed for this run.
+        {% endif %}
+      </p>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+
+<script>
+function runDetail(runId) {
+  const initialStatus = {{ run.status|tojson }};
+  const inFlight = initialStatus === 'queued' || initialStatus === 'running';
+  return {
+    runId,
+    status: initialStatus,
+    stdout: {{ (initial_stdout or '')|tojson }},
+    stderr: {{ (initial_stderr or '')|tojson }},
+    finishedAt: {{ (run.finished_at or '')|tojson }},
+    prId: {{ (pr.id if pr else 'null') }},
+    deleting: false,
+    autoRefresh: inFlight,
+    logTab: initialStatus === 'failed' ? 'stderr' : 'stdout',
+    logTimer: null,
+    refreshTimer: null,
+    initialStatus,
+    init() {
+      this.pollLogs();
+      if (this.autoRefresh) this.startAutoRefresh();
+    },
+    hasStderr() {
+      return Boolean(this.stderr && String(this.stderr).trim());
+    },
+    statusLabel() {
+      const map = {
+        queued: 'not started',
+        running: 'running',
+        failed: 'failed',
+        cancelled: 'cancelled',
+        succeeded: 'completed',
+      };
+      return map[this.status] || this.status || 'unknown';
+    },
+    statusChipClass() {
+      const map = {
+        queued: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+        running: 'bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200',
+        failed: 'bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200',
+        cancelled: 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200',
+        succeeded: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200',
+      };
+      return map[this.status] || 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+    },
+    finishedLabel() {
+      if (!this.finishedAt) return '—';
+      return String(this.finishedAt).replace('T', ' ').slice(0, 19);
+    },
+    startAutoRefresh() {
+      if (this.refreshTimer) clearInterval(this.refreshTimer);
+      this.refreshTimer = setInterval(() => window.location.reload(), 30000);
+    },
+    stopAutoRefresh() {
+      if (this.refreshTimer) {
+        clearInterval(this.refreshTimer);
+        this.refreshTimer = null;
+      }
+    },
+    toggleAutoRefresh() {
+      this.autoRefresh = !this.autoRefresh;
+      if (this.autoRefresh) this.startAutoRefresh();
+      else this.stopAutoRefresh();
+    },
+    async pollLogs() {
+      try {
+        const res = await fetch('/api/runs/' + this.runId + '/logs');
+        if (res.ok) {
+          const data = await res.json();
+          this.status = data.status;
+          this.stdout = data.stdout || '';
+          this.stderr = data.stderr || '';
+          this.$nextTick(() => {
+            const el = this.logTab === 'stderr' ? this.$refs.stderr : this.$refs.stdout;
+            if (el) el.scrollTop = el.scrollHeight;
+          });
+          if (
+            (this.initialStatus === 'queued' || this.initialStatus === 'running') &&
+            data.status !== this.initialStatus &&
+            (data.status === 'succeeded' || data.status === 'failed' || data.status === 'cancelled')
+          ) {
+            this.stopAutoRefresh();
+            setTimeout(() => window.location.reload(), 800);
+            return;
+          }
+        }
+      } catch (e) { /* ignore transient */ }
+      if (this.status === 'queued' || this.status === 'running') {
+        this.logTimer = setTimeout(() => this.pollLogs(), 1500);
+      } else {
+        this.stopAutoRefresh();
+        this.autoRefresh = false;
+      }
+    },
+    async deleteRun() {
+      const active = this.status === 'queued' || this.status === 'running';
+      const msg = active
+        ? 'This run is still active. Cancel it, then delete from the database and local disk?'
+        : 'Delete this run from the database and local disk? This cannot be undone.';
+      if (!confirm(msg)) return;
+      this.deleting = true;
+      try {
+        const res = await fetch('/api/runs/' + this.runId, { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Delete failed');
+        if (data.pr_id) window.location = '/prs/' + data.pr_id;
+        else window.location = '/';
+      } catch (e) {
+        alert(String(e.message || e));
+        this.deleting = false;
+      }
+    }
+  }
+}
+</script>
+<style>[x-cloak]{display:none!important}</style>
+{% endblock %}

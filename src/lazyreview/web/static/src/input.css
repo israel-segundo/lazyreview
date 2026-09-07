@@ -1,0 +1,171 @@
+@import "tailwindcss";
+@source "../../templates/**/*.html";
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Modal shells — explicit sizes so a stale Tailwind scan can't drop constraints. */
+.lr-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.lr-modal-panel {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  width: 100%;
+  min-width: 17.5rem;
+  max-width: min(100%, 42rem);
+  height: min(75vh, 45rem);
+  max-height: 90vh;
+  min-height: 15rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-slate-200, #e2e8f0);
+  background: var(--color-white, #fff);
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  padding: 1.25rem;
+}
+.dark .lr-modal-panel {
+  border-color: var(--color-slate-700, #334155);
+  background: var(--color-slate-900, #0f172a);
+}
+.lr-modal-panel--batch {
+  max-width: min(100%, 64rem);
+  width: min(100%, 64rem);
+  height: auto;
+  max-height: min(90vh, 52rem);
+  min-height: 0;
+}
+.lr-batch-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  margin-top: 1rem;
+  border: 1px solid var(--color-slate-200, #e2e8f0);
+  border-radius: 0.75rem;
+}
+.dark .lr-batch-table-wrap {
+  border-color: var(--color-slate-700, #334155);
+}
+.lr-batch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.lr-batch-table th {
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+  color: var(--color-slate-500, #64748b);
+  background: var(--color-slate-50, #f8fafc);
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--color-slate-200, #e2e8f0);
+  white-space: nowrap;
+}
+.dark .lr-batch-table th {
+  background: color-mix(in oklab, var(--color-slate-800, #1e293b) 80%, transparent);
+  border-bottom-color: var(--color-slate-700, #334155);
+  color: var(--color-slate-400, #94a3b8);
+}
+.lr-batch-table td {
+  padding: 0.75rem;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--color-slate-100, #f1f5f9);
+}
+.dark .lr-batch-table td {
+  border-bottom-color: var(--color-slate-800, #1e293b);
+}
+.lr-batch-table tr:last-child td {
+  border-bottom: 0;
+}
+.lr-batch-table .lr-batch-num {
+  width: 2.5rem;
+  color: var(--color-slate-500, #64748b);
+  font-variant-numeric: tabular-nums;
+}
+.lr-batch-table .lr-batch-actions {
+  width: 2.75rem;
+  text-align: right;
+}
+.lr-batch-combo-menu {
+  position: fixed;
+  z-index: 60;
+  max-height: 12rem;
+  overflow: auto;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-slate-200, #e2e8f0);
+  background: var(--color-white, #fff);
+  padding: 0.25rem 0;
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+.dark .lr-batch-combo-menu {
+  border-color: var(--color-slate-600, #475569);
+  background: var(--color-slate-950, #020617);
+}
+
+.lr-modal-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.lr-modal-header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.lr-modal-tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.25rem;
+  margin-top: 0.75rem;
+  padding: 0.125rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-slate-200, #e2e8f0);
+}
+.dark .lr-modal-tabs {
+  border-color: var(--color-slate-700, #334155);
+}
+.lr-modal-tab {
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-slate-600, #475569);
+}
+.lr-modal-tab.is-active {
+  background: var(--color-slate-900, #0f172a);
+  color: #fff;
+}
+.dark .lr-modal-tab {
+  color: var(--color-slate-300, #cbd5e1);
+}
+.dark .lr-modal-tab.is-active {
+  background: var(--color-slate-100, #f1f5f9);
+  color: var(--color-slate-900, #0f172a);
+}
+.lr-modal-close {
+  flex-shrink: 0;
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  color: var(--color-slate-500, #64748b);
+}
+.lr-modal-close:hover {
+  background: var(--color-slate-100, #f1f5f9);
+  color: var(--color-slate-800, #1e293b);
+}
+.dark .lr-modal-close:hover {
+  background: var(--color-slate-800, #1e293b);
+}

@@ -1,0 +1,23 @@
+# lazyreview configuration
+# Location (default): ~/.config/lazyreview/config.toml
+# Override path with LAZYREVIEW_CONFIG=/path/to/config.toml
+# Restart the daemon after changes: lazyreview restart
+
+[server]
+host = "127.0.0.1"
+port = 3334
+
+[paths]
+# Empty = ~/.local/share/lazyreview (XDG data home)
+data_dir = ""
+# Empty = {data_dir}/runs
+runs_dir = ""
+
+[worker]
+job_timeout_seconds = 3600
+retention_sweep_seconds = 3600
+# How many agent reviews may run at once across all PRs (each is a full CLI process).
+max_concurrent_jobs = 10
+
+[service]
+unit_name = "lazyreview.service"

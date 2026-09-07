@@ -1,0 +1,55 @@
+{# Shared UI macros for lazyreview templates #}
+
+{% macro agent_icon(name, size='h-4 w-4') -%}
+{%- set key = (name or '')|lower -%}
+{%- if key == 'claude' -%}
+<img src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+     class="{{ size }} shrink-0 object-contain" />
+{%- elif key == 'agy' -%}
+<img src="/static/img/agents/agy.png" alt="" width="16" height="16"
+     class="{{ size }} shrink-0 object-contain" />
+{%- elif key in ['cursor', 'agent'] -%}
+<img src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+     class="{{ size }} shrink-0 object-contain dark:hidden" />
+<img src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+     class="{{ size }} shrink-0 object-contain hidden dark:inline" />
+{%- endif -%}
+{%- endmacro %}
+
+{% macro agent_label(name) -%}
+<span class="inline-flex items-center gap-1.5 align-middle">
+  {{ agent_icon(name) }}
+  <span>{{ name|title }}</span>
+</span>
+{%- endmacro %}
+
+{% macro commit_hash(run, full=false) -%}
+{%- set sha = run.head_sha or '' -%}
+{%- set short = sha[:12] if sha else '—' -%}
+{%- set display = sha if full and sha else short -%}
+{%- set obsolete = run.deprecated -%}
+{%- set consolidated = run.consolidated -%}
+{%- if obsolete and consolidated -%}
+  {%- set tip = 'Obsolete · Consolidated' -%}
+{%- elif obsolete -%}
+  {%- set tip = 'Obsolete' -%}
+{%- elif consolidated -%}
+  {%- set tip = 'Consolidated' -%}
+{%- else -%}
+  {%- set tip = sha -%}
+{%- endif -%}
+<span class="inline-flex items-center gap-1 font-mono text-xs" title="{{ tip }}">
+  <span class="{% if obsolete %}line-through text-slate-400 dark:text-slate-500{% endif %}">{{ display if sha else '—' }}</span>
+  {% if obsolete %}
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
+       class="h-3.5 w-3.5 shrink-0 text-amber-500 dark:text-amber-400" aria-label="Obsolete">
+    <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 6a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 6Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
+  </svg>
+  {% elif consolidated %}
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
+       class="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-label="Consolidated">
+    <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd" />
+  </svg>
+  {% endif %}
+</span>
+{%- endmacro %}

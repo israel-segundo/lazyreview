@@ -1,0 +1,261 @@
+"""FastAPI application factory."""
+
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from lazyreview import __version__
+from lazyreview.api import (
+    agents,
+    analytics,
+    consolidations,
+    feedback,
+    health,
+    prs,
+    runs,
+    settings as settings_api,
+)
+from lazyreview.config import get_settings
+from lazyreview.db.schema import connect, init_db
+from lazyreview.services.consolidation_jobs import ConsolidationRunner
+from lazyreview.services.jobs import JobRunner
+from lazyreview.services.pr_sync import PrSyncer
+from lazyreview.services.retention import RetentionSweeper
+from lazyreview.web.formatters import format_cost_usd, format_duration_ms
+
+logger = logging.getLogger(__name__)
+
+WEB_DIR = Path(__file__).resolve().parent / "web"
+TEMPLATES = Jinja2Templates(directory=str(WEB_DIR / "templates"))
+TEMPLATES.env.filters["duration"] = format_duration_ms
+TEMPLATES.env.filters["cost"] = format_cost_usd
+
+
+def create_app() -> FastAPI:
+    settings = get_settings()
+    settings.ensure_dirs()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        conn = connect(settings.db_path)
+        init_db(conn)
+        runner = JobRunner(settings, conn)
+        consolidation_runner = ConsolidationRunner(settings, conn)
+        runner.on_run_finished = consolidation_runner.notify_run_finished
+        sweeper = RetentionSweeper(
+            settings,
+            conn,
+            interval_seconds=settings.retention_sweep_seconds,
+        )
+        pr_syncer = PrSyncer(conn)
+        app.state.settings = settings
+        app.state.db = conn
+        app.state.jobs = runner
+        app.state.consolidations = consolidation_runner
+        app.state.sweeper = sweeper
+        app.state.pr_syncer = pr_syncer
+        runner.start()
+        consolidation_runner.start()
+        sweeper.start()
+        pr_syncer.start()
+        logger.info(
+            "lazyreview %s config=%s url=%s data_dir=%s",
+            __version__,
+            settings.config_path,
+            settings.base_url,
+            settings.data_dir,
+        )
+        yield
+        pr_syncer.stop()
+        sweeper.stop()
+        consolidation_runner.stop()
+        runner.stop()
+        conn.close()
+
+    app = FastAPI(title="lazyreview", version=__version__, lifespan=lifespan)
+
+    static_dir = WEB_DIR / "static"
+    static_dir.mkdir(parents=True, exist_ok=True)
+    (static_dir / "css").mkdir(exist_ok=True)
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    app.include_router(health.router, prefix="/api")
+    app.include_router(agents.router, prefix="/api")
+    app.include_router(prs.router, prefix="/api")
+    app.include_router(runs.router, prefix="/api")
+    app.include_router(feedback.router, prefix="/api")
+    app.include_router(consolidations.router, prefix="/api")
+    app.include_router(analytics.router, prefix="/api")
+    app.include_router(settings_api.router, prefix="/api")
+
+    @app.get("/", response_class=HTMLResponse)
+    async def home(request: Request):
+        from lazyreview.db import get_setting, list_prs
+
+        prs_list = list_prs(request.app.state.db)
+        last_sync = get_setting(request.app.state.db, "pr_sync_last_at")
+        return TEMPLATES.TemplateResponse(
+            request,
+            "home.html",
+            {
+                "prs": prs_list,
+                "last_sync": last_sync,
+                "version": __version__,
+            },
+        )
+
+    @app.get("/prs/{pr_id}", response_class=HTMLResponse)
+    async def pr_detail(request: Request, pr_id: int):
+        from lazyreview.db import (
+            active_consolidation_run_ids,
+            get_pr,
+            in_flight_consolidation_run_ids,
+            list_consolidations_for_pr,
+            list_feedback_actions,
+            list_runs_for_pr,
+            run_is_selectable,
+            sync_run_deprecation_for_pr,
+            update_run,
+        )
+        from lazyreview.services.cost import resolve_run_cost_usd
+
+        pr = get_pr(request.app.state.db, pr_id)
+        if not pr:
+            return HTMLResponse("PR not found", status_code=404)
+        sync_run_deprecation_for_pr(request.app.state.db, pr_id)
+        locked_ids = active_consolidation_run_ids(request.app.state.db, pr_id)
+        consolidating_ids = in_flight_consolidation_run_ids(request.app.state.db, pr_id)
+        runs_list = list_runs_for_pr(request.app.state.db, pr_id)
+        enriched: list[dict] = []
+        total_cost = 0.0
+        have_cost = False
+        selectable_ids: list[int] = []
+        for run in runs_list:
+            row = dict(run)
+            cost = resolve_run_cost_usd(row)
+            row["cost_usd"] = cost
+            rid = int(row["id"])
+            row["consolidating"] = rid in consolidating_ids
+            row["selectable"] = run_is_selectable(row) and rid not in locked_ids
+            if row["selectable"]:
+                selectable_ids.append(rid)
+            if cost is not None:
+                have_cost = True
+                total_cost += cost
+                # Persist backfill when we discovered a cost for an older run.
+                if run.get("cost_usd") is None:
+                    try:
+                        update_run(request.app.state.db, rid, cost_usd=cost)
+                    except Exception:
+                        logger.exception("failed to backfill cost_usd for run %s", rid)
+            enriched.append(row)
+        feedback = list_feedback_actions(request.app.state.db, pr_id)
+        consolidations_list = list_consolidations_for_pr(request.app.state.db, pr_id)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "pr_detail.html",
+            {
+                "pr": pr,
+                "runs": enriched,
+                "selectable_ids": selectable_ids,
+                "consolidating_ids": sorted(consolidating_ids),
+                "consolidations": consolidations_list,
+                "feedback": feedback,
+                "total_cost_usd": total_cost if have_cost else None,
+                "version": __version__,
+            },
+        )
+
+    @app.get("/runs/{run_id}", response_class=HTMLResponse)
+    async def run_detail(request: Request, run_id: int):
+        from lazyreview.db import get_pr, get_run, list_findings, update_run
+        from lazyreview.services.cost import resolve_run_cost_usd
+
+        run = get_run(request.app.state.db, run_id)
+        if not run:
+            return HTMLResponse("Run not found", status_code=404)
+        stored_cost = run.get("cost_usd")
+        run = dict(run)
+        cost = resolve_run_cost_usd(run)
+        run["cost_usd"] = cost
+        if cost is not None and stored_cost is None:
+            try:
+                update_run(request.app.state.db, run_id, cost_usd=cost)
+            except Exception:
+                logger.exception("failed to backfill cost_usd for run %s", run_id)
+        pr = get_pr(request.app.state.db, int(run["pr_id"]))
+        findings = list_findings(request.app.state.db, run_id)
+        workdir = Path(run["workdir_path"] or "")
+        artifact_names = [
+            "prompt.md",
+            "cli.json",
+            "stdout.log",
+            "stderr.log",
+            "findings.md",
+            "report.html",
+            "meta.json",
+        ]
+        artifacts = [name for name in artifact_names if (workdir / name).is_file()]
+
+        def _read_log(name: str) -> str:
+            path = workdir / name
+            if not path.is_file():
+                return ""
+            text = path.read_text(encoding="utf-8", errors="replace")
+            return text[-400_000:] if len(text) > 400_000 else text
+
+        return TEMPLATES.TemplateResponse(
+            request,
+            "run_detail.html",
+            {
+                "run": run,
+                "pr": pr,
+                "findings": findings,
+                "artifacts": artifacts,
+                "initial_stdout": _read_log("stdout.log"),
+                "initial_stderr": _read_log("stderr.log"),
+                "version": __version__,
+            },
+        )
+
+    @app.get("/analytics", response_class=HTMLResponse)
+    async def analytics_page(request: Request):
+        from lazyreview.db import analytics_combos
+
+        combos = analytics_combos(request.app.state.db)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "analytics.html",
+            {"combos": combos, "version": __version__},
+        )
+
+    @app.get("/settings", response_class=HTMLResponse)
+    async def settings_page(request: Request):
+        from lazyreview.services.settings import get_settings_view
+
+        view = get_settings_view(request.app.state.db)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "settings.html",
+            {"settings": view, "version": __version__},
+        )
+
+    @app.get("/why", response_class=HTMLResponse)
+    async def why_page(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "why.html",
+            {"version": __version__},
+        )
+
+    return app
+
+
+app = create_app()

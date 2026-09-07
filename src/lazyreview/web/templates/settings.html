@@ -1,0 +1,408 @@
+{% extends "base.html" %}
+{% block title %} — Settings{% endblock %}
+{% block content %}
+<div class="space-y-6" x-data="settingsPage()">
+  <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <h1 class="text-2xl font-semibold tracking-tight">Settings</h1>
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
+      Global lazyreview preferences.
+      Daemon bind address, data paths, and timeouts live in
+      <code class="rounded bg-slate-100 px-1 text-xs dark:bg-slate-800">~/.config/lazyreview/config.toml</code>
+      (<code class="rounded bg-slate-100 px-1 text-xs dark:bg-slate-800">lazyreview config</code>).
+    </p>
+  </div>
+
+  <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <h2 class="text-lg font-semibold">Pending PR sync</h2>
+    <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">
+      Periodically fetch open PRs where you are a requested reviewer
+      (<code class="rounded bg-slate-100 px-1 text-xs dark:bg-slate-800">gh search prs --review-requested=@me --state open</code>).
+      Closed or merged PRs are excluded. You can also refresh on demand from the home page.
+    </p>
+    <div class="mt-4 flex flex-wrap items-end gap-3">
+      <div>
+        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300">Every (minutes)</label>
+        <input type="number" min="1" x-model.number="syncMinutes"
+               class="mt-1 w-28 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
+      </div>
+      <button type="button" @click="saveSync()"
+              class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Save</button>
+    </div>
+    <p class="mt-3 text-sm text-slate-500 dark:text-slate-400" x-text="syncHint"></p>
+    <p class="mt-1 text-xs text-slate-400" x-show="lastSync">Last sync: <span x-text="lastSync"></span></p>
+  </div>
+
+  <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <h2 class="text-lg font-semibold">Run retention</h2>
+    <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">
+      Finished runs older than this window are deleted automatically
+      (database row + <code class="rounded bg-slate-100 px-1 text-xs dark:bg-slate-800">~/.local/share/lazyreview/runs/{id}/</code>).
+      The daemon sweeps about once an hour. In-flight runs are never purged.
+      Purged runs are also removed from analytics rollups.
+    </p>
+    <div class="mt-4 flex flex-wrap items-end gap-3">
+      <div>
+        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300">Keep for</label>
+        <input type="number" min="1" x-model.number="value"
+               class="mt-1 w-24 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300">Unit</label>
+        <select x-model="unit" class="mt-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+          <option value="hours">hours</option>
+          <option value="days">days</option>
+          <option value="weeks">weeks</option>
+        </select>
+      </div>
+      <button type="button" @click="saveRetention()"
+              class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Save</button>
+    </div>
+    <p class="mt-3 text-sm text-slate-500 dark:text-slate-400" x-text="hint"></p>
+    <div class="mt-4">
+      <button type="button" @click="purge()"
+              class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+        Purge old runs now
+      </button>
+      <span class="ml-2 text-sm text-slate-500 dark:text-slate-400" x-text="purgeMsg"></span>
+    </div>
+  </div>
+
+  <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <h2 class="text-lg font-semibold">Consolidation</h2>
+    <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">
+      Agent, model, effort, and prompt used when consolidating selected review runs into a single PR comment.
+      The prompt is seeded once; edits here are kept across upgrades.
+    </p>
+    <div class="mt-4 max-w-md space-y-4 overflow-visible">
+      <div class="relative overflow-visible"
+           :class="openCombo === 'agent' ? 'z-30' : 'z-10'"
+           @click.outside="closeCombo('agent')" @keydown.escape.stop="closeCombo('agent')">
+        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="c-agent">Agent</label>
+        <input id="c-agent" type="text" autocomplete="off" role="combobox"
+               :aria-expanded="openCombo === 'agent'"
+               x-model="agentQuery"
+               @focus="openAgentCombo()" @click="openAgentCombo()" @input="onAgentFilter()"
+               @keydown.arrow-down.prevent="comboMove('agent', 1)"
+               @keydown.arrow-up.prevent="comboMove('agent', -1)"
+               @keydown.enter.prevent="comboConfirm('agent')"
+               placeholder="Filter agents…"
+               class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950" />
+        <ul x-show="openCombo === 'agent'" x-cloak
+            class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
+          <template x-for="(a, idx) in filteredAgents()" :key="a.name">
+            <li :class="comboOptionClass('agent', idx, !a.available)"
+                @mousedown.prevent="pickAgent(a)"
+                @mouseenter="comboHighlight = idx"
+                x-text="a.display_name + (a.available ? '' : ' (missing)')"></li>
+          </template>
+        </ul>
+      </div>
+      <div class="relative overflow-visible"
+           :class="openCombo === 'model' ? 'z-30' : 'z-10'"
+           @click.outside="closeCombo('model')" @keydown.escape.stop="closeCombo('model')">
+        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="c-model">Model</label>
+        <input id="c-model" type="text" autocomplete="off" role="combobox"
+               :aria-expanded="openCombo === 'model'"
+               x-model="modelQuery"
+               @focus="openModelCombo()" @click="openModelCombo()" @input="onModelFilter()"
+               @keydown.arrow-down.prevent="comboMove('model', 1)"
+               @keydown.arrow-up.prevent="comboMove('model', -1)"
+               @keydown.enter.prevent="comboConfirm('model')"
+               placeholder="Filter models…"
+               class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950" />
+        <ul x-show="openCombo === 'model'" x-cloak
+            class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
+          <template x-for="(m, idx) in filteredModels()" :key="m.id">
+            <li :class="comboOptionClass('model', idx, false)"
+                @mousedown.prevent="pickModel(m)"
+                @mouseenter="comboHighlight = idx"
+                x-text="m.label"></li>
+          </template>
+        </ul>
+      </div>
+      <div class="relative overflow-visible"
+           :class="openCombo === 'effort' ? 'z-30' : 'z-10'"
+           @click.outside="closeCombo('effort')" @keydown.escape.stop="closeCombo('effort')">
+        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="c-effort">Effort</label>
+        <input id="c-effort" type="text" autocomplete="off" role="combobox"
+               :aria-expanded="openCombo === 'effort'"
+               x-model="effortQuery"
+               :disabled="!efforts.length"
+               @focus="openEffortCombo()" @click="openEffortCombo()" @input="onEffortFilter()"
+               @keydown.arrow-down.prevent="comboMove('effort', 1)"
+               @keydown.arrow-up.prevent="comboMove('effort', -1)"
+               @keydown.enter.prevent="comboConfirm('effort')"
+               :placeholder="efforts.length ? 'Filter effort…' : 'n/a for this model'"
+               class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50 dark:border-slate-600 dark:bg-slate-950" />
+        <ul x-show="openCombo === 'effort' && efforts.length" x-cloak
+            class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
+          <template x-for="(e, idx) in filteredEfforts()" :key="e">
+            <li :class="comboOptionClass('effort', idx, false)"
+                @mousedown.prevent="pickEffort(e)"
+                @mouseenter="comboHighlight = idx"
+                x-text="e"></li>
+          </template>
+        </ul>
+      </div>
+    </div>
+    <div class="mt-4">
+      <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="c-prompt">Prompt</label>
+      <textarea id="c-prompt" x-model="consolidatorPrompt" rows="14"
+                class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"></textarea>
+      <p class="mt-1 text-xs text-slate-500">Use <code class="rounded bg-slate-100 px-1 dark:bg-slate-800">{source_runs_label}</code>,
+        <code class="rounded bg-slate-100 px-1 dark:bg-slate-800">{body_path}</code>, and
+        <code class="rounded bg-slate-100 px-1 dark:bg-slate-800">{findings_json_path}</code> placeholders.</p>
+    </div>
+    <div class="mt-4 flex flex-wrap items-center gap-3">
+      <button type="button" @click="saveConsolidation()"
+              class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Save</button>
+      <button type="button" @click="resetPrompt()"
+              class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+        Reset prompt to default
+      </button>
+      <span class="text-sm text-slate-500 dark:text-slate-400" x-text="consolidatorMsg"></span>
+    </div>
+  </div>
+</div>
+<script>
+function settingsPage() {
+  return {
+    value: {{ settings.run_retention_value|default(1) }},
+    unit: {{ (settings.run_retention_unit|default('weeks'))|tojson }},
+    hint: {{ ((settings.default_summary|default('Default is 1 week.')) ~ ' Current policy: ' ~ (settings.policy_summary|default('keep runs for 1 weeks, then delete')) ~ '.')|tojson }},
+    syncMinutes: {{ settings.pr_sync_interval_minutes|default(15) }},
+    syncHint: {{ (settings.pr_sync_summary|default('sync pending review PRs every 15 minutes (default 15)'))|tojson }},
+    lastSync: {{ (settings.pr_sync_last_at or '')|tojson }},
+    purgeMsg: '',
+    consolidatorAgent: {{ (settings.consolidator_agent|default('claude'))|tojson }},
+    consolidatorModel: {{ (settings.consolidator_model|default('haiku'))|tojson }},
+    consolidatorEffort: {{ (settings.consolidator_effort|default('low'))|tojson }},
+    consolidatorPrompt: {{ (settings.consolidator_prompt|default(''))|tojson }},
+    defaultConsolidatorPrompt: {{ (settings.consolidator_prompt_default|default(''))|tojson }},
+    consolidatorMsg: '',
+    agents: [],
+    models: [],
+    efforts: [],
+    openCombo: null,
+    agentQuery: '',
+    modelQuery: '',
+    effortQuery: '',
+    comboHighlight: -1,
+    async init() {
+      const res = await fetch('/api/agents');
+      const data = await res.json();
+      this.agents = (data.agents || []).slice().sort((a, b) =>
+        String(a.display_name || a.name).localeCompare(String(b.display_name || b.name), undefined, { sensitivity: 'base' })
+      );
+      if (!this.agents.find(a => a.name === this.consolidatorAgent)) {
+        const first = this.agents.find(a => a.available) || this.agents[0];
+        if (first) this.consolidatorAgent = first.name;
+      }
+      this.onAgentChange(false);
+      this.syncComboQueries();
+    },
+    async saveRetention() {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          run_retention_value: this.value,
+          run_retention_unit: this.unit
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.detail || 'save failed'); return; }
+      this.hint = data.default_summary + ' Current policy: ' + data.policy_summary + '.';
+    },
+    async saveSync() {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ pr_sync_interval_minutes: this.syncMinutes })
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.detail || 'save failed'); return; }
+      this.syncHint = data.pr_sync_summary;
+      this.lastSync = data.pr_sync_last_at || this.lastSync;
+    },
+    async saveConsolidation() {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          consolidator_agent: this.consolidatorAgent,
+          consolidator_model: this.consolidatorModel,
+          consolidator_effort: this.consolidatorEffort || '',
+          consolidator_prompt: this.consolidatorPrompt
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.detail || 'save failed'); return; }
+      this.consolidatorAgent = data.consolidator_agent;
+      this.consolidatorModel = data.consolidator_model;
+      this.consolidatorEffort = data.consolidator_effort || '';
+      this.consolidatorPrompt = data.consolidator_prompt || '';
+      this.consolidatorMsg = 'Saved.';
+      setTimeout(() => { this.consolidatorMsg = ''; }, 2500);
+    },
+    async resetPrompt() {
+      if (!confirm('Replace the prompt with the built-in default?')) return;
+      this.consolidatorPrompt = this.defaultConsolidatorPrompt || this.consolidatorPrompt;
+      await this.saveConsolidation();
+      this.consolidatorMsg = 'Prompt reset and saved.';
+      setTimeout(() => { this.consolidatorMsg = ''; }, 2500);
+    },
+    async purge() {
+      if (!confirm('Delete finished runs older than the retention window?')) return;
+      const res = await fetch('/api/settings/purge-runs', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) { alert(data.detail || 'purge failed'); return; }
+      this.purgeMsg = `Deleted ${data.deleted_runs} runs, ${data.removed_dirs} dirs, ${data.orphan_dirs} orphans.`;
+    },
+    closeCombo(which) {
+      if (this.openCombo === which) {
+        this.openCombo = null;
+        this.comboHighlight = -1;
+        this.syncComboQueries();
+      }
+    },
+    syncComboQueries() {
+      if (this.openCombo !== 'agent') this.agentQuery = this.agentLabel();
+      if (this.openCombo !== 'model') this.modelQuery = this.modelLabel();
+      if (this.openCombo !== 'effort') this.effortQuery = this.consolidatorEffort || '';
+    },
+    agentLabel() {
+      const a = this.agents.find(x => x.name === this.consolidatorAgent);
+      if (!a) return this.consolidatorAgent || '';
+      return a.display_name + (a.available ? '' : ' (missing)');
+    },
+    modelLabel() {
+      const m = this.models.find(x => x.id === this.consolidatorModel);
+      return m ? m.label : (this.consolidatorModel || '');
+    },
+    _match(haystack, query) {
+      const q = String(query || '').trim().toLowerCase();
+      if (!q) return true;
+      return String(haystack || '').toLowerCase().includes(q);
+    },
+    filteredAgents() {
+      const q = this.openCombo === 'agent' ? this.agentQuery : '';
+      return this.agents.filter(a =>
+        this._match(a.display_name, q) || this._match(a.name, q)
+      );
+    },
+    filteredModels() {
+      const q = this.openCombo === 'model' ? this.modelQuery : '';
+      return this.models.filter(m =>
+        this._match(m.label, q) || this._match(m.id, q)
+      );
+    },
+    filteredEfforts() {
+      const q = this.openCombo === 'effort' ? this.effortQuery : '';
+      return this.efforts.filter(e => this._match(e, q));
+    },
+    comboOptions(which) {
+      if (which === 'agent') return this.filteredAgents();
+      if (which === 'model') return this.filteredModels();
+      return this.filteredEfforts();
+    },
+    comboOptionClass(which, idx, disabled) {
+      const base = 'cursor-pointer px-3 py-2 text-sm ';
+      if (disabled) return base + 'cursor-not-allowed text-slate-400 dark:text-slate-500';
+      if (this.openCombo === which && this.comboHighlight === idx) {
+        return base + 'bg-blue-50 text-blue-900 dark:bg-blue-950 dark:text-blue-100';
+      }
+      return base + 'text-slate-800 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800';
+    },
+    openAgentCombo() { this.openCombo = 'agent'; this.agentQuery = ''; this.comboHighlight = 0; },
+    openModelCombo() { this.openCombo = 'model'; this.modelQuery = ''; this.comboHighlight = 0; },
+    openEffortCombo() { if (!this.efforts.length) return; this.openCombo = 'effort'; this.effortQuery = ''; this.comboHighlight = 0; },
+    onAgentFilter() { this.openCombo = 'agent'; this.comboHighlight = 0; },
+    onModelFilter() { this.openCombo = 'model'; this.comboHighlight = 0; },
+    onEffortFilter() { this.openCombo = 'effort'; this.comboHighlight = 0; },
+    comboMove(which, delta) {
+      if (this.openCombo !== which) {
+        if (which === 'agent') this.openAgentCombo();
+        else if (which === 'model') this.openModelCombo();
+        else this.openEffortCombo();
+      }
+      const opts = this.comboOptions(which);
+      if (!opts.length) { this.comboHighlight = -1; return; }
+      let i = this.comboHighlight;
+      if (i < 0) i = 0;
+      else i = (i + delta + opts.length) % opts.length;
+      this.comboHighlight = i;
+    },
+    comboConfirm(which) {
+      const opts = this.comboOptions(which);
+      const item = opts[this.comboHighlight] || opts[0];
+      if (!item) return;
+      if (which === 'agent') this.pickAgent(item);
+      else if (which === 'model') this.pickModel(item);
+      else this.pickEffort(item);
+    },
+    pickAgent(a) {
+      if (!a || !a.available) return;
+      this.consolidatorAgent = a.name;
+      this.openCombo = null;
+      this.comboHighlight = -1;
+      this.onAgentChange(true);
+      this.syncComboQueries();
+    },
+    pickModel(m) {
+      if (!m) return;
+      this.consolidatorModel = m.id;
+      this.openCombo = null;
+      this.comboHighlight = -1;
+      this.onModelChange();
+      this.syncComboQueries();
+    },
+    pickEffort(e) {
+      if (e == null) return;
+      this.consolidatorEffort = e;
+      this.openCombo = null;
+      this.comboHighlight = -1;
+      this.syncComboQueries();
+    },
+    onAgentChange(resetModel) {
+      const a = this.agents.find(x => x.name === this.consolidatorAgent);
+      const models = ((a && a.models) || []).slice();
+      models.sort((x, y) =>
+        String(x.label || x.id).localeCompare(String(y.label || y.id), undefined, { sensitivity: 'base' })
+      );
+      this.models = models;
+      if (resetModel || !this.models.find(m => m.id === this.consolidatorModel)) {
+        this.consolidatorModel = this.models[0] ? this.models[0].id : '';
+      }
+      this.syncEffortsFromModel(resetModel);
+      this.syncComboQueries();
+    },
+    onModelChange() {
+      this.syncEffortsFromModel(true);
+      this.syncComboQueries();
+    },
+    syncEffortsFromModel(reset) {
+      const a = this.agents.find(x => x.name === this.consolidatorAgent);
+      const m = this.models.find(x => x.id === this.consolidatorModel);
+      let efforts = [];
+      if (m && Array.isArray(m.efforts) && m.efforts.length) {
+        efforts = m.efforts.slice();
+      } else if (a && Array.isArray(a.efforts) && a.efforts.length) {
+        efforts = a.efforts.slice();
+      }
+      this.efforts = efforts;
+      if (!efforts.length) {
+        this.consolidatorEffort = '';
+        return;
+      }
+      if (reset || !efforts.includes(this.consolidatorEffort)) {
+        this.consolidatorEffort = efforts.includes('low')
+          ? 'low'
+          : (efforts.includes('medium') ? 'medium' : efforts[0]);
+      }
+    }
+  }
+}
+</script>
+<style>[x-cloak]{display:none!important}</style>
+{% endblock %}

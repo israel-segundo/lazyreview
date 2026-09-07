@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %} — Analytics{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight">Analytics</h1>
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">Agent × model × effort performance across finished runs.</p>
+  </div>
+  <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
+      <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
+        <tr>
+          <th class="px-4 py-3">Agent</th>
+          <th class="px-4 py-3">Model</th>
+          <th class="px-4 py-3">Effort</th>
+          <th class="px-4 py-3">Runs</th>
+          <th class="px-4 py-3">OK / fail</th>
+          <th class="px-4 py-3">Avg duration</th>
+          <th class="px-4 py-3">Avg tokens</th>
+          <th class="px-4 py-3">Avg H/M/L</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+        {% for c in combos %}
+        <tr>
+          <td class="px-4 py-3">{{ c.agent }}</td>
+          <td class="px-4 py-3 font-mono text-xs">{{ c.model }}</td>
+          <td class="px-4 py-3">{{ c.effort or '—' }}</td>
+          <td class="px-4 py-3">{{ c.runs }}</td>
+          <td class="px-4 py-3">{{ c.succeeded }} / {{ c.failed }}</td>
+          <td class="px-4 py-3">{% if c.avg_duration_ms %}{{ (c.avg_duration_ms / 1000)|round(1) }}s{% else %}—{% endif %}</td>
+          <td class="px-4 py-3">{% if c.avg_total_tokens %}{{ c.avg_total_tokens|round(0)|int }}{% else %}—{% endif %}</td>
+          <td class="px-4 py-3 text-xs">
+            {{ (c.avg_sev1 or 0)|round(1) }} /
+            {{ (c.avg_sev2 or 0)|round(1) }} /
+            {{ (c.avg_sev3 or 0)|round(1) }}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="px-4 py-8 text-center text-slate-500 dark:text-slate-400">No finished runs yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

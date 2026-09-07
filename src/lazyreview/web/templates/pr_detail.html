@@ -1,0 +1,1182 @@
+{% extends "base.html" %}
+{% from "macros.html" import agent_label, commit_hash %}
+{% block title %} — {{ pr.owner }}/{{ pr.repo }}#{{ pr.number }}{% endblock %}
+{% block content %}
+{% macro run_status_chip(status) %}
+  {% if status == 'queued' %}
+  <span class="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">not started</span>
+  {% elif status == 'running' %}
+  <span class="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-900 dark:bg-blue-900/40 dark:text-blue-200">
+    <svg class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
+    running
+  </span>
+  {% elif status == 'failed' %}
+  <span class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-900 dark:bg-red-900/40 dark:text-red-200">failed</span>
+  {% elif status == 'cancelled' %}
+  <span class="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">cancelled</span>
+  {% elif status == 'succeeded' %}
+  <span class="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200">completed</span>
+  {% else %}
+  <span class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">{{ status }}</span>
+  {% endif %}
+{% endmacro %}
+
+<div class="space-y-8" x-data="reviewForm()">
+  <div>
+    <a href="/" class="text-sm text-blue-600 hover:underline dark:text-blue-400">← PRs</a>
+
+    <section class="mt-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 class="text-2xl font-semibold tracking-tight">
+            <a class="text-blue-600 hover:underline dark:text-blue-400" href="{{ pr.url }}" target="_blank" rel="noopener">#{{ pr.number }}</a>
+            <span class="ml-1.5 text-slate-900 dark:text-slate-100">{{ pr.title }}</span>
+          </h1>
+          <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
+            <span class="font-medium text-slate-800 dark:text-slate-200">{{ pr.owner }}/{{ pr.repo }}</span>
+            {% if pr.author %}· by <span class="font-medium">{{ pr.author }}</span>{% endif %}
+          </p>
+        </div>
+        <div class="flex flex-wrap gap-2 text-xs">
+          {% set pr_label = 'draft' if pr.is_draft else (pr.state or 'open') %}
+          <span class="rounded-full px-2.5 py-1
+            {% if pr_label == 'draft' %}bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200
+            {% elif pr_label == 'open' %}bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200
+            {% elif pr_label == 'merged' %}bg-purple-100 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200
+            {% else %}bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200{% endif %}">{{ pr_label }}</span>
+          {% if pr.review_requested %}
+          <span class="rounded-full bg-amber-100 px-2.5 py-1 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">needs review</span>
+          {% endif %}
+        </div>
+      </div>
+      <dl class="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-5">
+        <div>
+          <dt class="text-xs uppercase tracking-wide text-slate-500">Author</dt>
+          <dd class="mt-0.5 font-medium">{{ pr.author or '—' }}</dd>
+        </div>
+        <div>
+          <dt class="text-xs uppercase tracking-wide text-slate-500">Head</dt>
+          <dd class="mt-0.5 font-mono text-xs">
+            {% if pr.head_sha %}
+            <a class="text-blue-600 hover:underline dark:text-blue-400"
+               href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/commit/{{ pr.head_sha }}"
+               target="_blank" rel="noopener">{{ pr.head_sha[:12] }}</a>
+            {% else %}—{% endif %}
+          </dd>
+        </div>
+        <div>
+          <dt class="text-xs uppercase tracking-wide text-slate-500">Diff</dt>
+          <dd class="mt-0.5">
+            {% if pr.additions is not none or pr.deletions is not none %}
+            <span class="text-emerald-700 dark:text-emerald-400">+{{ pr.additions or 0 }}</span>
+            /
+            <span class="text-red-700 dark:text-red-400">−{{ pr.deletions or 0 }}</span>
+            {% if pr.changed_files is not none %}
+            <span class="text-slate-500">· {{ pr.changed_files }} files</span>
+            {% endif %}
+            {% else %}
+            —
+            {% endif %}
+          </dd>
+        </div>
+        <div>
+          <dt class="text-xs uppercase tracking-wide text-slate-500">Branches</dt>
+          <dd class="mt-0.5 text-xs text-slate-600 dark:text-slate-300">
+            {% if pr.head_ref %}
+            <a class="text-blue-600 hover:underline dark:text-blue-400"
+               href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/tree/{{ pr.head_ref }}"
+               target="_blank" rel="noopener">{{ pr.head_ref }}</a>
+            {% else %}—{% endif %}
+            →
+            {% if pr.base_ref %}
+            <a class="text-blue-600 hover:underline dark:text-blue-400"
+               href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/tree/{{ pr.base_ref }}"
+               target="_blank" rel="noopener">{{ pr.base_ref }}</a>
+            {% else %}—{% endif %}
+          </dd>
+        </div>
+        <div>
+          <dt class="text-xs uppercase tracking-wide text-slate-500">Total cost</dt>
+          <dd class="mt-0.5 font-medium">{{ total_cost_usd|cost }}</dd>
+        </div>
+      </dl>
+    </section>
+  </div>
+
+  <section class="space-y-3">
+    <div class="flex items-center justify-between gap-3">
+      <h2 class="text-lg font-semibold">Runs</h2>
+      <div class="flex items-center gap-2">
+        <button type="button" @click="startConsolidation()"
+                class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
+                :disabled="selected.length === 0 || consolidatingBusy">Consolidate selected</button>
+        <button type="button" @click="openBatchModal()"
+                class="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+          Start Code Review
+        </button>
+      </div>
+    </div>
+    <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
+        <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
+          <tr>
+            <th class="px-3 py-3">
+              <input type="checkbox"
+                     title="Select all eligible runs"
+                     aria-label="Select all eligible runs"
+                     :disabled="selectableIds.length === 0"
+                     :checked="allSelectableSelected()"
+                     :indeterminate="someSelectableSelected() && !allSelectableSelected()"
+                     @change="toggleSelectAll($event.target.checked)" />
+            </th>
+            <th class="px-3 py-3">ID</th>
+            <th class="px-3 py-3">Status</th>
+            <th class="px-3 py-3">Agent / Model / Effort</th>
+            <th class="px-3 py-3">Commit</th>
+            <th class="px-3 py-3">Reviewed</th>
+            <th class="px-3 py-3">Findings</th>
+            <th class="px-3 py-3">Tokens</th>
+            <th class="px-3 py-3">Cost</th>
+            <th class="px-3 py-3">Duration</th>
+            <th class="px-3 py-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+          {% for run in runs %}
+          <tr>
+            <td class="px-3 py-3">
+              {% if run.selectable or run.consolidating or (run.id in consolidating_ids) %}
+              <template x-if="isConsolidating({{ run.id }})">
+                <span class="inline-flex items-center gap-1 text-xs text-violet-700 dark:text-violet-300"
+                      title="Consolidating">
+                  <svg class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                  </svg>
+                  consolidating
+                </span>
+              </template>
+              <template x-if="!isConsolidating({{ run.id }}) && canSelect({{ run.id }})">
+                <input type="checkbox" value="{{ run.id }}"
+                       :checked="selected.includes({{ run.id }})"
+                       @change="toggle({{ run.id }}, $event.target.checked)" />
+              </template>
+              {% endif %}
+            </td>
+            <td class="px-3 py-3"><a class="text-blue-600 hover:underline dark:text-blue-400" href="/runs/{{ run.id }}">#{{ run.id }}</a></td>
+            <td class="px-3 py-3">
+              <div class="flex flex-wrap items-center gap-1.5">
+                {{ run_status_chip(run.status) }}
+                {% if run.deprecated %}
+                <span class="inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">obsolete</span>
+                {% endif %}
+                {% if run.consolidated %}
+                <span class="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-900 dark:bg-violet-900/40 dark:text-violet-200">consolidated</span>
+                {% endif %}
+              </div>
+            </td>
+            <td class="px-3 py-3">
+              {{ agent_label(run.agent) }}
+              <span class="text-slate-400" aria-hidden="true"> · </span>
+              {{ run.model }}
+              {% if run.effort %}
+              <span class="text-slate-400" aria-hidden="true"> · </span>
+              {{ run.effort }}
+              {% endif %}
+            </td>
+            <td class="px-3 py-3">
+              {{ commit_hash(run) }}
+            </td>
+            <td class="px-3 py-3 whitespace-nowrap text-xs text-slate-600 dark:text-slate-300"
+                title="{{ run.finished_at or run.started_at or '' }}">
+              {% if run.finished_at %}{{ run.finished_at.replace('T', ' ')[:16] }}
+              {% elif run.started_at %}{{ run.started_at.replace('T', ' ')[:16] }}
+              {% else %}—{% endif %}
+            </td>
+            <td class="px-3 py-3 text-xs">
+              {% if (run.findings_sev1 or 0) + (run.findings_sev2 or 0) + (run.findings_sev3 or 0) > 0 %}
+              H{{ run.findings_sev1 }} M{{ run.findings_sev2 }} L{{ run.findings_sev3 }}
+              {% else %}—{% endif %}
+            </td>
+            <td class="px-3 py-3">{{ run.total_tokens or '—' }}</td>
+            <td class="px-3 py-3">{{ run.cost_usd|cost }}</td>
+            <td class="px-3 py-3">{{ run.duration_ms|duration }}</td>
+            <td class="px-3 py-3 text-right">
+              <div class="inline-flex items-center justify-end gap-0.5">
+              {% if run.status in ['queued', 'running'] %}
+              <button type="button"
+                      @click="cancelRun({{ run.id }})"
+                      :disabled="cancelling[{{ run.id }}] || deleting[{{ run.id }}]"
+                      title="Cancel run"
+                      aria-label="Cancel run #{{ run.id }}"
+                      class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-amber-50 hover:text-amber-700 disabled:opacity-40 dark:hover:bg-amber-950/40 dark:hover:text-amber-300">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4" aria-hidden="true">
+                  <path fill-rule="evenodd" d="M4.5 7.5a3 3 0 0 1 3-3h9a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3h-9a3 3 0 0 1-3-3v-9Z" clip-rule="evenodd" />
+                </svg>
+              </button>
+              {% endif %}
+              <button type="button"
+                      @click="deleteRun({{ run.id }})"
+                      :disabled="cancelling[{{ run.id }}] || deleting[{{ run.id }}]"
+                      title="Delete run"
+                      aria-label="Delete run #{{ run.id }}"
+                      class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 dark:hover:bg-red-950/40 dark:hover:text-red-300">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                </svg>
+              </button>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="11" class="px-4 py-8 text-center text-slate-500">No runs yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="space-y-3">
+    <div class="flex items-center justify-between gap-3">
+      <h2 class="text-lg font-semibold">Consolidations</h2>
+      <span class="text-xs text-slate-500" x-show="pollActive" x-cloak>Updating…</span>
+    </div>
+    <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
+        <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
+          <tr>
+            <th class="px-3 py-3">ID</th>
+            <th class="px-3 py-3">Status</th>
+            <th class="px-3 py-3">Agent / Model / Effort</th>
+            <th class="px-3 py-3">Source runs</th>
+            <th class="px-3 py-3">Tokens</th>
+            <th class="px-3 py-3">Cost</th>
+            <th class="px-3 py-3">Duration</th>
+            <th class="px-3 py-3">Feedback</th>
+            <th class="px-3 py-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+          <template x-for="c in consolidations" :key="c.id">
+            <tr>
+              <td class="px-3 py-3 font-mono text-xs" x-text="'#' + c.id"></td>
+              <td class="px-3 py-3">
+                <span class="inline-flex items-center gap-1.5">
+                  <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
+                        :class="statusChipClass(c.status)"
+                        x-text="c.status"></span>
+                  <svg x-show="c.status === 'queued' || c.status === 'running'" x-cloak
+                       class="h-3.5 w-3.5 animate-spin text-violet-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                  </svg>
+                </span>
+              </td>
+              <td class="px-3 py-3">
+                <span class="inline-flex items-center gap-1.5 align-middle">
+                  <img x-show="agentKey(c.agent) === 'claude'" x-cloak
+                       src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain" />
+                  <img x-show="agentKey(c.agent) === 'agy'" x-cloak
+                       src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain" />
+                  <img x-show="agentKey(c.agent) === 'cursor'" x-cloak
+                       src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+                  <img x-show="agentKey(c.agent) === 'cursor'" x-cloak
+                       src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+                  <span x-text="agentTitle(c.agent)"></span>
+                </span>
+                <span class="text-slate-400" aria-hidden="true"> · </span>
+                <span x-text="c.model"></span>
+                <template x-if="c.effort">
+                  <span>
+                    <span class="text-slate-400" aria-hidden="true"> · </span>
+                    <span x-text="c.effort"></span>
+                  </span>
+                </template>
+              </td>
+              <td class="px-3 py-3 font-mono text-xs" x-text="(c.source_run_ids || []).map(id => '#' + id).join(', ') || '—'"></td>
+              <td class="px-3 py-3" x-text="c.total_tokens != null ? c.total_tokens : '—'"></td>
+              <td class="px-3 py-3" x-text="formatCost(c.cost_usd)"></td>
+              <td class="px-3 py-3" x-text="formatDuration(c.duration_ms)"></td>
+              <td class="px-3 py-3">
+                <span x-show="c.feedback_provided" title="Feedback provided"
+                      class="inline-flex text-emerald-600 dark:text-emerald-400">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4" aria-label="Feedback provided">
+                    <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd" />
+                  </svg>
+                </span>
+                <span x-show="!c.feedback_provided" class="text-slate-400">—</span>
+              </td>
+              <td class="px-3 py-3 text-right">
+                <div class="inline-flex items-center justify-end gap-1">
+                  <button type="button" @click="openConsolLogs(c)"
+                          class="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
+                    Logs
+                  </button>
+                  <button type="button"
+                          x-show="c.status === 'succeeded' || c.status === 'failed' || c.status === 'cancelled'"
+                          x-cloak
+                          @click="askRegenerate(c.id)"
+                          :disabled="!!regenerating[c.id] || !!c.feedback_provided"
+                          :title="c.feedback_provided ? 'Already posted to GitHub' : 'Re-run with current consolidator settings'"
+                          class="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800">
+                    Regenerate
+                  </button>
+                  <button type="button"
+                          x-show="c.status === 'dormant' || c.status === 'queued' || c.status === 'running'"
+                          @click="cancelConsolidation(c.id)"
+                          class="rounded-lg px-2 py-1 text-xs text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-950/40">
+                    Cancel
+                  </button>
+                  <button type="button"
+                          x-show="c.status === 'succeeded' && !c.feedback_provided"
+                          @click="openSubmit(c)"
+                          class="rounded-lg bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700">
+                    Submit
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </template>
+          <tr x-show="!consolidations.length">
+            <td colspan="9" class="px-4 py-8 text-center text-slate-500">No consolidations yet.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {% if feedback %}
+  <section>
+    <h2 class="text-lg font-semibold">Feedback history</h2>
+    <ul class="mt-3 space-y-2 text-sm">
+      {% for f in feedback %}
+      <li class="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+        <span class="font-medium">{{ f.action }}</span>
+        <span class="text-slate-400">· {{ f.created_at }}</span>
+        {% if f.dedup_summary %}<div class="text-slate-500">{{ f.dedup_summary }}</div>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <!-- Submit consolidation modal -->
+  <div x-show="submitOpen" x-cloak class="lr-modal-backdrop" role="dialog" aria-modal="true">
+    <div class="absolute inset-0 bg-slate-900/50" @click="closeSubmit()"></div>
+    <div class="lr-modal-panel lr-modal-panel--wide" @click.stop>
+      <div class="lr-modal-header">
+        <div>
+          <h2 class="text-lg font-semibold">Submit feedback</h2>
+          <p class="mt-1 text-sm text-slate-500">Post consolidation <span x-text="submitTarget && ('#' + submitTarget.id)"></span> to GitHub.</p>
+        </div>
+        <button type="button" class="lr-modal-close" @click="closeSubmit()" aria-label="Close">Close</button>
+      </div>
+      <div class="lr-modal-tabs" role="tablist">
+        <button type="button" role="tab"
+                class="lr-modal-tab"
+                :class="submitView === 'preview' && 'is-active'"
+                :aria-selected="submitView === 'preview'"
+                @click.prevent="setSubmitView('preview')">Preview</button>
+        <button type="button" role="tab"
+                class="lr-modal-tab"
+                :class="submitView === 'source' && 'is-active'"
+                :aria-selected="submitView === 'source'"
+                @click.prevent="setSubmitView('source')">Source</button>
+      </div>
+      <div class="mt-3 lr-modal-scroll rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950">
+        <div class="consol-md px-4 py-3 text-sm text-slate-800 dark:text-slate-200"
+             x-show="submitView === 'preview'"
+             x-html="renderedSubmitBody()"></div>
+        <pre class="p-3 font-mono text-xs text-slate-800 dark:text-slate-200"
+             style="white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;margin:0"
+             x-show="submitView === 'source'"
+             x-text="submitTarget && submitTarget.body"></pre>
+      </div>
+      <div class="mt-4 flex shrink-0 flex-wrap gap-2">
+        <button type="button" @click="postConsolidation('comment')" class="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700">Post comment</button>
+        <button type="button" @click="postConsolidation('approve')" class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-600">Approve</button>
+        <button type="button" @click="postConsolidation('request_changes')" class="rounded-lg border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50">Request changes</button>
+        <button type="button" @click="closeSubmit()" class="rounded-lg px-3 py-1.5 text-sm text-slate-500">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Consolidation logs modal -->
+  <div x-show="logsOpen" x-cloak class="lr-modal-backdrop" role="dialog" aria-modal="true">
+    <div class="absolute inset-0 bg-slate-900/50" @click="closeLogs()"></div>
+    <div class="lr-modal-panel" @click.stop>
+      <div class="lr-modal-header">
+        <h2 class="text-lg font-semibold">Consolidation logs <span class="font-mono text-sm text-slate-500" x-text="logsTarget && ('#' + logsTarget.id)"></span></h2>
+        <button type="button" class="lr-modal-close" @click="closeLogs()" aria-label="Close">Close</button>
+      </div>
+      <p class="mt-1 shrink-0 truncate text-xs text-slate-500" x-text="logsStatus"></p>
+      <pre class="mt-3 lr-modal-scroll rounded-lg bg-slate-50 p-3 font-mono text-xs dark:bg-slate-950"
+           x-text="logsText"></pre>
+    </div>
+  </div>
+
+  <!-- Regenerate confirmation -->
+  <div x-show="regenConfirmOpen" x-cloak class="lr-modal-backdrop" role="dialog" aria-modal="true"
+       aria-labelledby="regen-confirm-title"
+       @keydown.escape.window="regenConfirmOpen && closeRegenConfirm()">
+    <div class="absolute inset-0 bg-slate-900/50" @click="closeRegenConfirm()"></div>
+    <div class="relative z-10 w-full max-w-sm rounded-xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-700 dark:bg-slate-900"
+         @click.stop>
+      <h2 id="regen-confirm-title" class="text-lg font-semibold">Regenerate consolidation?</h2>
+      <p class="mt-2 text-sm text-slate-600 dark:text-slate-300">
+        Re-run consolidation
+        <span class="font-mono" x-text="regenConfirmId != null ? ('#' + regenConfirmId) : ''"></span>
+        with the current consolidator agent, model, effort, and prompt from Settings.
+        The previous body will be replaced.
+      </p>
+      <div class="mt-5 flex flex-wrap justify-end gap-2">
+        <button type="button" @click="closeRegenConfirm()"
+                class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+          Cancel
+        </button>
+        <button type="button" @click="confirmRegenerate()"
+                :disabled="regenConfirmId != null && regenerating[regenConfirmId]"
+                class="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+          Regenerate
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Batch review modal -->
+  <div x-show="batchOpen" x-cloak class="lr-modal-backdrop" role="dialog" aria-modal="true"
+       aria-labelledby="batch-review-title"
+       @keydown.escape.window="batchOpen && closeBatchModal()">
+    <div class="absolute inset-0 bg-slate-900/50" @click="closeBatchModal()"></div>
+    <div class="lr-modal-panel lr-modal-panel--batch" @click.stop
+         @click="batchCloseCombo()">
+      <div class="lr-modal-header">
+        <div>
+          <h2 id="batch-review-title" class="text-lg font-semibold">Start Code Review</h2>
+          <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            Add rows for each review to queue. Choose agent, model, and effort per run.
+          </p>
+        </div>
+        <button type="button" class="lr-modal-close" @click="closeBatchModal()" aria-label="Close">Close</button>
+      </div>
+
+      <div class="lr-batch-table-wrap" @click.stop>
+        <table class="lr-batch-table">
+          <thead>
+            <tr>
+              <th class="lr-batch-num">#</th>
+              <th>Agent</th>
+              <th>Model</th>
+              <th>Effort</th>
+              <th class="lr-batch-actions"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(row, idx) in batchRows" :key="row.key">
+              <tr>
+                <td class="lr-batch-num" x-text="idx + 1"></td>
+                <td>
+                  <input type="text" autocomplete="off" role="combobox"
+                         :id="'batch-agent-' + row.key"
+                         :aria-expanded="batchCombo === row.key + ':agent'"
+                         :aria-label="'Agent for run ' + (idx + 1)"
+                         x-model="row.agentQuery"
+                         @focus="batchOpenCombo(idx, 'agent', $event)"
+                         @click.stop="batchOpenCombo(idx, 'agent', $event)"
+                         @input="batchOpenCombo(idx, 'agent', $event)"
+                         @keydown.arrow-down.prevent="batchComboMove(idx, 'agent', 1)"
+                         @keydown.arrow-up.prevent="batchComboMove(idx, 'agent', -1)"
+                         @keydown.enter.prevent="batchComboConfirm(idx, 'agent')"
+                         @keydown.escape.stop="batchCloseCombo()"
+                         placeholder="Filter agents…"
+                         class="w-full min-w-[8rem] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950" />
+                </td>
+                <td>
+                  <input type="text" autocomplete="off" role="combobox"
+                         :id="'batch-model-' + row.key"
+                         :aria-expanded="batchCombo === row.key + ':model'"
+                         :aria-label="'Model for run ' + (idx + 1)"
+                         x-model="row.modelQuery"
+                         @focus="batchOpenCombo(idx, 'model', $event)"
+                         @click.stop="batchOpenCombo(idx, 'model', $event)"
+                         @input="batchOpenCombo(idx, 'model', $event)"
+                         @keydown.arrow-down.prevent="batchComboMove(idx, 'model', 1)"
+                         @keydown.arrow-up.prevent="batchComboMove(idx, 'model', -1)"
+                         @keydown.enter.prevent="batchComboConfirm(idx, 'model')"
+                         @keydown.escape.stop="batchCloseCombo()"
+                         placeholder="Filter models…"
+                         class="w-full min-w-[12rem] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950" />
+                </td>
+                <td>
+                  <input type="text" autocomplete="off" role="combobox"
+                         :id="'batch-effort-' + row.key"
+                         :aria-expanded="batchCombo === row.key + ':effort'"
+                         :aria-label="'Effort for run ' + (idx + 1)"
+                         x-model="row.effortQuery"
+                         :disabled="!row.efforts.length"
+                         @focus="batchOpenCombo(idx, 'effort', $event)"
+                         @click.stop="batchOpenCombo(idx, 'effort', $event)"
+                         @input="batchOpenCombo(idx, 'effort', $event)"
+                         @keydown.arrow-down.prevent="batchComboMove(idx, 'effort', 1)"
+                         @keydown.arrow-up.prevent="batchComboMove(idx, 'effort', -1)"
+                         @keydown.enter.prevent="batchComboConfirm(idx, 'effort')"
+                         @keydown.escape.stop="batchCloseCombo()"
+                         :placeholder="row.efforts.length ? 'Filter…' : 'n/a'"
+                         :title="row.efforts.length ? '' : 'Effort is built into this model id'"
+                         class="w-full min-w-[6rem] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm disabled:opacity-50 dark:border-slate-600 dark:bg-slate-950" />
+                </td>
+                <td class="lr-batch-actions">
+                  <button type="button" @click="removeBatchRow(idx)"
+                          :disabled="batchBusy"
+                          title="Remove run"
+                          aria-label="Remove run"
+                          class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 dark:hover:bg-red-950/40 dark:hover:text-red-300">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4" aria-hidden="true">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                    </svg>
+                  </button>
+                </td>
+              </tr>
+            </template>
+            <tr x-show="!batchRows.length">
+              <td colspan="5" class="px-4 py-10 text-center text-slate-500">
+                No runs yet. Click <span class="font-medium text-slate-700 dark:text-slate-300">Add run</span> to begin.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Fixed-position combo menu (escapes table overflow clipping) -->
+      <ul x-show="batchCombo" x-cloak
+          class="lr-batch-combo-menu"
+          :style="batchComboStyle"
+          @click.stop
+          role="listbox">
+        <template x-for="(opt, oidx) in batchComboOptions()" :key="batchOptionKey(opt)">
+          <li role="option"
+              @mousedown.prevent="batchPickOption(opt)"
+              @mouseenter="batchComboHighlight = oidx"
+              :class="batchOptionClass(oidx, batchOptionDisabled(opt))"
+              x-text="batchOptionLabel(opt)"></li>
+        </template>
+        <li x-show="!batchComboOptions().length" class="px-3 py-2 text-sm text-slate-500">No matches</li>
+      </ul>
+
+      <p class="mt-3 text-sm text-red-600 dark:text-red-400" x-show="batchMessage" x-text="batchMessage"></p>
+      <div class="mt-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-3">
+          <button type="button" @click="addBatchRow()" :disabled="batchBusy || batchRows.length >= 20"
+                  class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+            Add run
+          </button>
+          <label class="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+            <input type="checkbox" x-model="batchConsolidateWhenDone" :disabled="batchBusy"
+                   class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-950" />
+            Consolidate when all runs finish
+          </label>
+        </div>
+        <div class="flex gap-2">
+          <button type="button" @click="closeBatchModal()" :disabled="batchBusy"
+                  class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+            Cancel
+          </button>
+          <button type="button" @click="startBatch()"
+                  :disabled="batchBusy || !batchCanStart()"
+                  class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+            <span x-text="batchStartLabel()"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div x-show="toast" x-cloak x-transition.opacity.duration.200ms
+       class="fixed bottom-6 right-6 z-50 max-w-sm rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-lg dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100"
+       role="status">
+    <span x-text="toast"></span>
+  </div>
+</div>
+
+<script>
+function reviewForm() {
+  return {
+    agents: [],
+    selected: [],
+    selectableIds: {{ selectable_ids | tojson }},
+    consolidatingIds: {{ consolidating_ids | tojson }},
+    consolidations: {{ consolidations | tojson }},
+    consolidatingBusy: false,
+    pollActive: false,
+    _pollTimer: null,
+    regenerating: {},
+    regenConfirmOpen: false,
+    regenConfirmId: null,
+    submitOpen: false,
+    submitTarget: null,
+    submitView: 'preview',
+    logsOpen: false,
+    logsTarget: null,
+    logsText: '',
+    logsStatus: '',
+    batchOpen: false,
+    batchBusy: false,
+    batchMessage: '',
+    batchRows: [],
+    batchCombo: null,
+    batchComboHighlight: -1,
+    batchComboStyle: {},
+    batchConsolidateWhenDone: true,
+    _batchKeySeq: 1,
+    toast: '',
+    cancelling: {},
+    deleting: {},
+    async init() {
+      const toast = sessionStorage.getItem('lazyreview-toast');
+      if (toast) {
+        sessionStorage.removeItem('lazyreview-toast');
+        this.toast = toast;
+        setTimeout(() => { this.toast = ''; }, 4000);
+      }
+      const res = await fetch('/api/agents');
+      const data = await res.json();
+      this.agents = (data.agents || []).slice().sort((a, b) =>
+        String(a.display_name || a.name).localeCompare(String(b.display_name || b.name), undefined, { sensitivity: 'base' })
+      );
+      this.maybeStartPoll();
+    },
+    isConsolidating(id) {
+      return this.consolidatingIds.includes(id);
+    },
+    canSelect(id) {
+      return this.selectableIds.includes(id) && !this.isConsolidating(id);
+    },
+    agentKey(name) {
+      const key = String(name || '').toLowerCase();
+      if (key === 'claude') return 'claude';
+      if (key === 'agy') return 'agy';
+      if (key === 'cursor' || key === 'agent') return 'cursor';
+      return key;
+    },
+    agentTitle(name) {
+      const s = String(name || '');
+      if (!s) return '';
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    },
+    statusChipClass(status) {
+      if (status === 'succeeded') return 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200';
+      if (status === 'failed') return 'bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200';
+      if (status === 'cancelled') return 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200';
+      if (status === 'running') return 'bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200';
+      if (status === 'dormant') return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+      return 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200';
+    },
+    consolidationIsActive(status) {
+      return status === 'dormant' || status === 'queued' || status === 'running';
+    },
+    formatCost(v) {
+      if (v == null || v === '') return '—';
+      const n = Number(v);
+      if (Number.isNaN(n)) return '—';
+      return '$' + n.toFixed(n < 0.01 ? 4 : 2);
+    },
+    formatDuration(ms) {
+      if (ms == null) return '—';
+      const s = Math.round(Number(ms) / 1000);
+      if (s < 60) return s + 's';
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return r ? (m + 'm ' + r + 's') : (m + 'm');
+    },
+    maybeStartPoll() {
+      const active = (this.consolidations || []).some(c => this.consolidationIsActive(c.status));
+      this.pollActive = active;
+      if (active && !this._pollTimer) {
+        this._pollTimer = setInterval(() => this.pollConsolidations(), 2000);
+      } else if (!active && this._pollTimer) {
+        clearInterval(this._pollTimer);
+        this._pollTimer = null;
+      }
+    },
+    async pollConsolidations() {
+      try {
+        const res = await fetch('/api/prs/{{ pr.id }}/consolidations');
+        if (!res.ok) return;
+        const data = await res.json();
+        const prevRunning = (this.consolidations || []).some(c =>
+          c.status === 'queued' || c.status === 'running'
+        );
+        this.consolidations = data.consolidations || [];
+        this.consolidatingIds = data.consolidating_run_ids
+          || (data.consolidations || [])
+              .filter(c => c.status === 'queued' || c.status === 'running')
+              .flatMap(c => c.source_run_ids || []);
+        const lockedIds = data.active_run_ids || this.consolidatingIds;
+        // Keep select-all / checkboxes in sync with locked consolidations.
+        this.selectableIds = this.selectableIds.filter(id => !lockedIds.includes(id));
+        this.selected = this.selected.filter(id => this.selectableIds.includes(id));
+        const stillActive = this.consolidations.some(c => this.consolidationIsActive(c.status));
+        const stillRunning = this.consolidations.some(c =>
+          c.status === 'queued' || c.status === 'running'
+        );
+        this.pollActive = stillActive;
+        if (prevRunning && !stillRunning && !stillActive) {
+          // Refresh so run consolidated flags / checkboxes update.
+          window.location.reload();
+          return;
+        }
+        if (!stillActive && this._pollTimer) {
+          clearInterval(this._pollTimer);
+          this._pollTimer = null;
+        }
+        if (this.logsOpen && this.logsTarget) {
+          await this.refreshLogs();
+        }
+      } catch (e) {
+        /* ignore transient poll errors */
+      }
+    },
+    openBatchModal() {
+      this.batchMessage = '';
+      this.batchCloseCombo();
+      if (!this.batchRows.length) {
+        this.batchRows = [this._newBatchRow()];
+      } else {
+        this.batchRows.forEach((_, i) => this.batchSyncQueries(i));
+      }
+      this.batchOpen = true;
+    },
+    closeBatchModal() {
+      if (this.batchBusy) return;
+      this.batchOpen = false;
+      this.batchMessage = '';
+      this.batchCloseCombo();
+    },
+    _newBatchRow() {
+      const first = this.agents.find(a => a.available) || this.agents[0];
+      const row = {
+        key: this._batchKeySeq++,
+        agent: first ? first.name : '',
+        model: '',
+        effort: null,
+        models: [],
+        efforts: [],
+        agentQuery: '',
+        modelQuery: '',
+        effortQuery: '',
+      };
+      this._batchApplyAgent(row, false);
+      return row;
+    },
+    addBatchRow() {
+      if (this.batchRows.length >= 20) return;
+      this.batchRows.push(this._newBatchRow());
+    },
+    removeBatchRow(idx) {
+      this.batchCloseCombo();
+      this.batchRows.splice(idx, 1);
+    },
+    _batchApplyAgent(row, resetModel) {
+      const a = this.agents.find(x => x.name === row.agent);
+      const models = ((a && a.models) || []).slice();
+      models.sort((x, y) =>
+        String(x.label || x.id).localeCompare(String(y.label || y.id), undefined, { sensitivity: 'base' })
+      );
+      row.models = models;
+      if (resetModel || !row.models.find(m => m.id === row.model)) {
+        row.model = row.models[0] ? row.models[0].id : '';
+      }
+      this._batchApplyModel(row, resetModel);
+      this.batchSyncQueriesForRow(row);
+    },
+    _batchApplyModel(row, reset) {
+      const a = this.agents.find(x => x.name === row.agent);
+      const m = row.models.find(x => x.id === row.model);
+      let efforts = [];
+      if (m && Array.isArray(m.efforts) && m.efforts.length) {
+        efforts = m.efforts.slice();
+      } else if (a && Array.isArray(a.efforts) && a.efforts.length) {
+        efforts = a.efforts.slice();
+      }
+      row.efforts = efforts;
+      if (!efforts.length) {
+        row.effort = null;
+        return;
+      }
+      if (reset || !efforts.includes(row.effort)) {
+        row.effort = efforts.includes('medium') ? 'medium' : efforts[0];
+      }
+    },
+    batchSyncQueries(idx) {
+      const row = this.batchRows[idx];
+      if (row) this.batchSyncQueriesForRow(row);
+    },
+    batchSyncQueriesForRow(row) {
+      const open = this.batchCombo;
+      if (open !== row.key + ':agent') {
+        const a = this.agents.find(x => x.name === row.agent);
+        row.agentQuery = a ? (a.display_name + (a.available ? '' : ' (missing)')) : (row.agent || '');
+      }
+      if (open !== row.key + ':model') {
+        const m = row.models.find(x => x.id === row.model);
+        row.modelQuery = m ? m.label : (row.model || '');
+      }
+      if (open !== row.key + ':effort') {
+        row.effortQuery = row.effort || '';
+      }
+    },
+    batchOpenCombo(idx, which, evt) {
+      const row = this.batchRows[idx];
+      if (!row) return;
+      if (which === 'effort' && !row.efforts.length) return;
+      const key = row.key + ':' + which;
+      const alreadyOpen = this.batchCombo === key;
+      this.batchCombo = key;
+      if (!alreadyOpen) {
+        this.batchComboHighlight = 0;
+        // Clear only when opening — not on every @input keystroke.
+        if (which === 'agent') row.agentQuery = '';
+        else if (which === 'model') row.modelQuery = '';
+        else row.effortQuery = '';
+      }
+      this.$nextTick(() => this._positionBatchCombo(evt && evt.target));
+    },
+    _positionBatchCombo(el) {
+      if (!el || !el.getBoundingClientRect) return;
+      const r = el.getBoundingClientRect();
+      this.batchComboStyle = {
+        top: (r.bottom + 4) + 'px',
+        left: r.left + 'px',
+        width: r.width + 'px',
+      };
+    },
+    batchCloseCombo() {
+      if (!this.batchCombo) return;
+      const [key] = String(this.batchCombo).split(':');
+      this.batchCombo = null;
+      this.batchComboHighlight = -1;
+      const row = this.batchRows.find(r => String(r.key) === String(key));
+      if (row) this.batchSyncQueriesForRow(row);
+    },
+    batchComboWhich() {
+      if (!this.batchCombo) return null;
+      return String(this.batchCombo).split(':')[1] || null;
+    },
+    batchComboRow() {
+      if (!this.batchCombo) return null;
+      const key = String(this.batchCombo).split(':')[0];
+      return this.batchRows.find(r => String(r.key) === String(key)) || null;
+    },
+    batchComboOptions() {
+      const row = this.batchComboRow();
+      const which = this.batchComboWhich();
+      if (!row || !which) return [];
+      const q = which === 'agent' ? row.agentQuery
+        : which === 'model' ? row.modelQuery
+        : row.effortQuery;
+      const match = (hay) => {
+        const needle = String(q || '').trim().toLowerCase();
+        if (!needle) return true;
+        return String(hay || '').toLowerCase().includes(needle);
+      };
+      if (which === 'agent') {
+        return this.agents.filter(a => match(a.display_name) || match(a.name));
+      }
+      if (which === 'model') {
+        return (row.models || []).filter(m => match(m.label) || match(m.id));
+      }
+      return (row.efforts || []).filter(e => match(e));
+    },
+    batchOptionKey(opt) {
+      const which = this.batchComboWhich();
+      if (which === 'agent') return opt.name;
+      if (which === 'model') return opt.id;
+      return opt;
+    },
+    batchOptionLabel(opt) {
+      const which = this.batchComboWhich();
+      if (which === 'agent') return opt.display_name + (opt.available ? '' : ' (missing)');
+      if (which === 'model') return opt.label;
+      return opt;
+    },
+    batchOptionDisabled(opt) {
+      return this.batchComboWhich() === 'agent' && opt && !opt.available;
+    },
+    batchOptionClass(idx, disabled) {
+      const base = 'cursor-pointer px-3 py-2 text-sm ';
+      if (disabled) return base + 'cursor-not-allowed text-slate-400 dark:text-slate-500';
+      if (this.batchComboHighlight === idx) {
+        return base + 'bg-blue-50 text-blue-900 dark:bg-blue-950 dark:text-blue-100';
+      }
+      return base + 'text-slate-800 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800';
+    },
+    batchComboMove(idx, which, delta) {
+      this.batchOpenCombo(idx, which, { target: document.getElementById('batch-' + which + '-' + this.batchRows[idx].key) });
+      const opts = this.batchComboOptions();
+      if (!opts.length) { this.batchComboHighlight = -1; return; }
+      let i = this.batchComboHighlight;
+      if (i < 0) i = 0;
+      else i = (i + delta + opts.length) % opts.length;
+      this.batchComboHighlight = i;
+    },
+    batchComboConfirm(idx, which) {
+      const opts = this.batchComboOptions();
+      const item = opts[this.batchComboHighlight] || opts[0];
+      if (!item) return;
+      this.batchPickOption(item);
+    },
+    batchPickOption(opt) {
+      const row = this.batchComboRow();
+      const which = this.batchComboWhich();
+      if (!row || !which) return;
+      if (which === 'agent') {
+        if (!opt || !opt.available) return;
+        row.agent = opt.name;
+        this._batchApplyAgent(row, true);
+      } else if (which === 'model') {
+        row.model = opt.id;
+        this._batchApplyModel(row, true);
+      } else {
+        row.effort = opt;
+      }
+      this.batchCloseCombo();
+    },
+    batchCanStart() {
+      return this.batchRows.length > 0 && this.batchRows.every(r => r.agent && r.model);
+    },
+    batchStartLabel() {
+      if (this.batchBusy) return 'Starting…';
+      const n = this.batchRows.length;
+      if (n === 0) return 'Start runs';
+      return 'Start ' + n + ' run' + (n === 1 ? '' : 's');
+    },
+    async startBatch() {
+      if (!this.batchCanStart()) return;
+      this.batchBusy = true;
+      this.batchMessage = '';
+      this.batchCloseCombo();
+      try {
+        const res = await fetch('/api/runs/batch', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            pr_id: {{ pr.id }},
+            skill: 'pr-code-review-batch',
+            consolidate_when_done: !!this.batchConsolidateWhenDone,
+            runs: this.batchRows.map(r => ({
+              agent: r.agent,
+              model: r.model,
+              effort: r.effort,
+            })),
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(typeof data.detail === 'string' ? data.detail : 'Batch start failed');
+        }
+        const n = data.count || (data.runs || []).length;
+        let msg = n + ' review run' + (n === 1 ? '' : 's') + ' started';
+        if (data.consolidation && data.consolidation.id) {
+          msg += '; consolidation #' + data.consolidation.id + ' waiting';
+        }
+        sessionStorage.setItem('lazyreview-toast', msg);
+        window.location.reload();
+      } catch (e) {
+        this.batchMessage = String(e.message || e);
+        this.batchBusy = false;
+      }
+    },
+    toggle(id, on) {
+      if (on) {
+        if (!this.selected.includes(id)) this.selected.push(id);
+      } else {
+        this.selected = this.selected.filter(x => x !== id);
+      }
+    },
+    toggleSelectAll(on) {
+      this.selected = on ? this.selectableIds.slice() : [];
+    },
+    allSelectableSelected() {
+      return this.selectableIds.length > 0
+        && this.selectableIds.every(id => this.selected.includes(id));
+    },
+    someSelectableSelected() {
+      return this.selectableIds.some(id => this.selected.includes(id));
+    },
+    async cancelRun(id) {
+      this.cancelling = { ...this.cancelling, [id]: true };
+      try {
+        const res = await fetch('/api/runs/' + id + '/cancel', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Cancel failed');
+        window.location.reload();
+      } catch (e) {
+        alert(String(e.message || e));
+        this.cancelling = { ...this.cancelling, [id]: false };
+      }
+    },
+    async deleteRun(id) {
+      if (!confirm('Delete run #' + id + ' from the database and local disk?')) return;
+      this.deleting = { ...this.deleting, [id]: true };
+      try {
+        const res = await fetch('/api/runs/' + id, { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Delete failed');
+        window.location.reload();
+      } catch (e) {
+        alert(String(e.message || e));
+        this.deleting = { ...this.deleting, [id]: false };
+      }
+    },
+    async startConsolidation() {
+      if (!this.selected.length) return;
+      this.consolidatingBusy = true;
+      try {
+        const res = await fetch('/api/prs/{{ pr.id }}/consolidations', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ run_ids: this.selected })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'failed');
+        this.selected = [];
+        await this.pollConsolidations();
+        this.maybeStartPoll();
+        this.toast = 'Consolidation #' + data.id + ' queued';
+        setTimeout(() => { this.toast = ''; }, 3000);
+      } catch (e) {
+        alert(String(e.message || e));
+      } finally {
+        this.consolidatingBusy = false;
+      }
+    },
+    async cancelConsolidation(id) {
+      try {
+        const res = await fetch('/api/consolidations/' + id + '/cancel', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Cancel failed');
+        await this.pollConsolidations();
+      } catch (e) {
+        alert(String(e.message || e));
+      }
+    },
+    askRegenerate(id) {
+      this.regenConfirmId = id;
+      this.regenConfirmOpen = true;
+    },
+    closeRegenConfirm() {
+      if (this.regenConfirmId != null && this.regenerating[this.regenConfirmId]) return;
+      this.regenConfirmOpen = false;
+      this.regenConfirmId = null;
+    },
+    async confirmRegenerate() {
+      const id = this.regenConfirmId;
+      if (id == null) return;
+      this.regenerating = { ...this.regenerating, [id]: true };
+      try {
+        const res = await fetch('/api/consolidations/' + id + '/regenerate', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Regenerate failed');
+        this.regenConfirmOpen = false;
+        this.regenConfirmId = null;
+        await this.pollConsolidations();
+        this.maybeStartPoll();
+        this.toast = 'Consolidation #' + id + ' re-queued';
+        setTimeout(() => { this.toast = ''; }, 3000);
+      } catch (e) {
+        this.toast = String(e.message || e);
+        setTimeout(() => { this.toast = ''; }, 4000);
+      } finally {
+        this.regenerating = { ...this.regenerating, [id]: false };
+      }
+    },
+    openSubmit(c) {
+      this.submitTarget = c;
+      this.submitView = 'preview';
+      this.submitOpen = true;
+    },
+    setSubmitView(view) {
+      this.submitView = view === 'source' ? 'source' : 'preview';
+    },
+    closeSubmit() {
+      this.submitOpen = false;
+    },
+    closeLogs() {
+      this.logsOpen = false;
+    },
+    renderedSubmitBody() {
+      const raw = (this.submitTarget && this.submitTarget.body) || '';
+      if (!raw) return '<p class="text-slate-500">No body.</p>';
+      try {
+        const html = (typeof marked !== 'undefined')
+          ? marked.parse(raw, { breaks: true })
+          : raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return (typeof DOMPurify !== 'undefined') ? DOMPurify.sanitize(html) : html;
+      } catch (e) {
+        return '<pre class="whitespace-pre-wrap break-words text-xs">' +
+          String(raw).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') +
+          '</pre>';
+      }
+    },
+    async postConsolidation(action) {
+      if (!this.submitTarget) return;
+      if (!confirm('Post ' + action + ' to GitHub?')) return;
+      const id = this.submitTarget.id;
+      const res = await fetch('/api/consolidations/' + id + '/post', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ action, body: this.submitTarget.body })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { alert(data.detail || 'post failed'); return; }
+      this.closeSubmit();
+      window.location.reload();
+    },
+    async openConsolLogs(c) {
+      this.logsTarget = c;
+      this.logsOpen = true;
+      await this.refreshLogs();
+    },
+    async refreshLogs() {
+      if (!this.logsTarget) return;
+      const res = await fetch('/api/consolidations/' + this.logsTarget.id + '/logs');
+      if (!res.ok) return;
+      const data = await res.json();
+      this.logsStatus = data.status + (data.error_message ? (' — ' + data.error_message) : '');
+      const parts = [];
+      if (data.stdout) parts.push('=== stdout ===\n' + data.stdout);
+      if (data.stderr) parts.push('=== stderr ===\n' + data.stderr);
+      if (data.body) parts.push('=== body.md ===\n' + data.body);
+      this.logsText = parts.join('\n\n') || '(no logs yet)';
+    }
+  }
+}
+</script>
+<style>
+[x-cloak]{display:none!important}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border-width:0}
+.consol-md :is(h1,h2,h3){font-weight:600;margin:0.75em 0 0.35em;line-height:1.3}
+.consol-md h1{font-size:1.25rem}
+.consol-md h2{font-size:1.1rem}
+.consol-md h3{font-size:1rem}
+.consol-md p,.consol-md ul,.consol-md ol,.consol-md blockquote{margin:0.5em 0}
+.consol-md ul{list-style:disc;padding-left:1.25rem}
+.consol-md ol{list-style:decimal;padding-left:1.25rem}
+.consol-md blockquote{border-left:3px solid #94a3b8;padding-left:0.75rem;color:#475569}
+.dark .consol-md blockquote{border-color:#64748b;color:#cbd5e1}
+.consol-md code{font-family:ui-monospace,monospace;font-size:0.85em;background:#e2e8f0;padding:0.1em 0.3em;border-radius:0.25rem}
+.dark .consol-md code{background:#1e293b}
+.consol-md pre{overflow:auto;white-space:pre-wrap;word-break:break-word;background:#e2e8f0;padding:0.75rem;border-radius:0.5rem;font-size:0.75rem}
+.dark .consol-md pre{background:#1e293b}
+.consol-md a{color:#2563eb;text-decoration:underline}
+.consol-md strong{font-weight:600}
+</style>
+{% endblock %}

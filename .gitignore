@@ -1,0 +1,20 @@
+# Bytecode / venv
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Node / Tailwind
+node_modules/
+
+# Local data
+*.db
+.lazyreview/
+
+# IDE
+.idea/
+.vscode/
+*.swp
