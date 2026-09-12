@@ -302,7 +302,16 @@ def list_prs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         """
         SELECT p.*,
           (SELECT COUNT(*) FROM review_runs r WHERE r.pr_id = p.id) AS run_count,
-          (SELECT r.status FROM review_runs r WHERE r.pr_id = p.id ORDER BY r.id DESC LIMIT 1) AS latest_status
+          (SELECT r.status FROM review_runs r WHERE r.pr_id = p.id ORDER BY r.id DESC LIMIT 1) AS latest_status,
+          CASE
+            WHEN (SELECT COUNT(*) FROM review_runs r WHERE r.pr_id = p.id) = 0 THEN 0
+            WHEN p.head_sha IS NULL OR p.head_sha = '' THEN 0
+            WHEN EXISTS (
+              SELECT 1 FROM review_runs r
+              WHERE r.pr_id = p.id AND r.head_sha = p.head_sha
+            ) THEN 0
+            ELSE 1
+          END AS runs_stale
         FROM prs p
         ORDER BY
           CASE WHEN p.state = 'open' THEN 0 ELSE 1 END,
@@ -311,7 +320,13 @@ def list_prs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
           p.id ASC
         """
     ).fetchall()
-    return [_attach_internal_status(conn, dict(r)) for r in rows]
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        pr = _attach_internal_status(conn, dict(r))
+        pr["run_count"] = int(pr.get("run_count") or 0)
+        pr["runs_stale"] = bool(int(pr.get("runs_stale") or 0))
+        out.append(pr)
+    return out
 
 
 def get_pr(conn: sqlite3.Connection, pr_id: int) -> dict[str, Any] | None:

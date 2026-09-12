@@ -57,10 +57,10 @@
       </div>
     </div>
   </header>
-  <main class="mx-auto max-w-7xl px-4 py-8">
+  <main class="mx-auto px-4 py-8 {% block main_width %}max-w-7xl{% endblock %}">
     {% block content %}{% endblock %}
   </main>
-  <footer class="mx-auto max-w-7xl px-4 pb-8 text-center text-xs text-slate-400 dark:text-slate-500">
+  <footer class="mx-auto px-4 pb-8 text-center text-xs text-slate-400 dark:text-slate-500 {% block footer_width %}max-w-7xl{% endblock %}">
     lazyreview {{ version }}
     <span aria-hidden="true"> · </span>
     <a href="/why" class="hover:text-slate-600 hover:underline dark:hover:text-slate-300">Why lazyreview?</a>

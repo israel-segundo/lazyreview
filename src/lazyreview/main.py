@@ -148,7 +148,6 @@ def create_app() -> FastAPI:
             list_consolidations_for_pr,
             list_feedback_actions,
             list_runs_for_pr,
-            run_is_selectable,
             sync_run_deprecation_for_pr,
             update_run,
         )
@@ -164,16 +163,12 @@ def create_app() -> FastAPI:
         enriched: list[dict] = []
         total_cost = 0.0
         have_cost = False
-        selectable_ids: list[int] = []
         for run in runs_list:
             row = dict(run)
             cost = resolve_run_cost_usd(row)
             row["cost_usd"] = cost
             rid = int(row["id"])
             row["consolidating"] = rid in consolidating_ids
-            row["selectable"] = run_is_selectable(row) and rid not in locked_ids
-            if row["selectable"]:
-                selectable_ids.append(rid)
             if cost is not None:
                 have_cost = True
                 total_cost += cost
@@ -186,13 +181,17 @@ def create_app() -> FastAPI:
             enriched.append(row)
         feedback = list_feedback_actions(request.app.state.db, pr_id)
         consolidations_list = list_consolidations_for_pr(request.app.state.db, pr_id)
+        head = (pr.get("head_sha") or "").strip()
+        runs_stale = bool(enriched) and bool(head) and not any(
+            (r.get("head_sha") or "").strip() == head for r in enriched
+        )
         return TEMPLATES.TemplateResponse(
             request,
             "pr_detail.html",
             {
                 "pr": pr,
                 "runs": enriched,
-                "selectable_ids": selectable_ids,
+                "runs_stale": runs_stale,
                 "consolidating_ids": sorted(consolidating_ids),
                 "locked_run_ids": sorted(locked_ids),
                 "consolidations": consolidations_list,

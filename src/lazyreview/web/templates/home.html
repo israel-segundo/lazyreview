@@ -85,6 +85,7 @@
           <th class="px-4 py-3">Author</th>
           <th class="px-4 py-3">PR status</th>
           <th class="px-4 py-3">Review status</th>
+          <th class="px-4 py-3" title="Agent review runs for this PR">Runs</th>
           <th class="px-4 py-3" title="Days since the current head started awaiting review">Age</th>
         </tr>
       </thead>
@@ -94,7 +95,7 @@
             <td class="px-4 py-3 font-medium whitespace-nowrap">
               <a class="text-blue-600 hover:underline dark:text-blue-400"
                  :href="'/prs/' + pr.id"
-                 x-text="pr.owner + '/' + pr.repo + '#' + pr.number"></a>
+                 x-text="pr.repo + '#' + pr.number"></a>
             </td>
             <td class="px-4 py-3 text-slate-700 dark:text-slate-300" x-text="pr.title"></td>
             <td class="px-4 py-3 text-slate-600 dark:text-slate-300" x-text="pr.author || '—'"></td>
@@ -108,13 +109,25 @@
                     :class="internalStatusClass(pr)"
                     x-text="pr.internal_status_label || 'needs review'"></span>
             </td>
+            <td class="px-4 py-3 whitespace-nowrap text-slate-700 dark:text-slate-300">
+              <span class="inline-flex items-center gap-1.5"
+                    :title="pr.runs_stale ? 'New head commit has not been reviewed — previous runs are obsolete' : ''">
+                <span x-text="pr.run_count || 0"></span>
+                <svg x-show="pr.runs_stale" x-cloak
+                     xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
+                     class="h-4 w-4 shrink-0 text-amber-500 dark:text-amber-400"
+                     aria-label="New head commit has not been reviewed">
+                  <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 6a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 6Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
+                </svg>
+              </span>
+            </td>
             <td class="px-4 py-3 whitespace-nowrap text-slate-700 dark:text-slate-300"
                 :title="pr.head_updated_at || ''"
                 x-text="ageLabel(pr)"></td>
           </tr>
         </template>
         <tr x-show="filteredPrs.length === 0">
-          <td colspan="6" class="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+          <td colspan="7" class="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
             No PRs match the current filters.
           </td>
         </tr>

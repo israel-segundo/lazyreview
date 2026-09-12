@@ -2,6 +2,14 @@
 @source "../../templates/**/*.html";
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Alpine cloak + classes only referenced from Alpine :class strings */
+[x-cloak] { display: none !important; }
+@source inline("-rotate-90");
+@source inline("break-all");
+@source inline("lg:w-80");
+@source inline("xl:grid-cols-3");
+@source inline("sm:col-span-2");
+
 /* Modal shells — explicit sizes so a stale Tailwind scan can't drop constraints. */
 .lr-modal-backdrop {
   position: fixed;
@@ -21,9 +29,9 @@
   width: 100%;
   min-width: 17.5rem;
   max-width: min(100%, 42rem);
-  height: min(75vh, 45rem);
-  max-height: 90vh;
-  min-height: 15rem;
+  height: auto;
+  max-height: 80vh;
+  min-height: 0;
   border-radius: 0.75rem;
   border: 1px solid var(--color-slate-200, #e2e8f0);
   background: var(--color-white, #fff);
@@ -38,8 +46,26 @@
   max-width: min(100%, 64rem);
   width: min(100%, 64rem);
   height: auto;
-  max-height: min(90vh, 52rem);
+  max-height: 80vh;
   min-height: 0;
+}
+/* Wide modals (consolidation view/submit, logs, run findings): same content-sized height. */
+.lr-modal-panel--large {
+  width: min(100%, 80vw);
+  max-width: min(100%, 80vw);
+  height: auto;
+  max-height: 80vh;
+  min-height: 0;
+  min-width: 0;
+}
+.lr-modal-footer {
+  flex-shrink: 0;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-slate-200, #e2e8f0);
+}
+.dark .lr-modal-footer {
+  border-top-color: var(--color-slate-700, #334155);
 }
 .lr-batch-table-wrap {
   flex: 1 1 auto;
@@ -112,11 +138,168 @@
 
 .lr-modal-scroll {
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+/* Only for log / source panes — do NOT put this on containers that wrap markup,
+   or HTML indentation becomes giant vertical gaps. */
+.lr-modal-scroll--pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
+  overflow-x: auto;
+}
+
+/* Compact finding cards (run findings modal + consolidation findings tab). */
+.lr-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.lr-finding {
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--color-slate-200, #e2e8f0);
+  border-radius: 0.5rem;
+  background: var(--color-white, #fff);
+  padding: 0.5rem 0.75rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.dark .lr-finding {
+  border-color: var(--color-slate-700, #334155);
+  background: var(--color-slate-950, #020617);
+}
+.lr-finding-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.lr-finding-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  color: var(--color-slate-900, #0f172a);
+}
+.dark .lr-finding-title {
+  color: var(--color-slate-100, #f1f5f9);
+}
+.lr-finding-id {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-slate-500, #64748b);
+}
+.lr-finding-sev {
+  flex-shrink: 0;
+  border-radius: 9999px;
+  padding: 0.05rem 0.45rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.lr-finding-path {
+  margin-top: 0.15rem;
+  min-width: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.6875rem;
+  line-height: 1.3;
+  color: var(--color-slate-500, #64748b);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+.lr-finding-body {
+  margin: 0.35rem 0 0;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  color: var(--color-slate-700, #334155);
+}
+.dark .lr-finding-body {
+  color: var(--color-slate-300, #cbd5e1);
+}
+.lr-finding-body > :first-child { margin-top: 0; }
+.lr-finding-body > :last-child { margin-bottom: 0; }
+.lr-finding-body :is(p, ul, ol, blockquote, pre) {
+  margin: 0.35em 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.lr-finding-body ul {
+  list-style: disc;
+  padding-left: 1.1rem;
+}
+.lr-finding-body ol {
+  list-style: decimal;
+  padding-left: 1.1rem;
+}
+.lr-finding-body li { margin: 0.15em 0; }
+.lr-finding-body code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  background: var(--color-slate-100, #f1f5f9);
+  padding: 0.05em 0.3em;
+  border-radius: 0.25rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.dark .lr-finding-body code {
+  background: var(--color-slate-800, #1e293b);
+}
+.lr-finding-body pre {
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  background: var(--color-slate-100, #f1f5f9);
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.375rem;
+  font-size: 0.7rem;
+  margin: 0.35em 0;
+  max-width: 100%;
+}
+.dark .lr-finding-body pre {
+  background: var(--color-slate-800, #1e293b);
+}
+.lr-finding-body pre code {
+  background: transparent;
+  padding: 0;
+}
+.lr-finding-body a {
+  color: var(--color-blue-600, #2563eb);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+.lr-finding-body strong { font-weight: 600; }
+.lr-finding-title code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  font-weight: 600;
+  background: var(--color-slate-100, #f1f5f9);
+  padding: 0.05em 0.3em;
+  border-radius: 0.25rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.dark .lr-finding-title code {
+  background: var(--color-slate-800, #1e293b);
 }
 .lr-modal-header {
   display: flex;
@@ -231,4 +414,94 @@
 }
 .dark .lr-analytics-summary-cell {
   border-right-color: var(--color-slate-700, #334155);
+}
+
+/* PR detail job layout — keep columns stable even if Tailwind scan is stale. */
+.lr-pr-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: stretch;
+}
+@media (min-width: 1024px) {
+  .lr-pr-layout {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+}
+.lr-pr-main {
+  min-width: 0;
+  flex: 1 1 0%;
+}
+.lr-pr-sidebar {
+  width: 100%;
+  flex-shrink: 0;
+}
+/* Effort is optional in cramped sidebar rows; show when the column is wide enough. */
+.lr-sidebar-effort {
+  display: none !important;
+}
+@media (min-width: 1024px) {
+  .lr-pr-sidebar {
+    width: 28rem;
+  }
+}
+@media (min-width: 1280px) {
+  .lr-pr-sidebar {
+    width: 32rem;
+  }
+  .lr-sidebar-effort {
+    display: inline !important;
+  }
+  .lr-sidebar-effort.inline-flex {
+    display: inline-flex !important;
+  }
+}
+.lr-pr-meta {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 640px) {
+  .lr-pr-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1280px) {
+  .lr-pr-meta {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.lr-pr-meta-wide {
+  min-width: 0;
+}
+@media (min-width: 640px) {
+  .lr-pr-meta-wide {
+    grid-column: span 2;
+  }
+}
+
+
+/* Jenkins-style status balls (runs / consolidations). */
+.lr-status-ball {
+  display: inline-block;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: #94a3b8; /* slate-400 fallback */
+}
+.lr-status-ball--succeeded { background: #10b981; } /* green */
+.lr-status-ball--failed { background: #ef4444; } /* red */
+.lr-status-ball--deprecated { background: #eab308; } /* yellow */
+.lr-status-ball--consolidated,
+.lr-status-ball--consolidating { background: #8b5cf6; } /* purple */
+.lr-status-ball--running,
+.lr-status-ball--queued { background: #f97316; } /* orange — in progress (Jenkins anime) */
+.lr-status-ball--cancelled,
+.lr-status-ball--dormant { background: #94a3b8; } /* grey */
+.lr-status-ball--pulse {
+  animation: lr-status-flicker 1s ease-in-out infinite;
+}
+@keyframes lr-status-flicker {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
 }

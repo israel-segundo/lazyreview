@@ -22,7 +22,7 @@
   <div class="flex flex-wrap items-start justify-between gap-3">
     <div>
       {% if pr %}
-      <a href="/prs/{{ pr.id }}" class="text-sm text-blue-600 hover:underline dark:text-blue-400">← {{ pr.owner }}/{{ pr.repo }}#{{ pr.number }}</a>
+      <a href="/prs/{{ pr.id }}" class="text-sm text-blue-600 hover:underline dark:text-blue-400">← {{ pr.repo }}#{{ pr.number }}</a>
       {% endif %}
       <h1 class="mt-2 text-2xl font-semibold tracking-tight">Run #{{ run.id }}</h1>
     </div>
@@ -58,9 +58,20 @@
     </div>
   </div>
 
-  <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-    <h2 class="text-lg font-semibold">Details</h2>
-    <dl class="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+  <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <button type="button"
+            class="flex w-full items-center justify-between gap-3 px-6 py-4 text-left"
+            @click="openSections.details = !openSections.details"
+            :aria-expanded="openSections.details.toString()">
+      <h2 class="text-lg font-semibold">Details</h2>
+      <svg class="h-5 w-5 shrink-0 text-slate-400 transition-transform"
+           :class="openSections.details ? 'rotate-180' : ''"
+           xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clip-rule="evenodd" />
+      </svg>
+    </button>
+    <div class="border-t border-slate-200 px-6 pb-6 pt-5 dark:border-slate-700" x-show="openSections.details">
+      <dl class="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
       <div>
         <dt class="text-xs uppercase tracking-wide text-slate-500">Status</dt>
         <dd class="mt-1">
@@ -130,16 +141,26 @@
         <dt class="text-xs uppercase tracking-wide text-slate-500">Findings</dt>
         <dd class="mt-0.5">
           {% if findings_total > 0 %}
-          H{{ run.findings_sev1 }} · M{{ run.findings_sev2 }} · L{{ run.findings_sev3 }}
-          {% else %}—{% endif %}
+          <button type="button"
+                  class="text-left text-blue-600 hover:underline dark:text-blue-400"
+                  @click="goToSection('findings')">
+            H{{ run.findings_sev1 }} · M{{ run.findings_sev2 }} · L{{ run.findings_sev3 }}
+          </button>
+          {% else %}
+          <button type="button"
+                  class="text-left text-blue-600 hover:underline dark:text-blue-400"
+                  @click="goToSection('findings')">—</button>
+          {% endif %}
         </dd>
       </div>
       <div>
         <dt class="text-xs uppercase tracking-wide text-slate-500">Artifacts</dt>
         <dd class="mt-0.5">
-          {{ artifacts|length }} file{% if artifacts|length != 1 %}s{% endif %}
-          ·
-          <a href="#artifacts" class="text-blue-600 hover:underline dark:text-blue-400">go to section</a>
+          <button type="button"
+                  class="text-left text-blue-600 hover:underline dark:text-blue-400"
+                  @click="goToSection('artifacts')">
+            {{ artifacts|length }} file{% if artifacts|length != 1 %}s{% endif %}
+          </button>
         </dd>
       </div>
       <div class="sm:col-span-2 lg:col-span-3">
@@ -147,14 +168,95 @@
         <dd class="mt-0.5 truncate font-mono text-xs" title="{{ run.workdir_path or '' }}">{{ run.workdir_path or '—' }}</dd>
       </div>
     </dl>
+    </div>
   </section>
 
-  <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-    <div class="flex items-center justify-between gap-3">
-      <h2 class="text-lg font-semibold">Log stream</h2>
-      <span class="text-xs text-slate-500" x-show="status === 'queued' || status === 'running'" x-cloak>Live · polling every 1.5s</span>
+<section id="findings" class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <button type="button"
+            class="flex w-full items-center justify-between gap-3 px-6 py-4 text-left"
+            @click="openSections.findings = !openSections.findings"
+            :aria-expanded="openSections.findings.toString()">
+      <h2 class="text-lg font-semibold">
+        Findings
+        <span class="font-normal text-slate-500" x-text="'(' + findings.length + ')'"></span>
+      </h2>
+      <svg class="h-5 w-5 shrink-0 text-slate-400 transition-transform"
+           :class="openSections.findings ? 'rotate-180' : ''"
+           xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clip-rule="evenodd" />
+      </svg>
+    </button>
+    <div class="border-t border-slate-200 px-6 pb-6 pt-5 dark:border-slate-700" x-show="openSections.findings" x-cloak>
+      <template x-if="!findings.length">
+        <p class="text-sm text-slate-500">
+          {% if run.status in ['queued', 'running'] %}
+          Run in progress — findings will appear when the agent finishes.
+          {% else %}
+          No findings parsed for this run.
+          {% endif %}
+        </p>
+      </template>
+      <div x-show="findings.length">
+        <div class="lr-modal-tabs" role="tablist">
+          <button type="button" role="tab" class="lr-modal-tab"
+                  :class="findingsTab === 'High' && 'is-active'"
+                  :aria-selected="findingsTab === 'High'"
+                  @click.prevent="findingsTab = 'High'"
+                  x-text="'High (' + findingsForTab('High').length + ')'"></button>
+          <button type="button" role="tab" class="lr-modal-tab"
+                  :class="findingsTab === 'Medium' && 'is-active'"
+                  :aria-selected="findingsTab === 'Medium'"
+                  @click.prevent="findingsTab = 'Medium'"
+                  x-text="'Medium (' + findingsForTab('Medium').length + ')'"></button>
+          <button type="button" role="tab" class="lr-modal-tab"
+                  :class="findingsTab === 'Low' && 'is-active'"
+                  :aria-selected="findingsTab === 'Low'"
+                  @click.prevent="findingsTab = 'Low'"
+                  x-text="'Low (' + findingsForTab('Low').length + ')'"></button>
+        </div>
+        <div class="mt-3">
+          <p class="text-sm text-slate-500"
+             x-show="!findingsForTab(findingsTab).length"
+             x-text="'No ' + findingsTab.toLowerCase() + ' findings.'"></p>
+          <div class="lr-findings" x-show="findingsForTab(findingsTab).length">
+            <template x-for="(f, idx) in findingsForTab(findingsTab)" :key="f.id || f.external_id || idx">
+              <article class="lr-finding">
+                <div class="lr-finding-head">
+                  <div class="lr-finding-title">
+                    <span class="lr-finding-id" x-show="f.external_id" x-text="f.external_id"></span><span x-show="f.external_id"> </span><span x-html="renderedFindingTitle(f, idx)"></span>
+                  </div>
+                  <span class="lr-finding-sev" :class="findingSeverityClass(f.severity)"
+                        x-text="findingSeverityLabel(f.severity)"></span>
+                </div>
+                <div class="lr-finding-path"
+                     x-show="f.path"
+                     x-text="(f.path || '') + (f.line != null ? (':' + f.line) : '')"></div>
+                <div class="lr-finding-body" x-html="renderedFindingBody(f)"></div>
+              </article>
+            </template>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="mt-3 border-b border-slate-200 dark:border-slate-700">
+  </section>
+
+  <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <button type="button"
+            class="flex w-full items-center justify-between gap-3 px-6 py-4 text-left"
+            @click="openSections.logs = !openSections.logs"
+            :aria-expanded="openSections.logs.toString()">
+      <div class="flex min-w-0 items-center gap-3">
+        <h2 class="text-lg font-semibold">Log stream</h2>
+        <span class="text-xs text-slate-500" x-show="openSections.logs && (status === 'queued' || status === 'running')" x-cloak>Live · polling every 1.5s</span>
+      </div>
+      <svg class="h-5 w-5 shrink-0 text-slate-400 transition-transform"
+           :class="openSections.logs ? 'rotate-180' : ''"
+           xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clip-rule="evenodd" />
+      </svg>
+    </button>
+    <div class="border-t border-slate-200 px-6 pb-6 pt-5 dark:border-slate-700" x-show="openSections.logs" x-cloak>
+      <div class="border-b border-slate-200 dark:border-slate-700">
       <nav class="-mb-px flex gap-4" role="tablist">
         <button type="button" role="tab"
                 @click="logTab = 'stdout'"
@@ -183,22 +285,34 @@
         </button>
       </nav>
     </div>
-    <div class="mt-3">
+    <div class="mt-4">
       <pre x-show="logTab === 'stdout'"
            x-ref="stdout"
-           class="h-[36rem] max-h-[85vh] min-h-[12rem] resize-y overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+           class="h-[36rem] max-h-[85vh] min-h-[12rem] resize-y overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
            x-text="stdout || '(empty)'">{{ initial_stdout or '(empty)' }}</pre>
       <pre x-show="logTab === 'stderr'" {% if run.status != 'failed' %}x-cloak{% endif %}
            x-ref="stderr"
-           class="h-[36rem] max-h-[85vh] min-h-[12rem] resize-y overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+           class="h-[36rem] max-h-[85vh] min-h-[12rem] resize-y overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
            x-text="stderr || '(empty)'">{{ initial_stderr or '(empty)' }}</pre>
+    </div>
     </div>
   </section>
 
-  <section id="artifacts">
-    <h2 class="text-lg font-semibold">Artifacts</h2>
-    {% if artifacts %}
-    <ul class="mt-2 list-disc space-y-1 pl-5 text-sm">
+<section id="artifacts" class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <button type="button"
+            class="flex w-full items-center justify-between gap-3 px-6 py-4 text-left"
+            @click="openSections.artifacts = !openSections.artifacts"
+            :aria-expanded="openSections.artifacts.toString()">
+      <h2 class="text-lg font-semibold">Artifacts <span class="font-normal text-slate-500">({{ artifacts|length }})</span></h2>
+      <svg class="h-5 w-5 shrink-0 text-slate-400 transition-transform"
+           :class="openSections.artifacts ? 'rotate-180' : ''"
+           xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+        <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 11.17l3.71-3.94a.75.75 0 1 1 1.08 1.04l-4.25 4.5a.75.75 0 0 1-1.08 0l-4.25-4.5a.75.75 0 0 1 .02-1.06Z" clip-rule="evenodd" />
+      </svg>
+    </button>
+    <div class="border-t border-slate-200 px-6 pb-6 pt-5 dark:border-slate-700" x-show="openSections.artifacts" x-cloak>
+      {% if artifacts %}
+    <ul class="list-disc space-y-1.5 pl-5 text-sm">
       {% for name in artifacts %}
       <li>
         <a class="text-blue-600 hover:underline dark:text-blue-400"
@@ -207,36 +321,8 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p class="mt-2 text-sm text-slate-500">No artifacts yet.</p>
+    <p class="text-sm text-slate-500">No artifacts yet.</p>
     {% endif %}
-  </section>
-
-  <section>
-    <h2 class="text-lg font-semibold">Findings</h2>
-    <div class="mt-3 space-y-3">
-      {% for f in findings %}
-      <article class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <div class="flex items-start justify-between gap-3">
-          <h3 class="font-medium">{{ f.external_id }} — {{ f.title }}</h3>
-          <span class="shrink-0 rounded-full px-2 py-0.5 text-xs
-            {% if f.severity == 1 %}bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200
-            {% elif f.severity == 2 %}bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200
-            {% else %}bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300{% endif %}">
-            {% if f.severity == 1 %}High{% elif f.severity == 2 %}Medium{% else %}Low{% endif %}
-          </span>
-        </div>
-        {% if f.path %}<p class="mt-1 font-mono text-xs text-slate-500">{{ f.path }}{% if f.line %}:{{ f.line }}{% endif %}</p>{% endif %}
-        <pre class="mt-2 whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-300">{{ f.body }}</pre>
-      </article>
-      {% else %}
-      <p class="text-sm text-slate-500">
-        {% if run.status in ['queued', 'running'] %}
-        Run in progress — findings will appear when the agent finishes.
-        {% else %}
-        No findings parsed for this run.
-        {% endif %}
-      </p>
-      {% endfor %}
     </div>
   </section>
 </div>
@@ -245,6 +331,20 @@
 function runDetail(runId) {
   const initialStatus = {{ run.status|tojson }};
   const inFlight = initialStatus === 'queued' || initialStatus === 'running';
+  const findings = {{ findings|tojson }};
+  const defaultFindingsTab = (() => {
+    const labelOf = (sev) => {
+      const n = Number(sev);
+      if (n === 1) return 'High';
+      if (n === 2) return 'Medium';
+      if (n === 3) return 'Low';
+      return '—';
+    };
+    for (const label of ['High', 'Medium', 'Low']) {
+      if (findings.some(f => labelOf(f.severity) === label)) return label;
+    }
+    return 'High';
+  })();
   return {
     runId,
     status: initialStatus,
@@ -259,9 +359,68 @@ function runDetail(runId) {
     logTimer: null,
     refreshTimer: null,
     initialStatus,
+    openSections: { details: true, logs: false, artifacts: false, findings: false },
+    findings,
+    findingsTab: defaultFindingsTab,
+    goToSection(name) {
+      if (!this.openSections || !(name in this.openSections)) return;
+      this.openSections[name] = true;
+      this.$nextTick(() => {
+        const el = document.getElementById(name);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    },
     init() {
       this.pollLogs();
       if (this.autoRefresh) this.startAutoRefresh();
+    },
+    findingSeverityLabel(sev) {
+      if (sev == null || sev === '') return '—';
+      const n = Number(sev);
+      if (n === 1) return 'High';
+      if (n === 2) return 'Medium';
+      if (n === 3) return 'Low';
+      const s = String(sev).toLowerCase();
+      if (s === 'high' || s === 'sev1') return 'High';
+      if (s === 'medium' || s === 'med' || s === 'sev2') return 'Medium';
+      if (s === 'low' || s === 'sev3') return 'Low';
+      return String(sev);
+    },
+    findingSeverityClass(sev) {
+      const label = this.findingSeverityLabel(sev);
+      if (label === 'High') return 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200';
+      if (label === 'Medium') return 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200';
+      return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+    },
+    findingsForTab(tab) {
+      const label = tab || this.findingsTab || 'High';
+      return (this.findings || []).filter(f => this.findingSeverityLabel(f.severity) === label);
+    },
+    _renderMarkdown(raw, { inline = false } = {}) {
+      const text = String(raw || '').replace(/\n{3,}/g, '\n\n').trim();
+      if (!text) return '';
+      try {
+        let html;
+        if (typeof marked !== 'undefined') {
+          html = inline && typeof marked.parseInline === 'function'
+            ? marked.parseInline(text, { breaks: true })
+            : marked.parse(text, { breaks: true });
+        } else {
+          html = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+        return (typeof DOMPurify !== 'undefined') ? DOMPurify.sanitize(html) : html;
+      } catch (e) {
+        return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      }
+    },
+    renderedFindingTitle(f, idx) {
+      const raw = (f && f.title) || ('Finding ' + ((idx || 0) + 1));
+      return this._renderMarkdown(raw, { inline: true });
+    },
+    renderedFindingBody(f) {
+      const raw = (f && f.body) || '';
+      if (!raw) return '';
+      return this._renderMarkdown(raw);
     },
     hasStderr() {
       return Boolean(this.stderr && String(this.stderr).trim());

@@ -53,3 +53,37 @@
   {% endif %}
 </span>
 {%- endmacro %}
+
+
+{# Jenkins-style status ball. kind: succeeded|failed|deprecated|consolidated|running|consolidating|cancelled|queued|dormant #}
+{% macro status_ball(kind, title=None, size='h-2.5 w-2.5') -%}
+{%- set label = title if title is not none else (kind|replace('_', ' ')|title) -%}
+{%- set pulse = kind in ['running', 'consolidating', 'queued'] -%}
+<span class="lr-status-ball lr-status-ball--{{ kind }} {{ size }}{% if pulse %} lr-status-ball--pulse{% endif %}"
+      title="{{ label }}"
+      role="img"
+      aria-label="{{ label }}"></span>
+{%- endmacro %}
+
+{# Outcome + flags for a review run (consolidating ball is rendered separately via Alpine when in-flight). #}
+{% macro run_status_balls(run, size='h-2.5 w-2.5') -%}
+<span class="inline-flex items-center gap-1">
+  {% if run.status in ['running', 'queued'] %}
+    {{ status_ball('running', 'Running' if run.status == 'running' else 'Queued', size) }}
+  {% elif run.status == 'succeeded' %}
+    {{ status_ball('succeeded', 'Succeeded', size) }}
+  {% elif run.status == 'failed' %}
+    {{ status_ball('failed', 'Failed', size) }}
+  {% elif run.status == 'cancelled' %}
+    {{ status_ball('cancelled', 'Cancelled', size) }}
+  {% elif run.status %}
+    {{ status_ball('queued', run.status|title, size) }}
+  {% endif %}
+  {% if run.deprecated %}
+    {{ status_ball('deprecated', 'Deprecated', size) }}
+  {% endif %}
+  {% if run.consolidated %}
+    {{ status_ball('consolidated', 'Consolidated', size) }}
+  {% endif %}
+</span>
+{%- endmacro %}

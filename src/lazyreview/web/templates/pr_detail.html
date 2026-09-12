@@ -1,140 +1,172 @@
 {% extends "base.html" %}
-{% from "macros.html" import agent_label, commit_hash %}
+{% from "macros.html" import agent_label, agent_icon, commit_hash, status_ball, run_status_balls %}
 {% block title %} — {{ pr.owner }}/{{ pr.repo }}#{{ pr.number }}{% endblock %}
+{% block main_width %}max-w-none w-full{% endblock %}
+{% block footer_width %}max-w-none w-full{% endblock %}
 {% block content %}
-{% macro run_status_chip(status) %}
-  {% if status == 'queued' %}
-  <span class="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">not started</span>
-  {% elif status == 'running' %}
-  <span class="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-900 dark:bg-blue-900/40 dark:text-blue-200">
-    <svg class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-    </svg>
-    running
-  </span>
-  {% elif status == 'failed' %}
-  <span class="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-900 dark:bg-red-900/40 dark:text-red-200">failed</span>
-  {% elif status == 'cancelled' %}
-  <span class="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">cancelled</span>
-  {% elif status == 'succeeded' %}
-  <span class="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200">completed</span>
-  {% else %}
-  <span class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">{{ status }}</span>
-  {% endif %}
-{% endmacro %}
 
-<div class="space-y-8" x-data="reviewForm()">
-  <div>
-    <a href="/" class="text-sm text-blue-600 hover:underline dark:text-blue-400">← PRs</a>
+<div class="space-y-4" x-data="reviewForm()">
 
-    <section class="mt-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 class="text-2xl font-semibold tracking-tight">
-            <a class="text-blue-600 hover:underline dark:text-blue-400" href="{{ pr.url }}" target="_blank" rel="noopener">#{{ pr.number }}</a>
-            <span class="ml-1.5 text-slate-900 dark:text-slate-100">{{ pr.title }}</span>
-          </h1>
-          <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            <span class="font-medium text-slate-800 dark:text-slate-200">{{ pr.owner }}/{{ pr.repo }}</span>
-            {% if pr.author %}· by <span class="font-medium">{{ pr.author }}</span>{% endif %}
-          </p>
-        </div>
-        <div class="flex flex-wrap gap-2 text-xs">
-          {% set pr_label = 'draft' if pr.is_draft else (pr.state or 'open') %}
-          <span class="rounded-full px-2.5 py-1
-            {% if pr_label == 'draft' %}bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200
-            {% elif pr_label == 'open' %}bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200
-            {% elif pr_label == 'merged' %}bg-purple-100 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200
-            {% else %}bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200{% endif %}">{{ pr_label }}</span>
-          {% set istatus = pr.internal_status or 'needs_review' %}
-          <span class="rounded-full px-2.5 py-1
-            {% if istatus == 'approved' %}bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200
-            {% elif istatus == 'changes_requested' %}bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200
-            {% elif istatus == 'feedback_provided' %}bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200
-            {% else %}bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200{% endif %}">{{ pr.internal_status_label or 'needs review' }}</span>
-        </div>
-      </div>
-      <dl class="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-5">
-        <div>
-          <dt class="text-xs uppercase tracking-wide text-slate-500">Author</dt>
-          <dd class="mt-0.5 font-medium">{{ pr.author or '—' }}</dd>
-        </div>
-        <div>
-          <dt class="text-xs uppercase tracking-wide text-slate-500">Head</dt>
-          <dd class="mt-0.5 font-mono text-xs">
-            {% if pr.head_sha %}
-            <a class="text-blue-600 hover:underline dark:text-blue-400"
-               href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/commit/{{ pr.head_sha }}"
-               target="_blank" rel="noopener">{{ pr.head_sha[:12] }}</a>
-            {% else %}—{% endif %}
-          </dd>
-        </div>
-        <div>
-          <dt class="text-xs uppercase tracking-wide text-slate-500">Diff</dt>
-          <dd class="mt-0.5">
-            {% if pr.additions is not none or pr.deletions is not none %}
-            <span class="text-emerald-700 dark:text-emerald-400">+{{ pr.additions or 0 }}</span>
-            /
-            <span class="text-red-700 dark:text-red-400">−{{ pr.deletions or 0 }}</span>
-            {% if pr.changed_files is not none %}
-            <span class="text-slate-500">· {{ pr.changed_files }} files</span>
-            {% endif %}
-            {% else %}
-            —
-            {% endif %}
-          </dd>
-        </div>
-        <div>
-          <dt class="text-xs uppercase tracking-wide text-slate-500">Branches</dt>
-          <dd class="mt-0.5 text-xs text-slate-600 dark:text-slate-300">
-            {% if pr.head_ref %}
-            <a class="text-blue-600 hover:underline dark:text-blue-400"
-               href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/tree/{{ pr.head_ref }}"
-               target="_blank" rel="noopener">{{ pr.head_ref }}</a>
-            {% else %}—{% endif %}
-            →
-            {% if pr.base_ref %}
-            <a class="text-blue-600 hover:underline dark:text-blue-400"
-               href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/tree/{{ pr.base_ref }}"
-               target="_blank" rel="noopener">{{ pr.base_ref }}</a>
-            {% else %}—{% endif %}
-          </dd>
-        </div>
-        <div>
-          <dt class="text-xs uppercase tracking-wide text-slate-500">Total cost</dt>
-          <dd class="mt-0.5 font-medium">{{ total_cost_usd|cost }}</dd>
-        </div>
-      </dl>
-    </section>
+  <a href="/" class="inline-block text-sm text-blue-600 hover:underline dark:text-blue-400">← PRs</a>
+
+  {# Full-width title + New Review #}
+  <div class="flex items-start justify-between gap-4">
+    <h1 class="min-w-0 text-2xl font-semibold tracking-tight">
+      <a class="text-blue-600 hover:underline dark:text-blue-400" href="{{ pr.url }}" target="_blank" rel="noopener">{{ pr.repo }}#{{ pr.number }}</a>
+      <span class="ml-1.5 text-slate-900 dark:text-slate-100">{{ pr.title }}</span>
+    </h1>
+    <button type="button" @click="openBatchModal()"
+            class="shrink-0 rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+      New Review
+    </button>
   </div>
 
+  {# Full-width status chips + sidebar toggle #}
+  <div class="flex flex-wrap items-center gap-2 text-xs">
+    {% set pr_label = 'draft' if pr.is_draft else (pr.state or 'open') %}
+    <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
+      <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">PR</span>
+      <span class="px-2 py-1 font-medium
+        {% if pr_label == 'draft' %}bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200
+        {% elif pr_label == 'open' %}bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200
+        {% elif pr_label == 'merged' %}bg-purple-100 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200
+        {% else %}bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200{% endif %}">{{ pr_label }}</span>
+    </span>
+    {% set istatus = pr.internal_status or 'needs_review' %}
+    <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
+      <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Review</span>
+      <span class="px-2 py-1 font-medium
+        {% if istatus == 'approved' %}bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200
+        {% elif istatus == 'changes_requested' %}bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200
+        {% elif istatus == 'feedback_provided' %}bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200
+        {% else %}bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200{% endif %}">{{ pr.internal_status_label or 'needs review' }}</span>
+    </span>
+    <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
+      <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Commit head</span>
+      {% if pr.head_sha %}
+      <a class="bg-white px-2 py-1 font-mono font-medium text-blue-600 hover:underline dark:bg-slate-900 dark:text-blue-400"
+         href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/commit/{{ pr.head_sha }}"
+         target="_blank" rel="noopener"
+         title="{{ pr.head_sha }}">{{ pr.head_sha[:12] }}</a>
+      {% else %}
+      <span class="bg-white px-2 py-1 font-medium text-slate-500 dark:bg-slate-900 dark:text-slate-400">—</span>
+      {% endif %}
+    </span>
+    {% if runs_stale %}
+    <span class="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 font-medium text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+          title="Current head has no review runs — previous runs are obsolete">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5" aria-hidden="true">
+        <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 6a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 6Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
+      </svg>
+      Review stale
+    </span>
+    {% endif %}
+    <button type="button"
+            @click="setSidebarOpen(!sidebarOpen)"
+            class="ml-auto rounded-md border border-slate-200 bg-white px-2 py-1 font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            :aria-expanded="sidebarOpen"
+            aria-controls="pr-sidebar-panels"
+            x-text="sidebarOpen ? 'Hide runs' : 'Show runs'"></button>
+  </div>
+
+  <div class="lr-pr-layout">
+    {# Main column #}
+    <div class="lr-pr-main space-y-4">
+      {# Tabs #}
+      <div>
+        <div class="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-700" role="tablist">
+          <template x-for="t in [
+            {id:'general', label:'General'},
+            {id:'runs', label:'Runs'},
+            {id:'consolidations', label:'Consolidations'},
+            {id:'history', label:'History'}
+          ]" :key="t.id">
+            <button type="button" role="tab"
+                    @click="tab = t.id"
+                    :aria-selected="tab === t.id"
+                    class="border-b-2 px-3 py-2 text-sm font-medium transition-colors"
+                    :class="tab === t.id
+                      ? 'border-blue-600 text-blue-700 dark:border-blue-400 dark:text-blue-300'
+                      : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'"
+                    x-text="t.label"></button>
+          </template>
+        </div>
+
+        {# General #}
+        <div x-show="tab === 'general'" x-cloak class="mt-4 space-y-4">
+          <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <div class="lr-pr-meta text-sm">
+              <div class="min-w-0">
+                <div class="text-xs uppercase tracking-wide text-slate-500">Author</div>
+                <div class="mt-0.5 truncate font-medium" title="{{ pr.author or '' }}">{{ pr.author or '—' }}</div>
+              </div>
+              <div class="min-w-0">
+                <div class="text-xs uppercase tracking-wide text-slate-500">Repository</div>
+                <div class="mt-0.5 truncate font-medium" title="{{ pr.owner }}/{{ pr.repo }}">{{ pr.owner }}/{{ pr.repo }}</div>
+              </div>
+              <div class="min-w-0">
+                <div class="text-xs uppercase tracking-wide text-slate-500">Head</div>
+                <div class="mt-0.5 font-mono text-xs">
+                  {% if pr.head_sha %}
+                  <a class="text-blue-600 hover:underline dark:text-blue-400"
+                     href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/commit/{{ pr.head_sha }}"
+                     target="_blank" rel="noopener">{{ pr.head_sha[:12] }}</a>
+                  {% else %}—{% endif %}
+                </div>
+              </div>
+              <div class="min-w-0">
+                <div class="text-xs uppercase tracking-wide text-slate-500">Diff</div>
+                <div class="mt-0.5">
+                  {% if pr.additions is not none or pr.deletions is not none %}
+                  <span class="text-emerald-700 dark:text-emerald-400">+{{ pr.additions or 0 }}</span>
+                  /
+                  <span class="text-red-700 dark:text-red-400">−{{ pr.deletions or 0 }}</span>
+                  {% if pr.changed_files is not none %}
+                  <span class="text-slate-500">· {{ pr.changed_files }} files</span>
+                  {% endif %}
+                  {% else %}—{% endif %}
+                </div>
+              </div>
+              <div class="lr-pr-meta-wide">
+                <div class="text-xs uppercase tracking-wide text-slate-500">Branches</div>
+                <div class="mt-0.5 break-words text-xs text-slate-600 dark:text-slate-300">
+                  {% if pr.head_ref %}
+                  <a class="text-blue-600 hover:underline dark:text-blue-400"
+                     href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/tree/{{ pr.head_ref }}"
+                     target="_blank" rel="noopener">{{ pr.head_ref }}</a>
+                  {% else %}—{% endif %}
+                  →
+                  {% if pr.base_ref %}
+                  <a class="text-blue-600 hover:underline dark:text-blue-400"
+                     href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/tree/{{ pr.base_ref }}"
+                     target="_blank" rel="noopener">{{ pr.base_ref }}</a>
+                  {% else %}—{% endif %}
+                </div>
+              </div>
+              <div class="min-w-0">
+                <div class="text-xs uppercase tracking-wide text-slate-500">Total cost</div>
+                <div class="mt-0.5 font-medium">{{ total_cost_usd|cost }}</div>
+              </div>
+              <div class="min-w-0">
+                <div class="text-xs uppercase tracking-wide text-slate-500">Runs</div>
+                <div class="mt-0.5 font-medium">{{ runs|length }}{% if runs_stale %} <span class="text-amber-700 dark:text-amber-300">(stale)</span>{% endif %}</div>
+              </div>
+              <div class="min-w-0">
+                <div class="text-xs uppercase tracking-wide text-slate-500">Consolidations</div>
+                <div class="mt-0.5 font-medium" x-text="consolidations.length"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        {# Runs #}
+        <div x-show="tab === 'runs'" x-cloak class="mt-4" id="tab-runs">
   <section class="space-y-3">
-    <div class="flex items-center justify-between gap-3">
-      <h2 class="text-lg font-semibold">Runs</h2>
-      <div class="flex items-center gap-2">
-        <button type="button" @click="startConsolidation()"
-                class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
-                :disabled="selected.length === 0 || consolidatingBusy">Consolidate selected</button>
-        <button type="button" @click="openBatchModal()"
-                class="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
-          Start Code Review
-        </button>
-      </div>
-    </div>
+    <h2 class="sr-only">Runs</h2>
     <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
         <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
           <tr>
-            <th class="px-3 py-3">
-              <input type="checkbox"
-                     title="Select all eligible runs"
-                     aria-label="Select all eligible runs"
-                     :disabled="selectableIds.length === 0"
-                     :checked="allSelectableSelected()"
-                     :indeterminate="someSelectableSelected() && !allSelectableSelected()"
-                     @change="toggleSelectAll($event.target.checked)" />
-            </th>
             <th class="px-3 py-3">ID</th>
             <th class="px-3 py-3">Status</th>
             <th class="px-3 py-3">Agent / Model / Effort</th>
@@ -149,36 +181,17 @@
         </thead>
         <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
           {% for run in runs %}
-          <tr>
+          <tr id="run-{{ run.id }}" :class="highlightRunId === {{ run.id }} && 'bg-amber-50 dark:bg-amber-950/30'">
+<td class="px-3 py-3"><a class="text-blue-600 hover:underline dark:text-blue-400" href="/runs/{{ run.id }}">#{{ run.id }}</a></td>
             <td class="px-3 py-3">
-              {% if run.selectable or run.consolidating or (run.id in consolidating_ids) or (run.id in locked_run_ids) %}
-              <template x-if="isConsolidating({{ run.id }})">
-                <span class="inline-flex items-center gap-1 text-xs text-violet-700 dark:text-violet-300"
-                      title="Consolidation queued or running">
-                  <svg class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                  </svg>
-                  consolidating
+              <div class="inline-flex flex-wrap items-center gap-1">
+                {{ run_status_balls(run) }}
+                <span x-show="isConsolidating({{ run.id }}) && !{{ 'true' if run.consolidated else 'false' }}"
+                      x-cloak
+                      class="inline-flex"
+                      title="Consolidating">
+                  {{ status_ball('consolidating', 'Consolidating') }}
                 </span>
-              </template>
-              <template x-if="!isConsolidating({{ run.id }}) && canSelect({{ run.id }})">
-                <input type="checkbox" value="{{ run.id }}"
-                       :checked="selected.includes({{ run.id }})"
-                       @change="toggle({{ run.id }}, $event.target.checked)" />
-              </template>
-              {% endif %}
-            </td>
-            <td class="px-3 py-3"><a class="text-blue-600 hover:underline dark:text-blue-400" href="/runs/{{ run.id }}">#{{ run.id }}</a></td>
-            <td class="px-3 py-3">
-              <div class="flex flex-wrap items-center gap-1.5">
-                {{ run_status_chip(run.status) }}
-                {% if run.deprecated %}
-                <span class="inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">obsolete</span>
-                {% endif %}
-                {% if run.consolidated %}
-                <span class="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-900 dark:bg-violet-900/40 dark:text-violet-200">consolidated</span>
-                {% endif %}
               </div>
             </td>
             <td class="px-3 py-3">
@@ -193,22 +206,35 @@
             <td class="px-3 py-3">
               {{ commit_hash(run) }}
             </td>
+            {% set when = run.finished_at or run.started_at or run.created_at or '' %}
             <td class="px-3 py-3 whitespace-nowrap text-xs text-slate-600 dark:text-slate-300"
-                title="{{ run.finished_at or run.started_at or '' }}">
-              {% if run.finished_at %}{{ run.finished_at.replace('T', ' ')[:16] }}
-              {% elif run.started_at %}{{ run.started_at.replace('T', ' ')[:16] }}
-              {% else %}—{% endif %}
-            </td>
+                {% if when %}title="{{ when }}"{% endif %}
+                x-text='timeAgo({{ when|tojson }}) || "—"'></td>
             <td class="px-3 py-3 text-xs">
-              {% if (run.findings_sev1 or 0) + (run.findings_sev2 or 0) + (run.findings_sev3 or 0) > 0 %}
-              H{{ run.findings_sev1 }} M{{ run.findings_sev2 }} L{{ run.findings_sev3 }}
-              {% else %}—{% endif %}
+              {% set findings_total = (run.findings_sev1 or 0) + (run.findings_sev2 or 0) + (run.findings_sev3 or 0) %}
+              <button type="button"
+                      @click="openRunFindings({{ run.id }})"
+                      class="rounded px-1 py-0.5 font-mono text-left hover:bg-slate-100 hover:text-blue-700 dark:hover:bg-slate-800 dark:hover:text-blue-300
+                        {% if findings_total %}text-slate-700 dark:text-slate-200{% else %}text-slate-400{% endif %}"
+                      title="View findings for run #{{ run.id }}"
+                      aria-label="View findings for run #{{ run.id }}">
+                {% if findings_total %}H{{ run.findings_sev1 }} M{{ run.findings_sev2 }} L{{ run.findings_sev3 }}{% else %}—{% endif %}
+              </button>
             </td>
             <td class="px-3 py-3">{{ run.total_tokens or '—' }}</td>
             <td class="px-3 py-3">{{ run.cost_usd|cost }}</td>
             <td class="px-3 py-3">{{ run.duration_ms|duration }}</td>
             <td class="px-3 py-3 text-right">
               <div class="inline-flex items-center justify-end gap-0.5">
+              <button type="button"
+                      @click="openRunFindings({{ run.id }})"
+                      title="View findings"
+                      aria-label="View findings for run #{{ run.id }}"
+                      class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2Z" />
+                </svg>
+              </button>
               {% if run.status in ['queued', 'running'] %}
               <button type="button"
                       @click="cancelRun({{ run.id }})"
@@ -246,16 +272,20 @@
             </td>
           </tr>
           {% else %}
-          <tr><td colspan="11" class="px-4 py-8 text-center text-slate-500">No runs yet.</td></tr>
+          <tr><td colspan="10" class="px-4 py-8 text-center text-slate-500">No runs yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </section>
 
+        </div>
+
+        {# Consolidations #}
+        <div x-show="tab === 'consolidations'" x-cloak class="mt-4" id="tab-consolidations">
   <section class="space-y-3">
     <div class="flex items-center justify-between gap-3">
-      <h2 class="text-lg font-semibold">Consolidations</h2>
+      <h2 class="sr-only">Consolidations</h2>
       <span class="text-xs text-slate-500" x-show="pollActive" x-cloak>Updating…</span>
     </div>
     <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
@@ -276,17 +306,22 @@
         <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
           <template x-for="c in consolidations" :key="c.id">
             <tr>
-              <td class="px-3 py-3 font-mono text-xs" x-text="'#' + c.id"></td>
+              <td class="px-3 py-3 font-mono text-xs">
+                <button type="button"
+                        x-show="c.status === 'succeeded'"
+                        x-cloak
+                        class="text-blue-600 hover:underline dark:text-blue-400"
+                        @click="openView(c)"
+                        x-text="'#' + c.id"></button>
+                <span x-show="c.status !== 'succeeded'" x-text="'#' + c.id"></span>
+              </td>
               <td class="px-3 py-3">
-                <span class="inline-flex items-center gap-1.5">
-                  <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
-                        :class="statusChipClass(c.status)"
-                        x-text="consolidationStatusLabel(c.status)"></span>
-                  <svg x-show="c.status === 'queued' || c.status === 'running'" x-cloak
-                       class="h-3.5 w-3.5 animate-spin text-violet-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                  </svg>
+                <span class="inline-flex items-center gap-1"
+                      :title="consolidationStatusLabel(c.status)">
+                  <span class="lr-status-ball h-2.5 w-2.5"
+                        :class="statusBallClass(c.status, {consolidating: true})"
+                        role="img"
+                        :aria-label="consolidationStatusLabel(c.status)"></span>
                 </span>
               </td>
               <td class="px-3 py-3">
@@ -314,7 +349,19 @@
                   </span>
                 </template>
               </td>
-              <td class="px-3 py-3 font-mono text-xs" x-text="(c.source_run_ids || []).map(id => '#' + id).join(', ') || '—'"></td>
+              <td class="px-3 py-3 font-mono text-xs">
+                <template x-if="(c.source_run_ids || []).length">
+                  <span class="inline-flex flex-wrap gap-x-2 gap-y-1">
+                    <template x-for="rid in (c.source_run_ids || [])" :key="rid">
+                      <button type="button"
+                              class="text-blue-600 hover:underline dark:text-blue-400"
+                              @click="openSidebarRun(rid)"
+                              x-text="'#' + rid"></button>
+                    </template>
+                  </span>
+                </template>
+                <span x-show="!(c.source_run_ids || []).length">—</span>
+              </td>
               <td class="px-3 py-3" x-text="c.total_tokens != null ? c.total_tokens : '—'"></td>
               <td class="px-3 py-3" x-text="formatCost(c.cost_usd)"></td>
               <td class="px-3 py-3" x-text="formatDuration(c.duration_ms)"></td>
@@ -371,6 +418,10 @@
     </div>
   </section>
 
+        </div>
+
+        {# History #}
+        <div x-show="tab === 'history'" x-cloak class="mt-4 space-y-3">
   {% if feedback %}
   <section>
     <h2 class="text-lg font-semibold">Feedback history</h2>
@@ -378,7 +429,10 @@
       {% for f in feedback %}
       <li class="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
         <span class="font-medium">{{ f.action }}</span>
-        <span class="text-slate-400">· {{ f.created_at }}</span>
+        <span class="text-slate-400">·
+          <span title="{{ f.created_at }}"
+                x-text='timeAgo({{ f.created_at|tojson }}) || {{ f.created_at|tojson }}'></span>
+        </span>
         {% if f.dedup_summary %}<div class="text-slate-500">{{ f.dedup_summary }}</div>{% endif %}
       </li>
       {% endfor %}
@@ -386,74 +440,319 @@
   </section>
   {% endif %}
 
+          <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <h2 class="border-b border-slate-100 px-4 py-3 text-sm font-semibold dark:border-slate-800">Timeline</h2>
+            <ul class="divide-y divide-slate-100 text-sm dark:divide-slate-800">
+              <template x-for="item in historyItems" :key="item.key">
+                <li class="flex flex-wrap items-center gap-2 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <span class="inline-flex items-center gap-1">
+                    <span class="lr-status-ball h-2.5 w-2.5"
+                          :class="statusBallClass(item.status, {consolidating: item.kind === 'consolidation'})"
+                          role="img"
+                          :aria-label="item.status"
+                          :title="item.status"></span>
+                    <template x-if="item.deprecated">
+                      <span class="lr-status-ball lr-status-ball--deprecated h-2.5 w-2.5" title="Deprecated" role="img" aria-label="Deprecated"></span>
+                    </template>
+                    <template x-if="item.consolidated">
+                      <span class="lr-status-ball lr-status-ball--consolidated h-2.5 w-2.5" title="Consolidated" role="img" aria-label="Consolidated"></span>
+                    </template>
+                  </span>
+                  <button type="button" class="font-mono text-blue-600 hover:underline dark:text-blue-400"
+                          @click="item.kind === 'run' ? openSidebarRun(item.id) : openSidebarConsolidation(item.id)"
+                          x-text="'#' + item.id"></button>
+                  <span class="text-slate-500" x-text="item.kind === 'run' ? 'run' : 'consolidation'"></span>
+                  <span class="inline-flex min-w-0 items-center gap-1.5 text-slate-700 dark:text-slate-300">
+                    <img x-show="agentKey(item.agent) === LR.AgentName.CLAUDE" x-cloak
+                         src="/static/img/agents/claude.webp" alt="" width="14" height="14"
+                         class="h-3.5 w-3.5 shrink-0 object-contain" />
+                    <img x-show="agentKey(item.agent) === LR.AgentName.AGY" x-cloak
+                         src="/static/img/agents/agy.png" alt="" width="14" height="14"
+                         class="h-3.5 w-3.5 shrink-0 object-contain" />
+                    <img x-show="agentKey(item.agent) === LR.AgentName.CURSOR" x-cloak
+                         src="/static/img/agents/cursor-light.png" alt="" width="14" height="14"
+                         class="h-3.5 w-3.5 shrink-0 object-contain dark:hidden" />
+                    <img x-show="agentKey(item.agent) === LR.AgentName.CURSOR" x-cloak
+                         src="/static/img/agents/cursor-dark.png" alt="" width="14" height="14"
+                         class="h-3.5 w-3.5 shrink-0 object-contain hidden dark:inline" />
+                    <span class="shrink-0" x-text="agentTitle(item.agent)"></span>
+                    <template x-if="item.model">
+                      <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
+                        <span class="shrink-0 text-slate-400" aria-hidden="true">/</span>
+                        <span class="min-w-0 truncate" x-text="item.model"></span>
+                      </span>
+                    </template>
+                  </span>
+                  <span class="ml-auto text-xs text-slate-400"
+                        :title="item.whenExact || ''"
+                        x-text="timeAgo(item.whenIso) || ''"></span>
+                </li>
+              </template>
+              <li x-show="!historyItems.length" class="px-4 py-8 text-center text-slate-500">No history yet.</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    {# Right sidebar #}
+    <aside class="lr-pr-sidebar space-y-3" x-show="sidebarOpen" x-cloak id="pr-sidebar-panels">
+      <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <button type="button" class="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold"
+                @click="sidebarRunsOpen = !sidebarRunsOpen">
+          <span>Runs</span>
+          <svg class="h-4 w-4 text-slate-400 transition-transform" :class="sidebarRunsOpen ? '' : '-rotate-90'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
+        </button>
+        <ul x-show="sidebarRunsOpen" class="max-h-80 overflow-y-auto border-t border-slate-100 dark:border-slate-800">
+          {% for run in runs[:10] %}
+          {% set h = run.findings_sev1 or 0 %}
+          {% set m = run.findings_sev2 or 0 %}
+          {% set when = run.finished_at or run.started_at or run.created_at or '' %}
+          <li class="flex items-center gap-1.5 px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800/60">
+            {{ run_status_balls(run) }}
+            <button type="button"
+                    @click="openSidebarRun({{ run.id }})"
+                    class="shrink-0 font-mono text-blue-600 hover:underline dark:text-blue-400">#{{ run.id }}</button>
+            <a href="/runs/{{ run.id }}"
+               class="shrink-0 text-slate-400 hover:text-blue-600 hover:underline dark:text-slate-500 dark:hover:text-blue-400"
+               title="{{ when }}"
+               x-text='timeAgo({{ when|tojson }})'></a>
+            <span class="inline-flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-slate-600 dark:text-slate-300"
+                  title="{{ run.agent }} · {{ run.model }}{% if run.effort %} · {{ run.effort }}{% endif %}">
+              {{ agent_icon(run.agent, size='h-3.5 w-3.5') }}
+              <span class="shrink-0">{{ run.agent|title }}</span>
+              {% if run.model %}
+              <span class="shrink-0 text-slate-400" aria-hidden="true">·</span>
+              <span class="min-w-0 truncate">{{ run.model }}</span>
+              {% endif %}
+              {% if run.effort %}
+              <span class="lr-sidebar-effort shrink-0 text-slate-400" aria-hidden="true">·</span>
+              <span class="lr-sidebar-effort shrink-0">{{ run.effort }}</span>
+              {% endif %}
+            </span>
+            {% if h or m %}
+            <span class="ml-auto shrink-0 font-mono text-slate-500" title="Findings: high {{ h }}, medium {{ m }}">H{{ h }},M{{ m }}</span>
+            {% endif %}
+          </li>
+          {% else %}
+          <li class="px-3 py-3 text-xs text-slate-500">No runs</li>
+          {% endfor %}
+        </ul>
+      </section>
+
+      <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <button type="button" class="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold"
+                @click="sidebarConsolOpen = !sidebarConsolOpen">
+          <span>Consolidations</span>
+          <svg class="h-4 w-4 text-slate-400 transition-transform" :class="sidebarConsolOpen ? '' : '-rotate-90'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
+        </button>
+        <ul x-show="sidebarConsolOpen" class="max-h-80 overflow-y-auto border-t border-slate-100 dark:border-slate-800">
+          <template x-for="c in consolidations.slice(0, 10)" :key="c.id">
+            <li class="flex items-center gap-1.5 px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800/60">
+              <span class="lr-status-ball h-2.5 w-2.5 shrink-0"
+                    :class="statusBallClass(c.status, {consolidating: true})"
+                    :title="consolidationStatusLabel(c.status)"
+                    role="img"
+                    :aria-label="consolidationStatusLabel(c.status)"></span>
+              <button type="button"
+                      @click="openSidebarConsolidation(c.id)"
+                      class="shrink-0 font-mono text-blue-600 hover:underline dark:text-blue-400"
+                      x-text="'#' + c.id"></button>
+                <button type="button"
+                        @click="openSidebarConsolidation(c.id)"
+                        class="shrink-0 text-slate-400 hover:text-blue-600 hover:underline dark:text-slate-500 dark:hover:text-blue-400"
+                        :title="c.finished_at || c.started_at || c.created_at || ''"
+                        x-text="timeAgo(c.finished_at || c.started_at || c.created_at)"></button>
+              <span class="inline-flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-slate-600 dark:text-slate-300"
+                    :title="[c.agent, c.model, c.effort].filter(Boolean).join(' · ')">
+                <img x-show="agentKey(c.agent) === LR.AgentName.CLAUDE" x-cloak
+                     src="/static/img/agents/claude.webp" alt="" width="14" height="14"
+                     class="h-3.5 w-3.5 shrink-0 object-contain" />
+                <img x-show="agentKey(c.agent) === LR.AgentName.AGY" x-cloak
+                     src="/static/img/agents/agy.png" alt="" width="14" height="14"
+                     class="h-3.5 w-3.5 shrink-0 object-contain" />
+                <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
+                     src="/static/img/agents/cursor-light.png" alt="" width="14" height="14"
+                     class="h-3.5 w-3.5 shrink-0 object-contain dark:hidden" />
+                <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
+                     src="/static/img/agents/cursor-dark.png" alt="" width="14" height="14"
+                     class="h-3.5 w-3.5 shrink-0 object-contain hidden dark:inline" />
+                <span class="shrink-0" x-text="agentTitle(c.agent)"></span>
+                <template x-if="c.model">
+                  <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
+                    <span class="shrink-0 text-slate-400" aria-hidden="true">·</span>
+                    <span class="min-w-0 truncate" x-text="c.model"></span>
+                  </span>
+                </template>
+                <template x-if="c.effort">
+                  <span class="lr-sidebar-effort inline-flex shrink-0 items-center gap-1">
+                    <span class="text-slate-400" aria-hidden="true">·</span>
+                    <span x-text="c.effort"></span>
+                  </span>
+                </template>
+              </span>
+              <span class="ml-auto shrink-0 font-mono text-slate-500"
+                    x-show="consolidationFindingsSummary(c)"
+                    x-text="consolidationFindingsSummary(c)"
+                    :title="'Findings: ' + consolidationFindingsSummary(c)"></span>
+            </li>
+          </template>
+          <li x-show="!consolidations.length" class="px-3 py-3 text-xs text-slate-500">No consolidations</li>
+        </ul>
+      </section>
+    </aside>
+  </div>
+
+
   <!-- Submit / view consolidation modal -->
   <div x-show="submitOpen" x-cloak class="lr-modal-backdrop" role="dialog" aria-modal="true">
     <div class="absolute inset-0 bg-slate-900/50" @click="closeSubmit()"></div>
-    <div class="lr-modal-panel lr-modal-panel--wide" @click.stop>
+    <div class="lr-modal-panel lr-modal-panel--large" @click.stop>
       <div class="lr-modal-header">
-        <div>
-          <h2 class="text-lg font-semibold" x-text="submitReadOnly ? 'Consolidation' : 'Submit feedback'"></h2>
-          <p class="mt-1 text-sm text-slate-500">
-            <span x-show="!submitReadOnly">Post consolidation <span x-text="submitTarget && ('#' + submitTarget.id)"></span> to GitHub.</span>
-            <span x-show="submitReadOnly">
-              Consolidation <span x-text="submitTarget && ('#' + submitTarget.id)"></span>
-              <template x-if="submitTarget && submitTarget.feedback_provided">
-                <span> · submitted as <span x-text="feedbackActionLabel(submitTarget.gh_action)"></span></span>
-              </template>
-            </span>
+        <div class="min-w-0">
+          <h2 class="text-lg font-semibold"
+              x-text="submitReadOnly
+                ? ('#' + (submitTarget && submitTarget.id) + ' Consolidation Details')
+                : ('#' + (submitTarget && submitTarget.id) + ' Submit Feedback')"></h2>
+          <p class="mt-1 text-sm text-slate-500"
+             x-show="submitReadOnly && submitTarget && submitTarget.feedback_provided">
+            Submitted as <span x-text="feedbackActionLabel(submitTarget.gh_action)"></span>
           </p>
         </div>
         <button type="button" class="lr-modal-close" @click="closeSubmit()" aria-label="Close">Close</button>
       </div>
-      <div class="lr-modal-tabs" role="tablist">
-        <button type="button" role="tab"
-                class="lr-modal-tab"
-                :class="submitView === 'preview' && 'is-active'"
-                :aria-selected="submitView === 'preview'"
-                @click.prevent="setSubmitView('preview')">Preview</button>
-        <button type="button" role="tab"
-                class="lr-modal-tab"
-                :class="submitView === 'source' && 'is-active'"
-                :aria-selected="submitView === 'source'"
-                @click.prevent="setSubmitView('source')">Source</button>
-        <button type="button" role="tab"
-                class="lr-modal-tab"
-                :class="submitView === 'findings' && 'is-active'"
-                :aria-selected="submitView === 'findings'"
-                @click.prevent="setSubmitView('findings')">Findings</button>
-      </div>
-      <div class="mt-3 lr-modal-scroll rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950">
-        <div class="consol-md px-4 py-3 text-sm text-slate-800 dark:text-slate-200"
-             x-show="submitView === 'preview'"
-             x-html="renderedSubmitBody()"></div>
-        <pre class="p-3 font-mono text-xs text-slate-800 dark:text-slate-200"
-             style="white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;margin:0"
-             x-show="submitView === 'source'"
-             x-text="submitTarget && submitTarget.body"></pre>
-        <div class="px-4 py-3 text-sm text-slate-800 dark:text-slate-200"
-             x-show="submitView === 'findings'">
-          <template x-if="!(submitTarget && submitTarget.findings && submitTarget.findings.length)">
-            <p class="text-slate-500">No structured findings stored for this consolidation.</p>
+
+      <!-- Single scroll region for Runs, Findings, and future sections -->
+      <div class="mt-3 lr-modal-scroll space-y-8">
+        <section class="py-3">
+          <h3 class="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-200">Runs</h3>
+          <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+            <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
+              <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
+                <tr>
+                  <th class="px-3 py-2">ID</th>
+                  <th class="px-3 py-2">Status</th>
+                  <th class="px-3 py-2">Agent / Model / Effort</th>
+                  <th class="px-3 py-2">Findings</th>
+                  <th class="px-3 py-2">Tokens</th>
+                  <th class="px-3 py-2">Cost</th>
+                  <th class="px-3 py-2">Duration</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                <template x-for="row in submitSourceRunRows()" :key="row.id">
+                  <tr>
+                    <td class="px-3 py-2 font-mono text-xs">
+                      <button type="button"
+                              class="text-blue-600 hover:underline dark:text-blue-400"
+                              @click="closeSubmit(); openSidebarRun(row.id)"
+                              x-text="'#' + row.id"></button>
+                    </td>
+                    <td class="px-3 py-2">
+                      <span class="lr-status-ball h-2.5 w-2.5"
+                            :class="statusBallClass(row.status)"
+                            :title="row.status"
+                            role="img"
+                            :aria-label="row.status"></span>
+                    </td>
+                    <td class="px-3 py-2">
+                      <span class="inline-flex items-center gap-1.5 align-middle">
+                        <img x-show="agentKey(row.agent) === LR.AgentName.CLAUDE" x-cloak
+                             src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain" />
+                        <img x-show="agentKey(row.agent) === LR.AgentName.AGY" x-cloak
+                             src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain" />
+                        <img x-show="agentKey(row.agent) === LR.AgentName.CURSOR" x-cloak
+                             src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+                        <img x-show="agentKey(row.agent) === LR.AgentName.CURSOR" x-cloak
+                             src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+                        <span x-text="agentTitle(row.agent) || '—'"></span>
+                      </span>
+                      <span class="text-slate-400" x-show="row.model"> · </span>
+                      <span x-text="row.model || ''"></span>
+                      <span class="text-slate-400" x-show="row.effort"> · </span>
+                      <span x-text="row.effort || ''"></span>
+                    </td>
+                    <td class="px-3 py-2 font-mono text-xs"
+                        x-text="runFindingsLabel(row)"></td>
+                    <td class="px-3 py-2" x-text="row.total_tokens != null ? row.total_tokens : '—'"></td>
+                    <td class="px-3 py-2" x-text="formatCost(row.cost_usd)"></td>
+                    <td class="px-3 py-2" x-text="formatDuration(row.duration_ms)"></td>
+                  </tr>
+                </template>
+                <tr class="bg-slate-50 font-medium dark:bg-slate-800/60" x-show="submitSourceRunRows().length">
+                  <td class="px-3 py-2" colspan="3">Total</td>
+                  <td class="px-3 py-2 font-mono text-xs" x-text="submitRunsFindingsTotalLabel()"></td>
+                  <td class="px-3 py-2" x-text="submitRunsTokensTotal()"></td>
+                  <td class="px-3 py-2" x-text="submitRunsCostTotal()"></td>
+                  <td class="px-3 py-2" x-text="submitRunsDurationTotal()"></td>
+                </tr>
+                <tr x-show="!submitSourceRunRows().length">
+                  <td colspan="7" class="px-3 py-4 text-center text-slate-500">No source runs.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="py-3">
+          <h3 class="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-200"
+              x-text="'Findings (#' + submitFindingsCount() + ')'"></h3>
+          <template x-if="!submitFindingsCount()">
+            <p class="text-sm text-slate-500">No structured findings stored for this consolidation.</p>
           </template>
-          <ul class="space-y-3" x-show="submitTarget && submitTarget.findings && submitTarget.findings.length">
-            <template x-for="(f, idx) in (submitTarget && submitTarget.findings) || []" :key="(f.external_id || f.id || idx)">
-              <li class="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium dark:bg-slate-800"
-                        x-text="f.severity || f.Severity || '—'"></span>
-                  <span class="font-medium" x-text="f.title || f.Title || ('Finding ' + (idx + 1))"></span>
-                </div>
-                <p class="mt-1 text-slate-600 dark:text-slate-400 whitespace-pre-wrap"
-                   x-text="f.body || f.Body || f.summary || ''"></p>
-                <p class="mt-1 font-mono text-xs text-slate-500"
-                   x-show="f.path || f.file"
-                   x-text="(f.path || f.file || '') + (f.line != null ? (':' + f.line) : '')"></p>
-              </li>
-            </template>
-          </ul>
-        </div>
+          <div x-show="submitFindingsCount()">
+            <div class="lr-modal-tabs" role="tablist">
+              <button type="button" role="tab"
+                      class="lr-modal-tab"
+                      :class="viewFindingsTab === 'High' && 'is-active'"
+                      :aria-selected="viewFindingsTab === 'High'"
+                      @click.prevent="viewFindingsTab = 'High'"
+                      x-text="'High (' + submitFindingsForTab('High').length + ')'"></button>
+              <button type="button" role="tab"
+                      class="lr-modal-tab"
+                      :class="viewFindingsTab === 'Medium' && 'is-active'"
+                      :aria-selected="viewFindingsTab === 'Medium'"
+                      @click.prevent="viewFindingsTab = 'Medium'"
+                      x-text="'Medium (' + submitFindingsForTab('Medium').length + ')'"></button>
+              <button type="button" role="tab"
+                      class="lr-modal-tab"
+                      :class="viewFindingsTab === 'Low' && 'is-active'"
+                      :aria-selected="viewFindingsTab === 'Low'"
+                      @click.prevent="viewFindingsTab = 'Low'"
+                      x-text="'Low (' + submitFindingsForTab('Low').length + ')'"></button>
+            </div>
+            <div class="mt-3">
+              <p class="text-sm text-slate-500"
+                 x-show="!submitFindingsForTab(viewFindingsTab).length"
+                 x-text="'No ' + viewFindingsTab.toLowerCase() + ' findings.'"></p>
+              <div class="lr-findings" x-show="submitFindingsForTab(viewFindingsTab).length">
+                <template x-for="(f, idx) in submitFindingsForTab(viewFindingsTab)" :key="(f.external_id || f.id || idx)">
+                  <article class="lr-finding">
+                    <div class="lr-finding-head">
+                      <div class="lr-finding-title">
+                        <span class="lr-finding-id" x-show="f.external_id || f.id" x-text="f.external_id || ('#' + f.id)"></span><span x-show="f.external_id || f.id"> </span><span x-html="renderedFindingTitle(f, idx)"></span>
+                      </div>
+                      <span class="lr-finding-sev" :class="findingSeverityClass(f.severity || f.Severity)"
+                            x-text="findingSeverityLabel(f.severity || f.Severity)"></span>
+                    </div>
+                    <div class="lr-finding-path"
+                         x-show="f.path || f.file"
+                         x-text="(f.path || f.file || '') + (f.line != null ? (':' + f.line) : '')"></div>
+                    <div class="lr-finding-body" x-html="renderedFindingBody(f)"></div>
+                  </article>
+                </template>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
-      <div class="mt-4 flex shrink-0 flex-wrap items-end gap-3" x-show="!submitReadOnly">
+
+      <div class="lr-modal-footer flex flex-wrap items-end justify-end gap-3"
+           x-show="!submitReadOnly">
         <div>
           <label class="block text-xs font-medium uppercase tracking-wide text-slate-500" for="submit-verdict">Verdict</label>
           <select id="submit-verdict" x-model="submitVerdict"
@@ -469,23 +768,99 @@
         </button>
         <button type="button" @click="closeSubmit()" class="rounded-lg px-3 py-1.5 text-sm text-slate-500">Cancel</button>
       </div>
-      <div class="mt-4 flex shrink-0 flex-wrap gap-2" x-show="submitReadOnly">
-        <button type="button" @click="closeSubmit()" class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-600">Close</button>
-      </div>
     </div>
   </div>
 
   <!-- Consolidation logs modal -->
   <div x-show="logsOpen" x-cloak class="lr-modal-backdrop" role="dialog" aria-modal="true">
     <div class="absolute inset-0 bg-slate-900/50" @click="closeLogs()"></div>
-    <div class="lr-modal-panel" @click.stop>
+    <div class="lr-modal-panel lr-modal-panel--large" @click.stop>
       <div class="lr-modal-header">
-        <h2 class="text-lg font-semibold">Consolidation logs <span class="font-mono text-sm text-slate-500" x-text="logsTarget && ('#' + logsTarget.id)"></span></h2>
+        <div class="min-w-0">
+          <h2 class="text-lg font-semibold">Consolidation logs <span class="font-mono text-sm text-slate-500" x-text="logsTarget && ('#' + logsTarget.id)"></span></h2>
+          <div class="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-slate-500">
+            <span class="lr-status-ball h-2.5 w-2.5 shrink-0"
+                  :class="statusBallClass(logsTarget && logsTarget.status, {consolidating: true})"
+                  role="img"
+                  :title="consolidationStatusLabel(logsTarget && logsTarget.status)"
+                  :aria-label="consolidationStatusLabel(logsTarget && logsTarget.status)"></span>
+            <span class="truncate" x-show="logsError" x-text="logsError"></span>
+          </div>
+        </div>
         <button type="button" class="lr-modal-close" @click="closeLogs()" aria-label="Close">Close</button>
       </div>
-      <p class="mt-1 shrink-0 truncate text-xs text-slate-500" x-text="logsStatus"></p>
-      <pre class="mt-3 lr-modal-scroll rounded-lg bg-slate-50 p-3 font-mono text-xs dark:bg-slate-950"
+      <pre class="mt-3 lr-modal-scroll lr-modal-scroll--pre rounded-lg bg-slate-50 p-3 font-mono text-xs dark:bg-slate-950"
            x-text="logsText"></pre>
+    </div>
+  </div>
+
+  <!-- Run findings modal -->
+  <div x-show="findingsOpen" x-cloak class="lr-modal-backdrop" role="dialog" aria-modal="true"
+       aria-labelledby="run-findings-title">
+    <div class="absolute inset-0 bg-slate-900/50" @click="closeRunFindings()"></div>
+    <div class="lr-modal-panel lr-modal-panel--large" @click.stop>
+      <div class="lr-modal-header">
+        <div class="min-w-0">
+          <h2 id="run-findings-title" class="text-lg font-semibold">
+            <span x-text="'Findings (#' + (findingsItems.length || 0) + ')'"></span>
+            <span class="font-mono text-sm text-slate-500" x-text="findingsRunId && ('#' + findingsRunId)"></span>
+          </h2>
+          <p class="mt-1 truncate text-xs text-slate-500"
+             x-show="findingsRunMeta"
+             x-text="findingsRunMeta"></p>
+        </div>
+        <button type="button" class="lr-modal-close" @click="closeRunFindings()" aria-label="Close">Close</button>
+      </div>
+      <div class="mt-3 lr-modal-scroll pr-1">
+        <p x-show="findingsLoading" class="text-sm text-slate-500">Loading findings…</p>
+        <p x-show="!findingsLoading && findingsError" class="text-sm text-red-600 dark:text-red-400" x-text="findingsError"></p>
+        <p x-show="!findingsLoading && !findingsError && !findingsItems.length"
+           class="text-sm text-slate-500">No findings for this run.</p>
+        <div x-show="!findingsLoading && !findingsError && findingsItems.length">
+          <div class="lr-modal-tabs" role="tablist">
+            <button type="button" role="tab"
+                    class="lr-modal-tab"
+                    :class="runFindingsTab === 'High' && 'is-active'"
+                    :aria-selected="runFindingsTab === 'High'"
+                    @click.prevent="runFindingsTab = 'High'"
+                    x-text="'High (' + runFindingsForTab('High').length + ')'"></button>
+            <button type="button" role="tab"
+                    class="lr-modal-tab"
+                    :class="runFindingsTab === 'Medium' && 'is-active'"
+                    :aria-selected="runFindingsTab === 'Medium'"
+                    @click.prevent="runFindingsTab = 'Medium'"
+                    x-text="'Medium (' + runFindingsForTab('Medium').length + ')'"></button>
+            <button type="button" role="tab"
+                    class="lr-modal-tab"
+                    :class="runFindingsTab === 'Low' && 'is-active'"
+                    :aria-selected="runFindingsTab === 'Low'"
+                    @click.prevent="runFindingsTab = 'Low'"
+                    x-text="'Low (' + runFindingsForTab('Low').length + ')'"></button>
+          </div>
+          <div class="mt-3">
+            <p class="text-sm text-slate-500"
+               x-show="!runFindingsForTab(runFindingsTab).length"
+               x-text="'No ' + runFindingsTab.toLowerCase() + ' findings.'"></p>
+            <div class="lr-findings" x-show="runFindingsForTab(runFindingsTab).length">
+              <template x-for="(f, idx) in runFindingsForTab(runFindingsTab)" :key="f.id || f.external_id || idx">
+                <article class="lr-finding">
+                  <div class="lr-finding-head">
+                    <div class="lr-finding-title">
+                      <span class="lr-finding-id" x-show="f.external_id" x-text="f.external_id"></span><span x-show="f.external_id"> </span><span x-html="renderedFindingTitle(f, idx)"></span>
+                    </div>
+                    <span class="lr-finding-sev" :class="findingSeverityClass(f.severity)"
+                          x-text="findingSeverityLabel(f.severity)"></span>
+                  </div>
+                  <div class="lr-finding-path"
+                       x-show="f.path"
+                       x-text="(f.path || '') + (f.line != null ? (':' + f.line) : '')"></div>
+                  <div class="lr-finding-body" x-html="renderedFindingBody(f)"></div>
+                </article>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -643,30 +1018,35 @@
        role="status">
     <span x-text="toast"></span>
   </div>
+
 </div>
 
 <script>
 function reviewForm() {
   return {
     agents: [],
-    selected: [],
-    selectableIds: {{ selectable_ids | tojson }},
     consolidatingIds: {{ consolidating_ids | tojson }},
     lockedIds: {{ locked_run_ids | tojson }},
     consolidations: {{ consolidations | tojson }},
-    consolidatingBusy: false,
     pollActive: false,
     _pollTimer: null,
     regenerating: {},
     submitOpen: false,
     submitTarget: null,
     submitReadOnly: false,
-    submitView: 'preview',
+    viewFindingsTab: 'High',
     submitVerdict: 'comment',
     logsOpen: false,
     logsTarget: null,
     logsText: '',
-    logsStatus: '',
+    logsError: '',
+    findingsOpen: false,
+    findingsLoading: false,
+    findingsRunId: null,
+    findingsRunMeta: '',
+    findingsItems: [],
+    findingsError: '',
+    runFindingsTab: 'High',
     batchOpen: false,
     batchBusy: false,
     batchMessage: '',
@@ -679,10 +1059,21 @@ function reviewForm() {
     _agentsReady: false,
     _batchKeySeq: 1,
     toast: '',
+    tab: 'general',
+    sidebarOpen: true,
+    sidebarRunsOpen: true,
+    sidebarConsolOpen: true,
+    highlightRunId: null,
+    runsForHistory: {{ runs | tojson }},
     cancelling: {},
     deleting: {},
     rerunning: {},
     async init() {
+      try {
+        const saved = localStorage.getItem('lazyreview-pr-sidebar-open');
+        if (saved === '0') this.sidebarOpen = false;
+        else if (saved === '1') this.sidebarOpen = true;
+      } catch (_) { /* ignore */ }
       const toast = sessionStorage.getItem('lazyreview-toast');
       if (toast) {
         sessionStorage.removeItem('lazyreview-toast');
@@ -704,6 +1095,12 @@ function reviewForm() {
         this._agentsReady = true;
       }
       this.maybeStartPoll();
+    },
+    setSidebarOpen(open) {
+      this.sidebarOpen = !!open;
+      try {
+        localStorage.setItem('lazyreview-pr-sidebar-open', this.sidebarOpen ? '1' : '0');
+      } catch (_) { /* ignore */ }
     },
     _cloneJson(value) {
       return JSON.parse(JSON.stringify(value == null ? null : value));
@@ -731,9 +1128,6 @@ function reviewForm() {
     isLocked(id) {
       return this.lockedIds.includes(Number(id));
     },
-    canSelect(id) {
-      return this.selectableIds.includes(Number(id)) && !this.isLocked(id);
-    },
     agentKey(name) {
       return (window.LR && window.LR.agentKey) ? window.LR.agentKey(name) : String(name || '').toLowerCase();
     },
@@ -741,6 +1135,57 @@ function reviewForm() {
       const s = String(name || '');
       if (!s) return '';
       return s.charAt(0).toUpperCase() + s.slice(1);
+    },
+
+    timeAgo(iso) {
+      if (!iso) return '';
+      const then = new Date(iso);
+      if (Number.isNaN(then.getTime())) {
+        // sqlite "YYYY-MM-DD HH:MM:SS" (UTC-ish) fallback
+        const normalized = String(iso).includes('T') ? iso : String(iso).replace(' ', 'T') + 'Z';
+        const alt = new Date(normalized);
+        if (Number.isNaN(alt.getTime())) return '';
+        return this._formatTimeAgo(alt);
+      }
+      return this._formatTimeAgo(then);
+    },
+    _formatTimeAgo(then) {
+      const seconds = Math.max(0, Math.round((Date.now() - then.getTime()) / 1000));
+      if (seconds < 60) return '< 1 min ago';
+      const minutes = Math.round(seconds / 60);
+      if (minutes < 60) return minutes === 1 ? '1 min ago' : minutes + ' min ago';
+      const hours = Math.round(minutes / 60);
+      if (hours < 24) return hours === 1 ? '1 hr ago' : hours + ' hrs ago';
+      const days = Math.round(hours / 24);
+      if (days < 7) return days === 1 ? '1 day ago' : days + ' days ago';
+      const weeks = Math.round(days / 7);
+      if (weeks < 5) return weeks === 1 ? '1 week ago' : weeks + ' weeks ago';
+      const months = Math.round(days / 30);
+      return months <= 1 ? '1 month ago' : months + ' months ago';
+    },
+    consolidationFindingsSummary(c) {
+      const items = (c && c.findings) || [];
+      let h = 0, m = 0;
+      for (const f of items) {
+        const sev = Number(f && f.severity);
+        if (sev === 1) h += 1;
+        else if (sev === 2) m += 1;
+      }
+      if (!h && !m) return '';
+      return 'H' + h + ',M' + m;
+    },
+    statusBallClass(status, opts = {}) {
+      const consolidatingFlavor = !!(opts && opts.consolidating);
+      if (status === 'succeeded') return 'lr-status-ball--succeeded';
+      if (status === 'failed') return 'lr-status-ball--failed';
+      if (status === 'cancelled') return 'lr-status-ball--cancelled';
+      if (status === 'dormant') return 'lr-status-ball--dormant';
+      if (status === 'running' || status === 'queued') {
+        // Jenkins: in-progress is an animated ball. Runs use orange; consolidations use purple.
+        const kind = consolidatingFlavor ? 'consolidating' : 'running';
+        return 'lr-status-ball--' + kind + ' lr-status-ball--pulse';
+      }
+      return 'lr-status-ball--queued lr-status-ball--pulse';
     },
     statusChipClass(status) {
       if (status === 'succeeded') return 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200';
@@ -802,9 +1247,6 @@ function reviewForm() {
         );
         this.consolidations = data.consolidations || [];
         this.syncLocksFromConsolidations(this.consolidations);
-        // Keep select-all / checkboxes in sync with locked consolidations.
-        this.selectableIds = this.selectableIds.filter(id => !this.lockedIds.includes(id));
-        this.selected = this.selected.filter(id => this.selectableIds.includes(id));
         const stillActive = this.consolidations.some(c => this.consolidationIsActive(c.status));
         const stillRunning = this.consolidations.some(c =>
           c.status === 'queued' || c.status === 'running'
@@ -825,6 +1267,72 @@ function reviewForm() {
       } catch (e) {
         /* ignore transient poll errors */
       }
+    },
+
+    statusDotClass(status) {
+      if (status === 'succeeded') return 'bg-emerald-500';
+      if (status === 'failed') return 'bg-red-500';
+      if (status === 'running') return 'bg-blue-500';
+      if (status === 'cancelled') return 'bg-slate-400';
+      if (status === 'dormant' || status === 'queued') return 'bg-amber-400';
+      return 'bg-slate-400';
+    },
+    get historyItems() {
+      const items = [];
+      const exactWhen = (iso) => {
+        if (!iso) return '';
+        return String(iso).replace('T', ' ').slice(0, 19);
+      };
+      for (const r of (this.runsForHistory || [])) {
+        const whenIso = r.finished_at || r.started_at || r.created_at || '';
+        items.push({
+          key: 'run-' + r.id,
+          kind: 'run',
+          id: r.id,
+          status: r.status,
+          deprecated: !!r.deprecated,
+          consolidated: !!r.consolidated,
+          agent: r.agent || '',
+          model: r.model || '',
+          whenIso,
+          whenExact: exactWhen(whenIso),
+          sort: whenIso,
+        });
+      }
+      for (const c of (this.consolidations || [])) {
+        const whenIso = c.finished_at || c.started_at || c.created_at || '';
+        items.push({
+          key: 'consol-' + c.id,
+          kind: 'consolidation',
+          id: c.id,
+          status: c.status,
+          agent: c.agent || '',
+          model: c.model || '',
+          whenIso,
+          whenExact: exactWhen(whenIso),
+          sort: whenIso,
+        });
+      }
+      items.sort((a, b) => String(b.sort).localeCompare(String(a.sort)));
+      return items;
+    },
+    openSidebarRun(id) {
+      this.tab = 'runs';
+      this.highlightRunId = Number(id);
+      this.$nextTick(() => {
+        const el = document.getElementById('run-' + id);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => { if (this.highlightRunId === Number(id)) this.highlightRunId = null; }, 2500);
+      });
+    },
+    openSidebarConsolidation(id) {
+      this.tab = 'consolidations';
+      const c = (this.consolidations || []).find(x => Number(x.id) === Number(id));
+      if (!c) return;
+      this.$nextTick(() => {
+        if (c.status === 'succeeded') this.openView(c);
+        else this.openConsolLogs(c);
+      });
     },
     openBatchModal() {
       this.batchMessage = '';
@@ -1146,23 +1654,6 @@ function reviewForm() {
         this.batchBusy = false;
       }
     },
-    toggle(id, on) {
-      if (on) {
-        if (!this.selected.includes(id)) this.selected.push(id);
-      } else {
-        this.selected = this.selected.filter(x => x !== id);
-      }
-    },
-    toggleSelectAll(on) {
-      this.selected = on ? this.selectableIds.slice() : [];
-    },
-    allSelectableSelected() {
-      return this.selectableIds.length > 0
-        && this.selectableIds.every(id => this.selected.includes(id));
-    },
-    someSelectableSelected() {
-      return this.selectableIds.some(id => this.selected.includes(id));
-    },
     async cancelRun(id) {
       this.cancelling = { ...this.cancelling, [id]: true };
       try {
@@ -1213,28 +1704,6 @@ function reviewForm() {
         this.deleting = { ...this.deleting, [id]: false };
       }
     },
-    async startConsolidation() {
-      if (!this.selected.length) return;
-      this.consolidatingBusy = true;
-      try {
-        const res = await fetch('/api/prs/{{ pr.id }}/consolidations', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ run_ids: this.selected })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'failed');
-        this.selected = [];
-        await this.pollConsolidations();
-        this.maybeStartPoll();
-        this.toast = 'Consolidation #' + data.id + ' queued';
-        setTimeout(() => { this.toast = ''; }, 3000);
-      } catch (e) {
-        await lrAlert(String(e.message || e), { title: 'Consolidation failed' });
-      } finally {
-        this.consolidatingBusy = false;
-      }
-    },
     async cancelConsolidation(id) {
       try {
         const res = await fetch('/api/consolidations/' + id + '/cancel', { method: 'POST' });
@@ -1271,22 +1740,107 @@ function reviewForm() {
     openSubmit(c) {
       this.submitTarget = c;
       this.submitReadOnly = false;
-      this.submitView = 'preview';
       this.submitVerdict = 'comment';
+      this.viewFindingsTab = this.defaultViewFindingsTab(c);
       this.submitOpen = true;
+    },
+    runById(id) {
+      const n = Number(id);
+      return (this.runsForHistory || []).find(r => Number(r.id) === n) || null;
+    },
+    submitSourceRunRows() {
+      return this._sourceRunIds(this.submitTarget).map(id => {
+        const run = this.runById(id);
+        if (run) return run;
+        return {
+          id,
+          status: '',
+          agent: '',
+          model: '',
+          effort: '',
+          findings_sev1: 0,
+          findings_sev2: 0,
+          findings_sev3: 0,
+          total_tokens: null,
+          cost_usd: null,
+          duration_ms: null,
+        };
+      });
+    },
+    runFindingsLabel(run) {
+      if (!run) return '—';
+      const h = Number(run.findings_sev1 || 0);
+      const m = Number(run.findings_sev2 || 0);
+      const l = Number(run.findings_sev3 || 0);
+      if (!h && !m && !l) return '—';
+      return 'H' + h + ' M' + m + ' L' + l;
+    },
+    submitRunsFindingsTotals() {
+      let h = 0, m = 0, l = 0;
+      for (const run of this.submitSourceRunRows()) {
+        h += Number(run.findings_sev1 || 0);
+        m += Number(run.findings_sev2 || 0);
+        l += Number(run.findings_sev3 || 0);
+      }
+      return { h, m, l };
+    },
+    submitRunsFindingsTotalLabel() {
+      const t = this.submitRunsFindingsTotals();
+      if (!t.h && !t.m && !t.l) return '—';
+      return 'H' + t.h + ' M' + t.m + ' L' + t.l;
+    },
+    submitRunsTokensTotal() {
+      let sum = 0, any = false;
+      for (const run of this.submitSourceRunRows()) {
+        if (run.total_tokens != null && run.total_tokens !== '') {
+          sum += Number(run.total_tokens) || 0;
+          any = true;
+        }
+      }
+      return any ? sum : '—';
+    },
+    submitRunsCostTotal() {
+      let sum = 0, any = false;
+      for (const run of this.submitSourceRunRows()) {
+        if (run.cost_usd != null && run.cost_usd !== '') {
+          sum += Number(run.cost_usd) || 0;
+          any = true;
+        }
+      }
+      return any ? this.formatCost(sum) : '—';
+    },
+    submitRunsDurationTotal() {
+      let sum = 0, any = false;
+      for (const run of this.submitSourceRunRows()) {
+        if (run.duration_ms != null && run.duration_ms !== '') {
+          sum += Number(run.duration_ms) || 0;
+          any = true;
+        }
+      }
+      return any ? this.formatDuration(sum) : '—';
+    },
+    submitFindings() {
+      return (this.submitTarget && this.submitTarget.findings) || [];
+    },
+    submitFindingsCount() {
+      return this.submitFindings().length;
+    },
+    submitFindingsForTab(tab) {
+      const label = tab || this.viewFindingsTab || 'High';
+      return this.submitFindings().filter(f => this.findingSeverityLabel(f.severity || f.Severity) === label);
+    },
+    defaultViewFindingsTab(c) {
+      const items = (c && c.findings) || [];
+      for (const label of ['High', 'Medium', 'Low']) {
+        if (items.some(f => this.findingSeverityLabel(f.severity || f.Severity) === label)) return label;
+      }
+      return 'High';
     },
     openView(c) {
       this.submitTarget = c;
       this.submitReadOnly = true;
-      this.submitView = 'preview';
+      this.viewFindingsTab = this.defaultViewFindingsTab(c);
       this.submitOpen = true;
-    },
-    setSubmitView(view) {
-      if (view === 'source' || view === 'findings') {
-        this.submitView = view;
-      } else {
-        this.submitView = 'preview';
-      }
     },
     closeSubmit() {
       this.submitOpen = false;
@@ -1295,20 +1849,107 @@ function reviewForm() {
     },
     closeLogs() {
       this.logsOpen = false;
+      this.logsTarget = null;
+      this.logsText = '';
+      this.logsError = '';
     },
-    renderedSubmitBody() {
-      const raw = (this.submitTarget && this.submitTarget.body) || '';
-      if (!raw) return '<p class="text-slate-500">No body.</p>';
+    findingSeverityLabel(sev) {
+      if (sev == null || sev === '') return '—';
+      const n = Number(sev);
+      if (n === 1) return 'High';
+      if (n === 2) return 'Medium';
+      if (n === 3) return 'Low';
+      const s = String(sev).toLowerCase();
+      if (s === 'high' || s === 'sev1' || s === 'error') return 'High';
+      if (s === 'medium' || s === 'med' || s === 'sev2' || s === 'warning') return 'Medium';
+      if (s === 'low' || s === 'sev3' || s === 'info' || s === 'note') return 'Low';
+      return String(sev);
+    },
+    findingSeverityClass(sev) {
+      const label = this.findingSeverityLabel(sev);
+      if (label === 'High') return 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200';
+      if (label === 'Medium') return 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200';
+      if (label === 'Low') return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+      return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+    },
+    findingBodyText(f) {
+      const raw = (f && (f.body || f.Body || f.summary || '')) || '';
+      return String(raw).replace(/\n{3,}/g, '\n\n').trim();
+    },
+    _escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    },
+    _renderMarkdown(raw, { inline = false } = {}) {
+      const text = String(raw || '').replace(/\n{3,}/g, '\n\n').trim();
+      if (!text) return '';
       try {
-        const html = (typeof marked !== 'undefined')
-          ? marked.parse(raw, { breaks: true })
-          : raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        let html;
+        if (typeof marked !== 'undefined') {
+          html = inline && typeof marked.parseInline === 'function'
+            ? marked.parseInline(text, { breaks: true })
+            : marked.parse(text, { breaks: true });
+        } else {
+          html = this._escapeHtml(text);
+          if (!inline) html = '<p>' + html.replace(/\n/g, '<br>') + '</p>';
+        }
         return (typeof DOMPurify !== 'undefined') ? DOMPurify.sanitize(html) : html;
       } catch (e) {
-        return '<pre class="whitespace-pre-wrap break-words text-xs">' +
-          String(raw).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') +
-          '</pre>';
+        const safe = this._escapeHtml(text);
+        return inline ? safe : '<p>' + safe.replace(/\n/g, '<br>') + '</p>';
       }
+    },
+    renderedFindingTitle(f, idx) {
+      const raw = (f && (f.title || f.Title)) || ('Finding ' + ((idx || 0) + 1));
+      return this._renderMarkdown(raw, { inline: true });
+    },
+    renderedFindingBody(f) {
+      const raw = this.findingBodyText(f);
+      if (!raw) return '';
+      return this._renderMarkdown(raw);
+    },
+    runFindingsForTab(tab) {
+      const label = tab || this.runFindingsTab || 'High';
+      return (this.findingsItems || []).filter(f => this.findingSeverityLabel(f.severity || f.Severity) === label);
+    },
+    defaultRunFindingsTab(items) {
+      const list = items || [];
+      for (const label of ['High', 'Medium', 'Low']) {
+        if (list.some(f => this.findingSeverityLabel(f.severity || f.Severity) === label)) return label;
+      }
+      return 'High';
+    },
+    async openRunFindings(runId) {
+      this.findingsOpen = true;
+      this.findingsLoading = true;
+      this.findingsError = '';
+      this.findingsItems = [];
+      this.findingsRunId = Number(runId);
+      this.findingsRunMeta = '';
+      try {
+        const res = await fetch('/api/runs/' + runId);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Failed to load findings');
+        const run = data.run || {};
+        this.findingsRunMeta = [run.agent, run.model, run.effort].filter(Boolean).join(' · ');
+        this.findingsItems = data.findings || [];
+        this.runFindingsTab = this.defaultRunFindingsTab(this.findingsItems);
+      } catch (e) {
+        this.findingsError = String(e.message || e);
+      } finally {
+        this.findingsLoading = false;
+      }
+    },
+    closeRunFindings() {
+      this.findingsOpen = false;
+      this.findingsRunId = null;
+      this.findingsRunMeta = '';
+      this.findingsItems = [];
+      this.findingsError = '';
+      this.findingsLoading = false;
+      this.runFindingsTab = 'High';
     },
     async postConsolidation() {
       if (!this.submitTarget) return;
@@ -1336,6 +1977,8 @@ function reviewForm() {
     },
     async openConsolLogs(c) {
       this.logsTarget = c;
+      this.logsError = '';
+      this.logsText = '';
       this.logsOpen = true;
       await this.refreshLogs();
     },
@@ -1344,7 +1987,8 @@ function reviewForm() {
       const res = await fetch('/api/consolidations/' + this.logsTarget.id + '/logs');
       if (!res.ok) return;
       const data = await res.json();
-      this.logsStatus = data.status + (data.error_message ? (' — ' + data.error_message) : '');
+      if (data.status) this.logsTarget = { ...this.logsTarget, status: data.status };
+      this.logsError = data.error_message || '';
       const parts = [];
       if (data.stdout) parts.push('=== stdout ===\n' + data.stdout);
       if (data.stderr) parts.push('=== stderr ===\n' + data.stderr);
@@ -1366,9 +2010,11 @@ function reviewForm() {
 .consol-md ol{list-style:decimal;padding-left:1.25rem}
 .consol-md blockquote{border-left:3px solid #94a3b8;padding-left:0.75rem;color:#475569}
 .dark .consol-md blockquote{border-color:#64748b;color:#cbd5e1}
-.consol-md code{font-family:ui-monospace,monospace;font-size:0.85em;background:#e2e8f0;padding:0.1em 0.3em;border-radius:0.25rem}
+.consol-md{overflow-wrap:anywhere;word-break:break-word;min-width:0;max-width:100%}
+.consol-md :is(p,li,td,th,a,code){overflow-wrap:anywhere;word-break:break-word}
+.consol-md code{font-family:ui-monospace,monospace;font-size:0.85em;background:#e2e8f0;padding:0.1em 0.3em;border-radius:0.25rem;white-space:pre-wrap}
 .dark .consol-md code{background:#1e293b}
-.consol-md pre{overflow:auto;white-space:pre-wrap;word-break:break-word;background:#e2e8f0;padding:0.75rem;border-radius:0.5rem;font-size:0.75rem}
+.consol-md pre{overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;background:#e2e8f0;padding:0.75rem;border-radius:0.5rem;font-size:0.75rem;max-width:100%}
 .dark .consol-md pre{background:#1e293b}
 .consol-md a{color:#2563eb;text-decoration:underline}
 .consol-md strong{font-weight:600}
