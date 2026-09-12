@@ -95,6 +95,7 @@ ExecStart=$VENV/bin/gunicorn lazyreview.main:app --worker-class uvicorn.workers.
 Restart=on-failure
 RestartSec=3
 Environment=LAZYREVIEW_CONFIG=${CONFIG_PATH}
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 [Install]
 WantedBy=default.target

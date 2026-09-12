@@ -204,6 +204,68 @@ def cancel_review_run(run_id: int, request: Request):
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+@router.post("/runs/{run_id}/rerun")
+def rerun_review_run(run_id: int, request: Request):
+    """Re-queue an existing run with the same agent/model/effort, replacing prior results."""
+    import shutil
+
+    from lazyreview.db import (
+        active_consolidation_run_ids,
+        reset_run_for_rerun,
+    )
+
+    conn = request.app.state.db
+    run = get_run(conn, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run["status"] in ("queued", "running"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Run is {run['status']}; cancel it first or wait for it to finish",
+        )
+    locked = active_consolidation_run_ids(conn, int(run["pr_id"]))
+    if run_id in locked:
+        raise HTTPException(
+            status_code=400,
+            detail="Run is part of an active consolidation; cancel that first",
+        )
+
+    try:
+        adapter = get_adapter(str(run["agent"]))
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not adapter.available():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Agent {run['agent']} binary not available on PATH",
+        )
+
+    pr = get_pr(conn, int(run["pr_id"]))
+    workdir = Path(run["workdir_path"] or "")
+    if workdir.is_dir():
+        # Keep the run directory; drop prior clone/logs/artifacts so the job starts clean.
+        for child in workdir.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                try:
+                    child.unlink()
+                except OSError:
+                    pass
+    elif run["workdir_path"]:
+        workdir.mkdir(parents=True, exist_ok=True)
+
+    updated = reset_run_for_rerun(
+        conn,
+        run_id,
+        head_sha=(pr.get("head_sha") if pr else None) or run.get("head_sha") or "",
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Run not found")
+    request.app.state.jobs.enqueue(run_id)
+    return updated
+
+
 @router.delete("/runs/{run_id}")
 def delete_review_run(run_id: int, request: Request):
     """Remove a run from the DB and delete its on-disk workdir."""

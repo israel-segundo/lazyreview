@@ -41,9 +41,17 @@
                 :class="autoRefresh ? 'translate-x-5' : 'translate-x-0.5'"></span>
         </button>
       </div>
+      {% if run.status in ['succeeded', 'failed', 'cancelled'] %}
+      <button type="button"
+              @click="rerunRun()"
+              :disabled="rerunning || deleting"
+              class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+        <span x-text="rerunning ? 'Re-queuing…' : 'Re-run'"></span>
+      </button>
+      {% endif %}
       <button type="button"
               @click="deleteRun()"
-              :disabled="deleting"
+              :disabled="deleting || rerunning"
               class="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 dark:bg-red-700 dark:hover:bg-red-600">
         <span x-text="deleting ? 'Deleting…' : 'Delete run'"></span>
       </button>
@@ -245,6 +253,7 @@ function runDetail(runId) {
     finishedAt: {{ (run.finished_at or '')|tojson }},
     prId: {{ (pr.id if pr else 'null') }},
     deleting: false,
+    rerunning: false,
     autoRefresh: inFlight,
     logTab: initialStatus === 'failed' ? 'stderr' : 'stdout',
     logTimer: null,
@@ -326,12 +335,35 @@ function runDetail(runId) {
         this.autoRefresh = false;
       }
     },
+    async rerunRun() {
+      const ok = await lrConfirm({
+        title: 'Re-run review?',
+        message: 'Re-run with the same agent/model/effort? Prior findings for this run will be replaced.',
+        confirmLabel: 'Re-run',
+      });
+      if (!ok) return;
+      this.rerunning = true;
+      try {
+        const res = await fetch('/api/runs/' + this.runId + '/rerun', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Re-run failed');
+        window.location.reload();
+      } catch (e) {
+        await lrAlert(String(e.message || e), { title: 'Re-run failed' });
+        this.rerunning = false;
+      }
+    },
     async deleteRun() {
       const active = this.status === 'queued' || this.status === 'running';
-      const msg = active
-        ? 'This run is still active. Cancel it, then delete from the database and local disk?'
-        : 'Delete this run from the database and local disk? This cannot be undone.';
-      if (!confirm(msg)) return;
+      const ok = await lrConfirm({
+        title: 'Delete run?',
+        message: active
+          ? 'This run is still active. Cancel it, then delete from the database and local disk?'
+          : 'Delete this run from the database and local disk? This cannot be undone.',
+        confirmLabel: 'Delete',
+        danger: true,
+      });
+      if (!ok) return;
       this.deleting = true;
       try {
         const res = await fetch('/api/runs/' + this.runId, { method: 'DELETE' });
@@ -340,7 +372,7 @@ function runDetail(runId) {
         if (data.pr_id) window.location = '/prs/' + data.pr_id;
         else window.location = '/';
       } catch (e) {
-        alert(String(e.message || e));
+        await lrAlert(String(e.message || e), { title: 'Delete failed' });
         this.deleting = false;
       }
     }

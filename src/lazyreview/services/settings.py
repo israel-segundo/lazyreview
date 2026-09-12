@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Any
 
 from lazyreview.db import get_all_settings, get_setting, set_setting
-from lazyreview.db.schema import _default_consolidator_prompt
+from lazyreview.db.schema import (
+    DEFAULT_BATCH_REVIEW_DEFAULTS,
+    _default_consolidator_prompt,
+)
 from lazyreview.services.pr_sync import (
     DEFAULT_SYNC_INTERVAL_MINUTES,
     get_pr_sync_interval_minutes,
@@ -14,6 +18,54 @@ from lazyreview.services.pr_sync import (
 
 ALLOWED_UNITS = {"hours", "days", "weeks"}
 ALLOWED_CONSOLIDATOR_AGENTS = {"claude", "cursor", "agy"}
+ALLOWED_BATCH_AGENTS = {"claude", "cursor", "agy"}
+MAX_BATCH_DEFAULTS = 20
+
+
+def normalize_batch_review_defaults(raw: Any) -> list[dict[str, str]]:
+    """Validate and normalize a list of {agent, model, effort} run configs."""
+    if raw is None:
+        return [dict(x) for x in DEFAULT_BATCH_REVIEW_DEFAULTS]
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return []
+        try:
+            raw = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"batch_review_defaults must be valid JSON: {e}") from e
+    if not isinstance(raw, list):
+        raise ValueError("batch_review_defaults must be a list")
+    if len(raw) > MAX_BATCH_DEFAULTS:
+        raise ValueError(f"At most {MAX_BATCH_DEFAULTS} batch review defaults allowed")
+    out: list[dict[str, str]] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"batch_review_defaults[{i}] must be an object")
+        agent = str(item.get("agent") or "").strip().lower()
+        model = str(item.get("model") or "").strip()
+        effort_raw = item.get("effort")
+        effort = "" if effort_raw is None else str(effort_raw).strip()
+        if not agent:
+            raise ValueError(f"batch_review_defaults[{i}].agent is required")
+        if agent not in ALLOWED_BATCH_AGENTS:
+            raise ValueError(
+                f"batch_review_defaults[{i}].agent must be one of "
+                f"{sorted(ALLOWED_BATCH_AGENTS)}"
+            )
+        if not model:
+            raise ValueError(f"batch_review_defaults[{i}].model is required")
+        out.append({"agent": agent, "model": model, "effort": effort})
+    return out
+
+
+def parse_batch_review_defaults(raw: str | None) -> list[dict[str, str]]:
+    if raw is None:
+        return [dict(x) for x in DEFAULT_BATCH_REVIEW_DEFAULTS]
+    try:
+        return normalize_batch_review_defaults(raw)
+    except ValueError:
+        return [dict(x) for x in DEFAULT_BATCH_REVIEW_DEFAULTS]
 
 
 def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -22,6 +74,7 @@ def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
     unit = raw.get("run_retention_unit", "weeks") or "weeks"
     sync_minutes = get_pr_sync_interval_minutes(conn)
     prompt = raw.get("consolidator_prompt") or _default_consolidator_prompt() or ""
+    batch_defaults = parse_batch_review_defaults(raw.get("batch_review_defaults"))
     return {
         "run_retention_value": value,
         "run_retention_unit": unit,
@@ -39,6 +92,7 @@ def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
         "consolidator_effort": raw.get("consolidator_effort") or "low",
         "consolidator_prompt": prompt,
         "consolidator_prompt_default": _default_consolidator_prompt() or "",
+        "batch_review_defaults": batch_defaults,
     }
 
 
@@ -52,6 +106,7 @@ def update_app_settings(
     consolidator_model: str | None = None,
     consolidator_effort: str | None = None,
     consolidator_prompt: str | None = None,
+    batch_review_defaults: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if run_retention_value is not None:
         if run_retention_value < 1:
@@ -82,6 +137,9 @@ def update_app_settings(
         set_setting(conn, "consolidator_effort", consolidator_effort.strip())
     if consolidator_prompt is not None:
         set_setting(conn, "consolidator_prompt", consolidator_prompt)
+    if batch_review_defaults is not None:
+        normalized = normalize_batch_review_defaults(batch_review_defaults)
+        set_setting(conn, "batch_review_defaults", json.dumps(normalized))
     conn.commit()
     return get_settings_view(conn)
 

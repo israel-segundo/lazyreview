@@ -280,12 +280,30 @@ class ConsolidationRunner:
             daemon=True,
         )
         self._dispatcher.start()
+        orphaned = self.conn.execute(
+            "SELECT id FROM consolidations WHERE status = 'running' ORDER BY id ASC"
+        ).fetchall()
+        for r in orphaned:
+            cid = int(r["id"])
+            update_consolidation(
+                self.conn,
+                cid,
+                status="failed",
+                finished_at=utcnow(),
+                error_message="Interrupted by daemon restart (orphaned running consolidation)",
+            )
+            logger.warning("marked orphaned running consolidation %s as failed", cid)
         rows = self.conn.execute(
             "SELECT id FROM consolidations WHERE status = 'queued' ORDER BY id ASC"
         ).fetchall()
         for r in rows:
             self._queue.put(int(r["id"]))
-        logger.info("consolidation runner started max_concurrent_jobs=%s", workers)
+        logger.info(
+            "consolidation runner started max_concurrent_jobs=%s queued=%s reclaimed_running=%s",
+            workers,
+            len(rows),
+            len(orphaned),
+        )
 
     def stop(self) -> None:
         self._stop.set()

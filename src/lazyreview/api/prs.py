@@ -36,6 +36,7 @@ def resolve_pr(body: ResolvePrBody, request: Request):
         additions=data.get("additions"),
         deletions=data.get("deletions"),
         changed_files=data.get("changed_files"),
+        head_updated_at=data.get("head_updated_at"),
     )
     return pr
 

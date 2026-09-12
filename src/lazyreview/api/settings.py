@@ -9,6 +9,12 @@ from lazyreview.services.settings import get_settings_view, update_app_settings
 router = APIRouter(tags=["settings"])
 
 
+class BatchReviewDefault(BaseModel):
+    agent: str = Field(..., min_length=1)
+    model: str = Field(..., min_length=1)
+    effort: str | None = ""
+
+
 class SettingsBody(BaseModel):
     run_retention_value: int | None = Field(default=None, ge=1)
     run_retention_unit: str | None = None
@@ -17,6 +23,7 @@ class SettingsBody(BaseModel):
     consolidator_model: str | None = None
     consolidator_effort: str | None = None
     consolidator_prompt: str | None = None
+    batch_review_defaults: list[BatchReviewDefault] | None = None
 
 
 @router.get("/settings")
@@ -27,6 +34,9 @@ def read_settings(request: Request):
 @router.put("/settings")
 def write_settings(body: SettingsBody, request: Request):
     try:
+        batch = None
+        if body.batch_review_defaults is not None:
+            batch = [row.model_dump() for row in body.batch_review_defaults]
         view = update_app_settings(
             request.app.state.db,
             run_retention_value=body.run_retention_value,
@@ -36,6 +46,7 @@ def write_settings(body: SettingsBody, request: Request):
             consolidator_model=body.consolidator_model,
             consolidator_effort=body.consolidator_effort,
             consolidator_prompt=body.consolidator_prompt,
+            batch_review_defaults=batch,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

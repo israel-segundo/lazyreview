@@ -76,7 +76,7 @@ def _pr_and_run(conn, tmp_path: Path, *, status="succeeded", head="abc"):
 def test_schema_v6_consolidations_and_settings(tmp_path: Path):
     conn = _conn(tmp_path)
     ver = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert ver == SCHEMA_VERSION == 7
+    assert ver == SCHEMA_VERSION == 10
     cols = {
         r["name"]
         for r in conn.execute("PRAGMA table_info(consolidations)").fetchall()
@@ -98,6 +98,7 @@ def test_schema_v6_consolidations_and_settings(tmp_path: Path):
 def test_prompt_seed_contains_posted_comment_rules():
     text = _default_consolidator_prompt()
     assert "Title" in text
+    assert "Stance paragraph" in text
     assert "Coverage table" in text or "Agent / Model / Effort" in text
     assert "Total after deduping" in text
     assert "orchestrated agentic" in text.lower()
@@ -108,7 +109,19 @@ def test_prompt_seed_contains_posted_comment_rules():
     assert "gh api" in text
     assert "lazyreview" not in text.lower()
     assert "Already addressed by other reviewers" in text
+    assert "How this was produced" in text
     assert "S1" in text and "S2" in text
+    assert "review pass" in text.lower() or "1st pass" in text
+    assert "gh api user" in text
+    # Tables / closing disclosure belong at the end, not under the title.
+    title_i = text.index("**1. Title**")
+    stance_i = text.index("**2. Stance paragraph**")
+    findings_i = text.index("**3. Findings")
+    closing_i = text.index("**7. Closing disclosure**")
+    coverage_i = text.index("**8. Coverage table")
+    total_i = text.index("**9. Total after deduping")
+    assert title_i < stance_i < findings_i < closing_i < coverage_i < total_i
+    assert "Disclosure blockquote (opening)" not in text
     assert "Duplicate" in text or "existing PR" in text or "already covered" in text.lower()
 
 
@@ -490,6 +503,61 @@ def test_active_consolidation_run_ids(tmp_path: Path):
     update_consolidation(conn, 1, status="succeeded")
     assert run["id"] not in active_consolidation_run_ids(conn, pr["id"])
     assert run["id"] not in in_flight_consolidation_run_ids(conn, pr["id"])
+
+
+def test_pr_internal_status_from_submitted_consolidation(tmp_path: Path):
+    from lazyreview.db import get_pr, list_prs, pr_internal_status
+
+    conn = _conn(tmp_path)
+    pr, run = _pr_and_run(conn, tmp_path, head="deadbeef")
+    info = pr_internal_status(conn, pr)
+    assert info["status"] == "needs_review"
+
+    create_consolidation(
+        conn,
+        pr_id=pr["id"],
+        head_sha="deadbeef",
+        source_run_ids=[run["id"]],
+        agent="claude",
+        model="haiku",
+        effort="low",
+        workdir_path=str(tmp_path / "cs"),
+    )
+    update_consolidation(
+        conn,
+        1,
+        status="succeeded",
+        body="## ok",
+        feedback_provided=1,
+        gh_action="comment",
+    )
+    info = pr_internal_status(conn, get_pr(conn, pr["id"]))
+    assert info["status"] == "feedback_provided"
+    assert info["label"] == "feedback provided"
+
+    update_consolidation(conn, 1, gh_action="approve")
+    assert pr_internal_status(conn, get_pr(conn, pr["id"]))["status"] == "approved"
+
+    update_consolidation(conn, 1, gh_action="request_changes")
+    assert pr_internal_status(conn, get_pr(conn, pr["id"]))["status"] == "changes_requested"
+
+    # New head → back to needs review even though old consolidation was submitted.
+    upsert_pr(
+        conn,
+        owner="o",
+        repo="r",
+        number=1,
+        url="https://example.com/o/r/pull/1",
+        title="t",
+        base_ref="main",
+        head_ref="feat",
+        head_sha="newhead",
+    )
+    refreshed = get_pr(conn, pr["id"])
+    assert refreshed["head_sha"] == "newhead"
+    assert pr_internal_status(conn, refreshed)["status"] == "needs_review"
+    listed = list_prs(conn)
+    assert listed[0]["internal_status"] == "needs_review"
 
 
 def test_render_prompt_placeholders():

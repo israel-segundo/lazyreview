@@ -169,3 +169,66 @@
 .dark .lr-modal-close:hover {
   background: var(--color-slate-800, #1e293b);
 }
+
+/* Global alert/confirm — sits above other modals */
+.lr-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.lr-dialog-panel {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  max-width: 24rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-slate-200, #e2e8f0);
+  background: var(--color-white, #fff);
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  padding: 1.25rem;
+}
+.dark .lr-dialog-panel {
+  border-color: var(--color-slate-700, #334155);
+  background: var(--color-slate-900, #0f172a);
+}
+
+/* Analytics header + summary strip (explicit so layout doesn't depend on a fresh Tailwind scan). */
+.lr-analytics-header {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.lr-analytics-period {
+  flex-shrink: 0;
+  margin-left: auto;
+  text-align: right;
+}
+.lr-analytics-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-slate-200, #e2e8f0);
+  background: var(--color-white, #fff);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+.dark .lr-analytics-summary {
+  border-color: var(--color-slate-700, #334155);
+  background: var(--color-slate-900, #0f172a);
+}
+.lr-analytics-summary-cell {
+  padding: 0.75rem 1rem;
+  border-right: 1px solid var(--color-slate-200, #e2e8f0);
+}
+.lr-analytics-summary-cell:last-child {
+  border-right: none;
+}
+.dark .lr-analytics-summary-cell {
+  border-right-color: var(--color-slate-700, #334155);
+}

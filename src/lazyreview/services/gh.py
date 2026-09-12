@@ -99,7 +99,7 @@ def view_pr(url_or_ref: str) -> dict[str, Any]:
             "--repo",
             f"{ref.owner}/{ref.repo}",
             "--json",
-            "number,title,url,baseRefName,headRefName,headRefOid,state,author,isDraft,additions,deletions,changedFiles",
+            "number,title,url,baseRefName,headRefName,headRefOid,state,author,isDraft,additions,deletions,changedFiles,commits,reviews",
         ]
     )
     data = json.loads(raw)
@@ -110,6 +110,8 @@ def view_pr(url_or_ref: str) -> dict[str, Any]:
         author = author_obj.get("login") or author_obj.get("name") or ""
     elif isinstance(author_obj, str):
         author = author_obj
+    head_sha = data.get("headRefOid") or ""
+    head_updated_at = _head_committed_at(data.get("commits") or [], head_sha)
     return {
         "owner": ref.owner,
         "repo": ref.repo,
@@ -119,13 +121,111 @@ def view_pr(url_or_ref: str) -> dict[str, Any]:
         "author": author,
         "base_ref": data.get("baseRefName") or "",
         "head_ref": data.get("headRefName") or "",
-        "head_sha": data.get("headRefOid") or "",
+        "head_sha": head_sha,
+        "head_updated_at": head_updated_at,
         "state": state,
         "is_draft": bool(data.get("isDraft")),
         "additions": data.get("additions"),
         "deletions": data.get("deletions"),
         "changed_files": data.get("changedFiles"),
+        "reviews": data.get("reviews") or [],
     }
+
+
+_GH_REVIEW_TO_ACTION = {
+    "APPROVED": "approve",
+    "CHANGES_REQUESTED": "request_changes",
+    "COMMENTED": "comment",
+}
+
+
+def gh_user_login() -> str:
+    """Login for the authenticated gh CLI user."""
+    raw = run_gh(["api", "user", "--jq", ".login"])
+    login = (raw or "").strip().strip('"')
+    if not login:
+        raise GhError("Could not resolve authenticated gh user login")
+    return login
+
+
+def _review_commit_oid(item: dict[str, Any]) -> str:
+    """Commit SHA a review was submitted against (gh pr view / REST shapes)."""
+    direct = (item.get("commitOID") or item.get("commit_id") or "").strip()
+    if direct:
+        return direct
+    commit = item.get("commit")
+    if isinstance(commit, dict):
+        return (commit.get("oid") or commit.get("OID") or "").strip()
+    return ""
+
+
+def parse_user_review_for_head(
+    reviews: list[Any],
+    *,
+    head_sha: str,
+    login: str,
+) -> dict[str, Any] | None:
+    """
+    Latest non-dismissed review by ``login`` on ``head_sha``.
+
+    Returns gh_action (approve | request_changes | comment), review id, body, url.
+    """
+    if not login or not head_sha:
+        return None
+    candidates: list[dict[str, Any]] = []
+    for item in reviews:
+        if not isinstance(item, dict):
+            continue
+        author = item.get("author")
+        author_login = ""
+        if isinstance(author, dict):
+            author_login = author.get("login") or ""
+        elif isinstance(author, str):
+            author_login = author
+        if author_login != login:
+            continue
+        state = (item.get("state") or "").upper()
+        if state in ("DISMISSED", "PENDING"):
+            continue
+        commit = _review_commit_oid(item)
+        if commit and commit != head_sha:
+            continue
+        action = _GH_REVIEW_TO_ACTION.get(state)
+        if not action:
+            continue
+        candidates.append(
+            {
+                "gh_action": action,
+                "gh_review_id": str(item.get("id") or ""),
+                "body": item.get("body") or "",
+                "html_url": item.get("url") or item.get("html_url"),
+                "submitted_at": item.get("submittedAt") or item.get("submitted_at") or "",
+            }
+        )
+    if not candidates:
+        return None
+    return max(candidates, key=lambda r: r.get("submitted_at") or "")
+
+
+def _head_committed_at(commits: list[Any], head_sha: str) -> str | None:
+    """Best-effort commit timestamp for the PR head SHA."""
+    if not isinstance(commits, list) or not commits:
+        return None
+    matched: dict[str, Any] | None = None
+    if head_sha:
+        for item in commits:
+            if not isinstance(item, dict):
+                continue
+            if (item.get("oid") or "") == head_sha:
+                matched = item
+                break
+    if matched is None:
+        last = commits[-1]
+        matched = last if isinstance(last, dict) else None
+    if not matched:
+        return None
+    raw = matched.get("committedDate") or matched.get("authoredDate")
+    return str(raw) if raw else None
 
 
 def search_pending_review_prs(*, limit: int = 100) -> list[dict[str, Any]]:

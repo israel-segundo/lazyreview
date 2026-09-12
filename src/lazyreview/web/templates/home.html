@@ -1,27 +1,18 @@
 {% extends "base.html" %}
 {% block title %} — PRs{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="homePage()" x-init="tickRelative()">
-  <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-    <div>
-      <h1 class="text-2xl font-semibold tracking-tight">Pull requests</h1>
-      <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
-        Paste a GitHub PR URL, or refresh PRs where you are a requested reviewer.
-      </p>
-      <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
-        Last fetch:
-        <span class="cursor-help underline decoration-dotted underline-offset-2"
-              :title="lastSyncExact || 'Never synced'"
-              x-text="lastSyncRelative"></span>
-      </p>
-    </div>
-    <div class="flex flex-col items-stretch gap-2 sm:items-end">
-      <button type="button" @click="syncPending()" :disabled="syncing"
-              class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700">
-        <span x-text="syncing ? 'Refreshing…' : 'Refresh pending reviews'"></span>
-      </button>
-      <p class="text-xs text-slate-500 dark:text-slate-400" x-text="syncMsg"></p>
-    </div>
+<div class="space-y-6" x-data="homePage()" x-init="init()">
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight">Pull requests</h1>
+    <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
+      Paste a GitHub PR URL, or refresh PRs where you are a requested reviewer.
+    </p>
+    <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+      Last fetch:
+      <span class="cursor-help underline decoration-dotted underline-offset-2"
+            :title="lastSyncExact || 'Never synced'"
+            x-text="lastSyncRelative"></span>
+    </p>
   </div>
 
   <form id="resolve-form" class="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:flex-row sm:items-end">
@@ -46,7 +37,7 @@
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert(err.detail || 'Failed to resolve PR');
+        await lrAlert(err.detail || 'Failed to resolve PR', { title: 'Resolve failed' });
         return;
       }
       const d = await res.json();
@@ -59,8 +50,21 @@
       <input type="checkbox" x-model="hideDrafts" class="rounded border-slate-300" />
       Hide drafts
     </label>
+    <label class="inline-flex items-center gap-2">
+      <input type="checkbox" x-model="hideApproved" class="rounded border-slate-300" />
+      Hide approved by me
+    </label>
+    <button type="button" @click="syncPending()" :disabled="syncing"
+            title="Refresh pending reviews"
+            aria-label="Refresh pending reviews"
+            class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
+      <svg class="h-4 w-4" :class="syncing ? 'animate-spin' : ''" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+      </svg>
+    </button>
     <span class="text-xs text-slate-500 dark:text-slate-400"
           x-text="visibleCount + ' shown · ' + openPrs.length + ' open'"></span>
+    <span x-show="syncMsg" x-cloak class="text-xs text-slate-500 dark:text-slate-400" x-text="syncMsg"></span>
   </div>
 
   <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
@@ -71,9 +75,8 @@
           <th class="px-4 py-3">Title</th>
           <th class="px-4 py-3">Author</th>
           <th class="px-4 py-3">PR status</th>
-          <th class="px-4 py-3">Action needed</th>
-          <th class="px-4 py-3">Runs</th>
-          <th class="px-4 py-3" title="Status of the most recent agentic review run for this PR">Latest run</th>
+          <th class="px-4 py-3">Review status</th>
+          <th class="px-4 py-3" title="Days since the current head started awaiting review">Age</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
@@ -93,18 +96,16 @@
             </td>
             <td class="px-4 py-3">
               <span class="rounded-full px-2 py-0.5 text-xs"
-                    :class="pr.review_requested ? 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'"
-                    x-text="pr.review_requested ? 'needs review' : '—'"></span>
+                    :class="internalStatusClass(pr)"
+                    x-text="pr.internal_status_label || 'needs review'"></span>
             </td>
-            <td class="px-4 py-3" x-text="pr.run_count"></td>
-            <td class="px-4 py-3">
-              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800"
-                    x-text="pr.latest_status || '—'"></span>
-            </td>
+            <td class="px-4 py-3 whitespace-nowrap text-slate-700 dark:text-slate-300"
+                :title="pr.head_updated_at || ''"
+                x-text="ageLabel(pr)"></td>
           </tr>
         </template>
         <tr x-show="filteredPrs.length === 0">
-          <td colspan="7" class="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+          <td colspan="6" class="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
             No PRs match the current filters.
           </td>
         </tr>
@@ -138,6 +139,7 @@ function homePage() {
   return {
     prs: {{ prs|tojson }},
     hideDrafts: true,
+    hideApproved: true,
     syncing: false,
     syncMsg: '',
     lastSyncIso: {{ (last_sync or '')|tojson }},
@@ -151,13 +153,31 @@ function homePage() {
       });
     },
     get filteredPrs() {
-      return this.openPrs.filter((pr) => {
-        if (this.hideDrafts && !!pr.is_draft) return false;
-        return true;
-      });
+      return this.openPrs
+        .filter((pr) => {
+          if (this.hideDrafts && !!pr.is_draft) return false;
+          if (this.hideApproved && pr.internal_status === 'approved') return false;
+          return true;
+        })
+        .slice()
+        .sort((a, b) => {
+          const aa = a.age_days == null ? -1 : Number(a.age_days);
+          const bb = b.age_days == null ? -1 : Number(b.age_days);
+          if (bb !== aa) return bb - aa; // age desc
+          return Number(a.id) - Number(b.id);
+        });
     },
     get visibleCount() {
       return this.filteredPrs.length;
+    },
+    init() {
+      this.tickRelative();
+    },
+    ageLabel(pr) {
+      if (pr.age_days == null || pr.age_days === '') return '—';
+      const n = Number(pr.age_days);
+      if (Number.isNaN(n)) return '—';
+      return n === 1 ? '1 day' : n + ' days';
     },
     prStatusLabel(pr) {
       if (pr.is_draft) return 'draft';
@@ -170,6 +190,13 @@ function homePage() {
       if (label === 'merged') return 'bg-purple-100 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200';
       if (label === 'closed') return 'bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200';
       return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+    },
+    internalStatusClass(pr) {
+      const s = pr.internal_status || 'needs_review';
+      if (s === 'approved') return 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200';
+      if (s === 'changes_requested') return 'bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200';
+      if (s === 'feedback_provided') return 'bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200';
+      return 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200';
     },
     tickRelative() {
       this.lastSyncRelative = formatRelative(this.lastSyncIso);
@@ -196,4 +223,5 @@ function homePage() {
   }
 }
 </script>
+<style>[x-cloak]{display:none!important}</style>
 {% endblock %}

@@ -1,46 +1,1052 @@
 {% extends "base.html" %}
 {% block title %} — Analytics{% endblock %}
 {% block content %}
-<div class="space-y-6">
-  <div>
-    <h1 class="text-2xl font-semibold tracking-tight">Analytics</h1>
-    <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">Agent × model × effort performance across finished runs.</p>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.1.0/dist/chartjs-plugin-annotation.min.js"></script>
+<div class="space-y-6" x-data="analyticsPage()" x-init="init()">
+  <div class="lr-analytics-header">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">Analytics</h1>
+      <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
+        Successful review runs — usage, cost, finding rates, duration, and diff correlation.
+      </p>
+    </div>
+    <div class="lr-analytics-period">
+      <label class="block text-xs font-medium uppercase tracking-wide text-slate-500" for="period">Period</label>
+      <select id="period" x-model="period" @change="load()"
+              class="mt-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+        <template x-for="p in periods" :key="p.id">
+          <option :value="p.id" x-text="p.label" :selected="p.id === period"></option>
+        </template>
+      </select>
+    </div>
   </div>
-  <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-    <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
-      <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
-        <tr>
-          <th class="px-4 py-3">Agent</th>
-          <th class="px-4 py-3">Model</th>
-          <th class="px-4 py-3">Effort</th>
-          <th class="px-4 py-3">Runs</th>
-          <th class="px-4 py-3">OK / fail</th>
-          <th class="px-4 py-3">Avg duration</th>
-          <th class="px-4 py-3">Avg tokens</th>
-          <th class="px-4 py-3">Avg H/M/L</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-        {% for c in combos %}
-        <tr>
-          <td class="px-4 py-3">{{ c.agent }}</td>
-          <td class="px-4 py-3 font-mono text-xs">{{ c.model }}</td>
-          <td class="px-4 py-3">{{ c.effort or '—' }}</td>
-          <td class="px-4 py-3">{{ c.runs }}</td>
-          <td class="px-4 py-3">{{ c.succeeded }} / {{ c.failed }}</td>
-          <td class="px-4 py-3">{% if c.avg_duration_ms %}{{ (c.avg_duration_ms / 1000)|round(1) }}s{% else %}—{% endif %}</td>
-          <td class="px-4 py-3">{% if c.avg_total_tokens %}{{ c.avg_total_tokens|round(0)|int }}{% else %}—{% endif %}</td>
-          <td class="px-4 py-3 text-xs">
-            {{ (c.avg_sev1 or 0)|round(1) }} /
-            {{ (c.avg_sev2 or 0)|round(1) }} /
-            {{ (c.avg_sev3 or 0)|round(1) }}
-          </td>
-        </tr>
-        {% else %}
-        <tr><td colspan="8" class="px-4 py-8 text-center text-slate-500 dark:text-slate-400">No finished runs yet.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+
+  <p x-show="error" x-cloak class="text-sm text-red-600 dark:text-red-400" x-text="error"></p>
+  <p x-show="loading" x-cloak class="text-sm text-slate-500">Loading…</p>
+
+  <div class="lr-analytics-summary" x-show="!loading || hasData">
+    <div class="lr-analytics-summary-cell">
+      <div class="text-xs uppercase tracking-wide text-slate-500">Succeeded</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="summary.succeeded"></div>
+    </div>
+    <div class="lr-analytics-summary-cell">
+      <div class="text-xs uppercase tracking-wide text-slate-500">Failed</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="summary.failed"></div>
+    </div>
+    <div class="lr-analytics-summary-cell">
+      <div class="text-xs uppercase tracking-wide text-slate-500">Combos</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="summary.combos"></div>
+    </div>
+    <div class="lr-analytics-summary-cell">
+      <div class="text-xs uppercase tracking-wide text-slate-500">Total cost</div>
+      <div class="mt-1 text-2xl font-semibold tabular-nums" x-text="fmtCost(summary.total_cost_usd)"></div>
+    </div>
   </div>
+
+  <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900"
+           x-show="!loading || hasData">
+    <div>
+      <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Review activity</h2>
+      <p class="mt-0.5 text-xs text-slate-500"
+         x-text="(activity.granularity === 'week' ? 'Weekly' : 'Daily') + ' count of agent review runs that finished (succeeded or failed) in this period'"></p>
+    </div>
+    <div class="relative mt-3 h-56">
+      <canvas id="chart-activity"></canvas>
+      <p x-show="!activityTotal" x-cloak
+         class="absolute inset-0 flex items-center justify-center text-sm text-slate-500">No completed review runs in this period.</p>
+    </div>
+  </section>
+
+  <div class="grid gap-4 lg:grid-cols-2" x-show="!loading || hasData">
+    <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Agent / model / effort mix</h2>
+      <p class="mt-0.5 text-xs text-slate-500">Inner ring: agents · Outer ring: model (+ effort) in matching colors</p>
+      <div class="relative mx-auto mt-3 h-96 max-w-lg">
+        <canvas id="chart-usage"></canvas>
+        <p x-show="!summary.succeeded" x-cloak
+           class="absolute inset-0 flex items-center justify-center text-sm text-slate-500">No successful runs in this period.</p>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Spend by agent / model</h2>
+      <p class="mt-0.5 text-xs text-slate-500">Inner ring: agent spend · Outer ring: model (+ effort) · successful runs with known cost</p>
+      <div class="relative mx-auto mt-3 h-96 max-w-lg">
+        <canvas id="chart-spend"></canvas>
+        <p x-show="!summary.costed_runs" x-cloak
+           class="absolute inset-0 flex items-center justify-center text-sm text-slate-500">No costed runs in this period.</p>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Duration distribution</h2>
+      <p class="mt-0.5 text-xs text-slate-500">Frequency of review duration · dashed lines mark each combo’s average</p>
+      <div class="relative mt-3 h-72">
+        <canvas id="chart-duration"></canvas>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Cost distribution</h2>
+      <p class="mt-0.5 text-xs text-slate-500">Frequency of run cost (USD) · dashed lines mark each combo’s average</p>
+      <div class="relative mt-3 h-72">
+        <canvas id="chart-cost"></canvas>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">High (S1) findings distribution</h2>
+      <p class="mt-0.5 text-xs text-slate-500">X = findings count · curve = frequency · markers = combo averages</p>
+      <div class="relative mt-3 h-72">
+        <canvas id="chart-sev1"></canvas>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Medium (S2) findings distribution</h2>
+      <p class="mt-0.5 text-xs text-slate-500">X = findings count · curve = frequency · markers = combo averages</p>
+      <div class="relative mt-3 h-72">
+        <canvas id="chart-sev2"></canvas>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:col-span-2">
+      <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Low (S3) findings distribution</h2>
+      <p class="mt-0.5 text-xs text-slate-500">X = findings count · curve = frequency · markers = combo averages</p>
+      <div class="relative mt-3 h-72">
+        <canvas id="chart-sev3"></canvas>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:col-span-2">
+      <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Diff size × duration × findings</h2>
+      <p class="mt-0.5 text-xs text-slate-500">
+        X = PR diff lines (additions + deletions) · Y = review duration · bubble size = total findings · color = model
+      </p>
+      <div class="relative mt-3 h-[48rem]">
+        <canvas id="chart-bubble"></canvas>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 lg:col-span-2">
+      <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Diff size × cost × findings</h2>
+      <p class="mt-0.5 text-xs text-slate-500">
+        X = PR diff lines · Y = run cost (USD) · bubble size = total findings · color = model · runs without cost omitted
+      </p>
+      <div class="relative mt-3 h-[48rem]">
+        <canvas id="chart-bubble-cost"></canvas>
+      </div>
+    </section>
+  </div>
+
+  <section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <div class="border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+      <h2 class="text-sm font-semibold">Combo table</h2>
+      <p class="text-xs text-slate-500">All finished runs in period (succeeded + failed)</p>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
+        <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
+          <tr>
+            <th class="px-4 py-3">Agent</th>
+            <th class="px-4 py-3">Model</th>
+            <th class="px-4 py-3">Effort</th>
+            <th class="px-4 py-3">Runs</th>
+            <th class="px-4 py-3">OK / fail</th>
+            <th class="px-4 py-3">Avg duration</th>
+            <th class="px-4 py-3">Avg / total cost</th>
+            <th class="px-4 py-3">Avg tokens</th>
+            <th class="px-4 py-3">Avg H/M/L</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+          <template x-for="c in table" :key="c.agent + '|' + c.model + '|' + c.effort">
+            <tr>
+              <td class="px-4 py-3" x-text="c.agent"></td>
+              <td class="px-4 py-3 font-mono text-xs" x-text="c.model"></td>
+              <td class="px-4 py-3" x-text="c.effort || '—'"></td>
+              <td class="px-4 py-3" x-text="c.runs"></td>
+              <td class="px-4 py-3" x-text="(c.succeeded || 0) + ' / ' + (c.failed || 0)"></td>
+              <td class="px-4 py-3" x-text="fmtDuration(c.avg_duration_ms)"></td>
+              <td class="px-4 py-3" x-text="fmtCost(c.avg_cost_usd) + ' / ' + fmtCost(c.total_cost_usd)"></td>
+              <td class="px-4 py-3" x-text="c.avg_total_tokens != null ? Math.round(c.avg_total_tokens) : '—'"></td>
+              <td class="px-4 py-3 text-xs"
+                  x-text="fmtAvg(c.avg_sev1) + ' / ' + fmtAvg(c.avg_sev2) + ' / ' + fmtAvg(c.avg_sev3)"></td>
+            </tr>
+          </template>
+          <tr x-show="!table.length">
+            <td colspan="9" class="px-4 py-8 text-center text-slate-500 dark:text-slate-400">No finished runs in this period.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 </div>
+
+<script>
+const LR_PALETTE = [
+  '#0f766e', '#0369a1', '#b45309', '#be123c', '#4338ca',
+  '#15803d', '#c2410c', '#0e7490', '#a16207', '#1d4ed8',
+];
+
+function analyticsPage() {
+  return {
+    period: 'month',
+    periods: [
+      { id: 'week', label: 'Last week' },
+      { id: 'month', label: 'Last month' },
+      { id: '3months', label: 'Last 3 months' },
+      { id: '6months', label: 'Last 6 months' },
+      { id: 'all', label: 'All' },
+    ],
+    activity: { period: 'month', granularity: 'day', buckets: [] },
+    loading: false,
+    hasData: false,
+    error: '',
+    summary: { succeeded: 0, failed: 0, combos: 0, total_cost_usd: null, costed_runs: 0 },
+    table: [],
+    charts: {},
+    _loadSeq: 0,
+    get activityTotal() {
+      const buckets = (this.activity && this.activity.buckets) || [];
+      return buckets.reduce((s, b) => s + Number(b.total || 0), 0);
+    },
+    async init() {
+      if (typeof Chart !== 'undefined') {
+        // Avoid destroy-during-animation races (null ctx.save / blank charts on reload).
+        Chart.defaults.animation = false;
+        Chart.defaults.animations = false;
+        Chart.defaults.transitions = Chart.defaults.transitions || {};
+        Chart.defaults.transitions.active = { animation: { duration: 0 } };
+        Chart.defaults.transitions.resize = { animation: { duration: 0 } };
+        Chart.defaults.transitions.show = { animations: { colors: false, numbers: { duration: 0 } } };
+        Chart.defaults.transitions.hide = { animations: { colors: false, numbers: { duration: 0 } } };
+        if (typeof ChartDataLabels !== 'undefined') {
+          Chart.register(ChartDataLabels);
+          Chart.defaults.plugins.datalabels = Chart.defaults.plugins.datalabels || {};
+          Chart.defaults.plugins.datalabels.display = false;
+        }
+        // chartjs-plugin-annotation UMD auto-registers; keep an explicit register if present.
+        const annotationPlugin = (typeof globalThis !== 'undefined')
+          ? globalThis['chartjs-plugin-annotation']
+          : null;
+        if (annotationPlugin) {
+          Chart.register(annotationPlugin);
+        }
+      }
+      await this.load();
+    },
+    fmtAvg(v) {
+      if (v == null) return '0.0';
+      return Number(v).toFixed(1);
+    },
+    fmtCost(v) {
+      if (v == null || !Number.isFinite(Number(v))) return '—';
+      const n = Number(v);
+      if (n === 0) return '$0.00';
+      if (n < 0.01) return '$' + n.toFixed(4);
+      return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    },
+    fmtDuration(ms) {
+      if (ms == null) return '—';
+      const s = Math.round(Number(ms) / 1000);
+      if (s < 60) return s + 's';
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return r ? (m + 'm ' + r + 's') : (m + 'm');
+    },
+    isDark() {
+      return document.documentElement.classList.contains('dark');
+    },
+    tickColor() {
+      return this.isDark() ? '#94a3b8' : '#64748b';
+    },
+    gridColor() {
+      return this.isDark() ? 'rgba(148,163,184,0.15)' : 'rgba(148,163,184,0.25)';
+    },
+    destroyCharts() {
+      Object.values(this.charts).forEach(c => {
+        try {
+          if (c && typeof c.stop === 'function') c.stop();
+          if (c && typeof c.destroy === 'function') c.destroy();
+        } catch (e) {}
+      });
+      this.charts = {};
+    },
+    _safeRender(label, fn) {
+      try {
+        fn();
+      } catch (e) {
+        console.error('analytics chart failed:', label, e);
+      }
+    },
+    colorFor(key, idx) {
+      const s = String(key || '');
+      let h = 0;
+      for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+      return LR_PALETTE[(h + (idx || 0)) % LR_PALETTE.length];
+    },
+    agentColor(agent) {
+      const a = String(agent || '').toLowerCase();
+      if (a === 'claude') return '#be123c';
+      if (a === 'cursor') return '#0369a1';
+      if (a === 'agy') return '#15803d';
+      return this.colorFor(agent, 0);
+    },
+    _mixHex(hex, other, t) {
+      const parse = (h) => {
+        const s = String(h || '').replace('#', '');
+        const full = s.length === 3 ? s.split('').map(c => c + c).join('') : s;
+        return [
+          parseInt(full.slice(0, 2), 16),
+          parseInt(full.slice(2, 4), 16),
+          parseInt(full.slice(4, 6), 16),
+        ];
+      };
+      const a = parse(hex);
+      const b = parse(other);
+      const m = (i) => Math.round(a[i] + (b[i] - a[i]) * t);
+      const to = (n) => n.toString(16).padStart(2, '0');
+      return '#' + to(m(0)) + to(m(1)) + to(m(2));
+    },
+    _lighten(hex, t) {
+      return this._mixHex(hex, '#ffffff', Math.min(0.75, Math.max(0, t)));
+    },
+    _darken(hex, t) {
+      return this._mixHex(hex, '#0f172a', Math.min(0.45, Math.max(0, t)));
+    },
+    async load() {
+      const seq = ++this._loadSeq;
+      this.loading = true;
+      this.error = '';
+      try {
+        const res = await fetch('/api/analytics/dashboard?period=' + encodeURIComponent(this.period));
+        const data = await res.json();
+        if (seq !== this._loadSeq) return;
+        if (!res.ok) throw new Error(data.detail || 'Failed to load analytics');
+        this.periods = data.periods || this.periods;
+        this.summary = data.summary || { succeeded: 0, failed: 0, combos: 0, total_cost_usd: null, costed_runs: 0 };
+        this.table = data.table || [];
+        this.activity = data.activity || { period: this.period, granularity: 'day', buckets: [] };
+        this.hasData = true;
+        await this.$nextTick();
+        if (seq !== this._loadSeq) return;
+        this.render(data);
+      } catch (e) {
+        if (seq !== this._loadSeq) return;
+        this.error = String(e.message || e);
+      } finally {
+        if (seq === this._loadSeq) this.loading = false;
+      }
+    },
+    render(data) {
+      this.destroyCharts();
+      this._safeRender('activity', () => this.renderActivity());
+      this._safeRender('usage', () => this.renderUsage(data.usage || { agents: [], models: [] }));
+      this._safeRender('spend', () => this.renderSpend(data.spend || { agents: [], models: [] }));
+      this._safeRender('distributions', () => this.renderDistributions(data.combos || [], data.bubbles || []));
+      this._safeRender('bubble', () => this.renderBubble(data.bubbles || []));
+      this._safeRender('bubble-cost', () => this.renderCostBubble(data.bubbles || []));
+    },
+    renderActivity() {
+      const el = document.getElementById('chart-activity');
+      if (!el || typeof Chart === 'undefined') return;
+      if (this.charts.activity) {
+        try {
+          if (typeof this.charts.activity.stop === 'function') this.charts.activity.stop();
+          this.charts.activity.destroy();
+        } catch (e) {}
+        delete this.charts.activity;
+      }
+      const buckets = (this.activity && this.activity.buckets) || [];
+      if (!buckets.length) return;
+      const labels = buckets.map(b => b.label);
+      const succeeded = buckets.map(b => Number(b.succeeded || 0));
+      const failed = buckets.map(b => Number(b.failed || 0));
+      this.charts.activity = new Chart(el, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Succeeded',
+              data: succeeded,
+              backgroundColor: '#0f766e',
+              borderRadius: 3,
+              stack: 'runs',
+            },
+            {
+              label: 'Failed',
+              data: failed,
+              backgroundColor: '#be123c',
+              borderRadius: 3,
+              stack: 'runs',
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: this.tickColor(), boxWidth: 10, font: { size: 11 } },
+            },
+            tooltip: {
+              callbacks: {
+                title(items) {
+                  const i = items[0] && items[0].dataIndex;
+                  const b = buckets[i];
+                  if (!b) return '';
+                  if (b.end_date && b.end_date !== b.date) return b.date + ' → ' + b.end_date;
+                  return b.date || '';
+                },
+                footer(items) {
+                  const total = items.reduce((s, it) => s + Number(it.raw || 0), 0);
+                  return 'Total: ' + total;
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              stacked: true,
+              ticks: { color: this.tickColor(), maxRotation: 0, autoSkip: true, maxTicksLimit: 14 },
+              grid: { display: false },
+            },
+            y: {
+              stacked: true,
+              beginAtZero: true,
+              ticks: {
+                color: this.tickColor(),
+                precision: 0,
+                stepSize: 1,
+              },
+              grid: { color: this.gridColor() },
+              title: { display: true, text: 'Runs', color: this.tickColor() },
+            },
+          },
+        },
+      });
+    },
+    renderUsage(usage) {
+      const el = document.getElementById('chart-usage');
+      if (!el || typeof Chart === 'undefined') return;
+      const agents = usage.agents || [];
+      const modelsRaw = usage.models || [];
+      if (!agents.length) return;
+
+      // Outer ring must follow the same angular order as the inner agent arcs.
+      const orderedModels = [];
+      agents.forEach((a) => {
+        const kids = modelsRaw
+          .filter(m => m.agent === a.label)
+          .slice()
+          .sort((x, y) => Number(y.count) - Number(x.count) || String(x.label).localeCompare(String(y.label)));
+        kids.forEach((m, i) => {
+          const base = this.agentColor(a.label);
+          // Alternate lighter / slightly darker shades of the parent agent color.
+          const shade = (i % 2 === 0)
+            ? this._lighten(base, 0.35)
+            : this._lighten(base, 0.55);
+          orderedModels.push({ ...m, _color: shade, _short: m.label });
+        });
+      });
+
+      const total = agents.reduce((s, a) => s + Number(a.count || 0), 0) || 1;
+      const border = this.isDark() ? '#0f172a' : '#ffffff';
+      const self = this;
+
+      // Chart.js: dataset 0 = outer ring, dataset 1 = inner ring.
+      this.charts.usage = new Chart(el, {
+        type: 'doughnut',
+        data: {
+          datasets: [
+            {
+              label: 'Model / effort',
+              labels: orderedModels.map(m => m._short),
+              data: orderedModels.map(m => m.count),
+              backgroundColor: orderedModels.map(m => m._color),
+              borderWidth: 2,
+              borderColor: border,
+              weight: 1.25,
+            },
+            {
+              label: 'Agent',
+              labels: agents.map(a => a.label),
+              data: agents.map(a => a.count),
+              backgroundColor: agents.map(a => this.agentColor(a.label)),
+              borderWidth: 2,
+              borderColor: border,
+              weight: 1,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '38%',
+          layout: { padding: 8 },
+          plugins: {
+            legend: { display: false },
+            datalabels: {
+              color: '#ffffff',
+              textAlign: 'center',
+              font: { size: 10, weight: '600' },
+              formatter(value, ctx) {
+                const label = (ctx.dataset.labels || [])[ctx.dataIndex] || '';
+                const n = Number(value) || 0;
+                const pct = (n / total) * 100;
+                const pctText = pct >= 10 ? pct.toFixed(0) + '%' : pct.toFixed(1) + '%';
+                // Hide labels on tiny slices so they don't collide.
+                if (pct < 4) return '';
+                const short = String(label).length > 18
+                  ? String(label).slice(0, 16) + '…'
+                  : label;
+                const runsText = n + ' run' + (n === 1 ? '' : 's');
+                return short + '\n(' + pctText + ' · ' + runsText + ')';
+              },
+              display(ctx) {
+                const value = Number(ctx.dataset.data[ctx.dataIndex] || 0);
+                return (value / total) * 100 >= 4;
+              },
+            },
+            tooltip: {
+              callbacks: {
+                title(items) {
+                  const it = items[0];
+                  if (!it) return '';
+                  if (it.datasetIndex === 1) return agents[it.dataIndex]?.label || '';
+                  const m = orderedModels[it.dataIndex];
+                  return m ? (m.agent + ' · ' + m.label) : '';
+                },
+                label(it) {
+                  const n = it.raw;
+                  const pct = ((n / total) * 100).toFixed(1);
+                  return n + ' runs (' + pct + '%)';
+                },
+              },
+            },
+          },
+        },
+        plugins: [
+          {
+            id: 'lrCenterLabel',
+            afterDraw(chart) {
+              const { ctx, chartArea } = chart;
+              if (!chartArea) return;
+              const cx = (chartArea.left + chartArea.right) / 2;
+              const cy = (chartArea.top + chartArea.bottom) / 2;
+              ctx.save();
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillStyle = self.isDark() ? '#e2e8f0' : '#0f172a';
+              ctx.font = '600 13px ui-sans-serif, system-ui, sans-serif';
+              ctx.fillText('runs', cx, cy - 10);
+              ctx.font = '700 20px ui-sans-serif, system-ui, sans-serif';
+              ctx.fillText(String(total), cx, cy + 12);
+              ctx.restore();
+            },
+          },
+        ],
+      });
+    },
+    renderSpend(spend) {
+      const el = document.getElementById('chart-spend');
+      if (!el || typeof Chart === 'undefined') return;
+      const agents = spend.agents || [];
+      const modelsRaw = spend.models || [];
+      if (!agents.length) return;
+
+      const orderedModels = [];
+      agents.forEach((a) => {
+        const kids = modelsRaw
+          .filter(m => m.agent === a.label)
+          .slice()
+          .sort((x, y) => Number(y.cost) - Number(x.cost) || String(x.label).localeCompare(String(y.label)));
+        kids.forEach((m, i) => {
+          const base = this.agentColor(a.label);
+          const shade = (i % 2 === 0)
+            ? this._lighten(base, 0.35)
+            : this._lighten(base, 0.55);
+          orderedModels.push({ ...m, _color: shade, _short: m.label });
+        });
+      });
+
+      const total = agents.reduce((s, a) => s + Number(a.cost || 0), 0) || 1;
+      const border = this.isDark() ? '#0f172a' : '#ffffff';
+      const self = this;
+      const fmt = (n) => self.fmtCost(n);
+
+      this.charts.spend = new Chart(el, {
+        type: 'doughnut',
+        data: {
+          datasets: [
+            {
+              label: 'Model / effort',
+              labels: orderedModels.map(m => m._short),
+              data: orderedModels.map(m => m.cost),
+              backgroundColor: orderedModels.map(m => m._color),
+              borderWidth: 2,
+              borderColor: border,
+              weight: 1.25,
+            },
+            {
+              label: 'Agent',
+              labels: agents.map(a => a.label),
+              data: agents.map(a => a.cost),
+              backgroundColor: agents.map(a => this.agentColor(a.label)),
+              borderWidth: 2,
+              borderColor: border,
+              weight: 1,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '38%',
+          layout: { padding: 8 },
+          plugins: {
+            legend: { display: false },
+            datalabels: {
+              color: '#ffffff',
+              textAlign: 'center',
+              font: { size: 10, weight: '600' },
+              formatter(value, ctx) {
+                const label = (ctx.dataset.labels || [])[ctx.dataIndex] || '';
+                const n = Number(value) || 0;
+                const pct = (n / total) * 100;
+                const pctText = pct >= 10 ? pct.toFixed(0) + '%' : pct.toFixed(1) + '%';
+                if (pct < 4) return '';
+                const short = String(label).length > 18
+                  ? String(label).slice(0, 16) + '…'
+                  : label;
+                return short + '\n(' + pctText + ' · ' + fmt(n) + ')';
+              },
+              display(ctx) {
+                const value = Number(ctx.dataset.data[ctx.dataIndex] || 0);
+                return (value / total) * 100 >= 4;
+              },
+            },
+            tooltip: {
+              callbacks: {
+                title(items) {
+                  const it = items[0];
+                  if (!it) return '';
+                  if (it.datasetIndex === 1) return agents[it.dataIndex]?.label || '';
+                  const m = orderedModels[it.dataIndex];
+                  return m ? (m.agent + ' · ' + m.label) : '';
+                },
+                label(it) {
+                  const n = Number(it.raw) || 0;
+                  const pct = ((n / total) * 100).toFixed(1);
+                  return fmt(n) + ' (' + pct + '%)';
+                },
+              },
+            },
+          },
+        },
+        plugins: [
+          {
+            id: 'lrSpendCenterLabel',
+            afterDraw(chart) {
+              const { ctx, chartArea } = chart;
+              if (!chartArea) return;
+              const cx = (chartArea.left + chartArea.right) / 2;
+              const cy = (chartArea.top + chartArea.bottom) / 2;
+              ctx.save();
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillStyle = self.isDark() ? '#e2e8f0' : '#0f172a';
+              ctx.font = '600 13px ui-sans-serif, system-ui, sans-serif';
+              ctx.fillText('spend', cx, cy - 10);
+              ctx.font = '700 16px ui-sans-serif, system-ui, sans-serif';
+              ctx.fillText(fmt(total), cx, cy + 12);
+              ctx.restore();
+            },
+          },
+        ],
+      });
+    },
+    _silvermanBandwidth(values) {
+      const n = values.length;
+      if (n < 2) return 1;
+      const mean = values.reduce((a, b) => a + b, 0) / n;
+      const variance = values.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (n - 1);
+      const sd = Math.sqrt(Math.max(variance, 1e-9));
+      return Math.max(0.45, 1.06 * sd * Math.pow(n, -0.2));
+    },
+    _kde(values, xs) {
+      const n = values.length;
+      if (!n) return xs.map(() => 0);
+      const h = this._silvermanBandwidth(values);
+      const norm = 1 / (n * h * Math.sqrt(2 * Math.PI));
+      return xs.map((x) => {
+        let s = 0;
+        for (let i = 0; i < n; i++) {
+          const u = (x - values[i]) / h;
+          s += Math.exp(-0.5 * u * u);
+        }
+        return s * norm * n;
+      });
+    },
+    _distGrid(values, pad) {
+      if (!values.length) return [0, 1, 2];
+      const minV = Math.min(...values);
+      const maxV = Math.max(...values);
+      const span = Math.max(maxV - minV, 1);
+      const lo = Math.max(0, minV - span * (pad || 0.15));
+      const hi = maxV + span * (pad || 0.25);
+      const steps = 48;
+      const xs = [];
+      for (let i = 0; i <= steps; i++) xs.push(lo + (hi - lo) * (i / steps));
+      return xs;
+    },
+    _interpY(xs, ys, x) {
+      if (!xs.length) return 0;
+      if (x <= xs[0]) return ys[0];
+      if (x >= xs[xs.length - 1]) return ys[ys.length - 1];
+      for (let i = 1; i < xs.length; i++) {
+        if (x <= xs[i]) {
+          const t = (x - xs[i - 1]) / (xs[i] - xs[i - 1] || 1);
+          return ys[i - 1] + t * (ys[i] - ys[i - 1]);
+        }
+      }
+      return ys[ys.length - 1];
+    },
+    renderDistributions(combos, runs) {
+      this._renderDistChart({
+        id: 'chart-sev1',
+        values: runs.map(r => Number(r.findings_sev1 || 0)),
+        means: combos.map(c => ({
+          label: c.label,
+          agent: c.agent,
+          value: Number(c.avg_sev1 || 0),
+          runs: c.runs,
+        })),
+        xTitle: 'Number of High (S1) findings',
+        curveColor: '#be123c',
+      });
+      this._renderDistChart({
+        id: 'chart-sev2',
+        values: runs.map(r => Number(r.findings_sev2 || 0)),
+        means: combos.map(c => ({
+          label: c.label,
+          agent: c.agent,
+          value: Number(c.avg_sev2 || 0),
+          runs: c.runs,
+        })),
+        xTitle: 'Number of Medium (S2) findings',
+        curveColor: '#b45309',
+      });
+      this._renderDistChart({
+        id: 'chart-sev3',
+        values: runs.map(r => Number(r.findings_sev3 || 0)),
+        means: combos.map(c => ({
+          label: c.label,
+          agent: c.agent,
+          value: Number(c.avg_sev3 || 0),
+          runs: c.runs,
+        })),
+        xTitle: 'Number of Low (S3) findings',
+        curveColor: '#0369a1',
+      });
+      this._renderDistChart({
+        id: 'chart-duration',
+        values: runs.map(r => Number(r.duration_ms || 0) / 60000),
+        means: combos.map(c => ({
+          label: c.label,
+          agent: c.agent,
+          value: Number(c.avg_duration_ms || 0) / 60000,
+          runs: c.runs,
+        })),
+        xTitle: 'Duration (minutes)',
+        curveColor: '#0f766e',
+        valueDecimals: 1,
+        valueUnit: ' min',
+      });
+      this._renderDistChart({
+        id: 'chart-cost',
+        values: runs
+          .map(r => r.cost_usd)
+          .filter(v => v != null && Number.isFinite(Number(v)))
+          .map(v => Number(v)),
+        means: combos
+          .filter(c => c.avg_cost_usd != null && Number.isFinite(Number(c.avg_cost_usd)))
+          .map(c => ({
+            label: c.label,
+            agent: c.agent,
+            value: Number(c.avg_cost_usd),
+            runs: c.runs,
+          })),
+        xTitle: 'Cost (USD)',
+        curveColor: '#4338ca',
+        valueDecimals: 2,
+        valueUnit: '',
+        valuePrefix: '$',
+      });
+    },
+    _renderDistChart({ id, values, means, xTitle, curveColor, valueDecimals, valueUnit, valuePrefix }) {
+      const el = document.getElementById(id);
+      if (!el || typeof Chart === 'undefined') return;
+      const clean = (values || []).filter(v => Number.isFinite(v));
+      const xs = this._distGrid(clean, 0.2);
+      const ys = this._kde(clean, xs);
+      const maxY = Math.max(0.001, ...ys);
+      const decimals = valueDecimals == null ? 2 : valueDecimals;
+      const unit = valueUnit || '';
+      const prefix = valuePrefix || '';
+      const fmtVal = (n) => prefix + Number(n).toFixed(decimals) + unit;
+
+      const annotations = {};
+      const scatter = [];
+      (means || []).forEach((m, i) => {
+        const x = Number(m.value);
+        if (!Number.isFinite(x)) return;
+        const color = this.agentColor(m.agent);
+        const y = Math.max(this._interpY(xs, ys, x), maxY * 0.08);
+        annotations['mean_' + i] = {
+          type: 'line',
+          xMin: x,
+          xMax: x,
+          borderColor: color,
+          borderWidth: 2,
+          borderDash: [6, 4],
+          label: {
+            display: true,
+            content: m.label + '  μ=' + fmtVal(x),
+            position: i % 2 === 0 ? 'start' : 'end',
+            backgroundColor: color,
+            color: '#fff',
+            font: { size: 10, weight: '600' },
+            padding: 4,
+            borderRadius: 4,
+          },
+        };
+        scatter.push({ x, y, _m: m });
+      });
+
+      this.charts[id] = new Chart(el, {
+        data: {
+          datasets: [
+            {
+              type: 'line',
+              label: 'Frequency',
+              data: xs.map((x, i) => ({ x, y: ys[i] })),
+              borderColor: curveColor,
+              backgroundColor: curveColor + '33',
+              fill: true,
+              tension: 0.35,
+              pointRadius: 0,
+              borderWidth: 2,
+              order: 2,
+            },
+            {
+              type: 'scatter',
+              label: 'Combo average',
+              data: scatter,
+              backgroundColor: scatter.map((p) => this.agentColor(p._m.agent)),
+              borderColor: this.isDark() ? '#0f172a' : '#ffffff',
+              borderWidth: 2,
+              pointRadius: 5,
+              pointHoverRadius: 7,
+              order: 1,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          parsing: false,
+          plugins: {
+            legend: { display: false },
+            annotation: { annotations },
+            tooltip: {
+              callbacks: {
+                title(items) {
+                  const it = items[0];
+                  if (!it) return '';
+                  if (it.datasetIndex === 1) {
+                    const m = it.raw && it.raw._m;
+                    return m ? m.label : 'Combo average';
+                  }
+                  return 'Distribution';
+                },
+                label(it) {
+                  if (it.datasetIndex === 1) {
+                    const m = it.raw && it.raw._m;
+                    if (!m) return '';
+                    return 'Average: ' + fmtVal(m.value)
+                      + ' · ' + m.runs + ' run' + (m.runs === 1 ? '' : 's');
+                  }
+                  return 'x=' + fmtVal(it.parsed.x)
+                    + ' · frequency≈' + Number(it.parsed.y).toFixed(2);
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              type: 'linear',
+              title: { display: true, text: xTitle, color: this.tickColor() },
+              ticks: { color: this.tickColor() },
+              grid: { color: this.gridColor() },
+            },
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: 'Frequency', color: this.tickColor() },
+              ticks: { color: this.tickColor() },
+              grid: { color: this.gridColor() },
+            },
+          },
+        },
+      });
+    },
+    renderBubble(points) {
+      const el = document.getElementById('chart-bubble');
+      if (!el || typeof Chart === 'undefined') return;
+      const byModel = {};
+      points.forEach(p => {
+        const m = p.model || 'unknown';
+        if (!byModel[m]) byModel[m] = [];
+        byModel[m].push(p);
+      });
+      const maxFindings = Math.max(1, ...points.map(p => p.findings || 0));
+      const datasets = Object.keys(byModel).sort().map((model, idx) => ({
+        label: model,
+        data: byModel[model].map(p => ({
+          x: p.diff_size,
+          y: (p.duration_ms || 0) / 60000,
+          r: 4 + 18 * ((p.findings || 0) / maxFindings),
+          _p: p,
+        })),
+        backgroundColor: this.colorFor(model, idx) + 'cc',
+        borderColor: this.colorFor(model, idx),
+        borderWidth: 1,
+      }));
+      this.charts.bubble = new Chart(el, {
+        type: 'bubble',
+        data: { datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: this.tickColor(), boxWidth: 10, font: { size: 11 } },
+            },
+            tooltip: {
+              callbacks: {
+                label(ctx) {
+                  const p = ctx.raw && ctx.raw._p;
+                  if (!p) return '';
+                  const mins = ((p.duration_ms || 0) / 60000).toFixed(1);
+                  const cost = (p.cost_usd == null || !Number.isFinite(Number(p.cost_usd)))
+                    ? '—'
+                    : ('$' + Number(p.cost_usd).toFixed(Number(p.cost_usd) < 0.01 ? 4 : 2));
+                  return [
+                    '#' + p.id + ' · ' + p.agent + ' / ' + p.model + (p.effort ? (' / ' + p.effort) : ''),
+                    'Diff: ' + p.diff_size + ' lines · ' + (p.changed_files || 0) + ' files',
+                    'Duration: ' + mins + ' min · Cost: ' + cost,
+                    'Findings: H' + p.findings_sev1 + ' M' + p.findings_sev2 + ' L' + p.findings_sev3,
+                  ];
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              title: { display: true, text: 'Diff size (additions + deletions)', color: this.tickColor() },
+              ticks: { color: this.tickColor() },
+              grid: { color: this.gridColor() },
+            },
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: 'Duration (minutes)', color: this.tickColor() },
+              ticks: { color: this.tickColor() },
+              grid: { color: this.gridColor() },
+            },
+          },
+        },
+      });
+    },
+    renderCostBubble(points) {
+      const el = document.getElementById('chart-bubble-cost');
+      if (!el || typeof Chart === 'undefined') return;
+      const priced = (points || []).filter(p => p.cost_usd != null && Number.isFinite(Number(p.cost_usd)));
+      if (!priced.length) return;
+      const byModel = {};
+      priced.forEach(p => {
+        const m = p.model || 'unknown';
+        if (!byModel[m]) byModel[m] = [];
+        byModel[m].push(p);
+      });
+      const maxFindings = Math.max(1, ...priced.map(p => p.findings || 0));
+      const datasets = Object.keys(byModel).sort().map((model, idx) => ({
+        label: model,
+        data: byModel[model].map(p => ({
+          x: p.diff_size,
+          y: Number(p.cost_usd),
+          r: 4 + 18 * ((p.findings || 0) / maxFindings),
+          _p: p,
+        })),
+        backgroundColor: this.colorFor(model, idx) + 'cc',
+        borderColor: this.colorFor(model, idx),
+        borderWidth: 1,
+      }));
+      this.charts.bubbleCost = new Chart(el, {
+        type: 'bubble',
+        data: { datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: this.tickColor(), boxWidth: 10, font: { size: 11 } },
+            },
+            tooltip: {
+              callbacks: {
+                label(ctx) {
+                  const p = ctx.raw && ctx.raw._p;
+                  if (!p) return '';
+                  const mins = ((p.duration_ms || 0) / 60000).toFixed(1);
+                  const cost = Number(p.cost_usd);
+                  const costText = '$' + cost.toFixed(cost < 0.01 ? 4 : 2);
+                  return [
+                    '#' + p.id + ' · ' + p.agent + ' / ' + p.model + (p.effort ? (' / ' + p.effort) : ''),
+                    'Diff: ' + p.diff_size + ' lines · ' + (p.changed_files || 0) + ' files',
+                    'Cost: ' + costText + ' · Duration: ' + mins + ' min',
+                    'Findings: H' + p.findings_sev1 + ' M' + p.findings_sev2 + ' L' + p.findings_sev3,
+                  ];
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              title: { display: true, text: 'Diff size (additions + deletions)', color: this.tickColor() },
+              ticks: { color: this.tickColor() },
+              grid: { color: this.gridColor() },
+            },
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: 'Cost (USD)', color: this.tickColor() },
+              ticks: {
+                color: this.tickColor(),
+                callback(v) { return '$' + Number(v).toFixed(2); },
+              },
+              grid: { color: this.gridColor() },
+            },
+          },
+        },
+      });
+    },
+  }
+}
+</script>
+<style>[x-cloak]{display:none!important}</style>
 {% endblock %}

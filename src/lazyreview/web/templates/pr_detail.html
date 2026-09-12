@@ -47,9 +47,12 @@
             {% elif pr_label == 'open' %}bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200
             {% elif pr_label == 'merged' %}bg-purple-100 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200
             {% else %}bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200{% endif %}">{{ pr_label }}</span>
-          {% if pr.review_requested %}
-          <span class="rounded-full bg-amber-100 px-2.5 py-1 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">needs review</span>
-          {% endif %}
+          {% set istatus = pr.internal_status or 'needs_review' %}
+          <span class="rounded-full px-2.5 py-1
+            {% if istatus == 'approved' %}bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200
+            {% elif istatus == 'changes_requested' %}bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200
+            {% elif istatus == 'feedback_provided' %}bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200
+            {% else %}bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200{% endif %}">{{ pr.internal_status_label or 'needs review' }}</span>
         </div>
       </div>
       <dl class="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-5">
@@ -148,10 +151,10 @@
           {% for run in runs %}
           <tr>
             <td class="px-3 py-3">
-              {% if run.selectable or run.consolidating or (run.id in consolidating_ids) %}
+              {% if run.selectable or run.consolidating or (run.id in consolidating_ids) or (run.id in locked_run_ids) %}
               <template x-if="isConsolidating({{ run.id }})">
                 <span class="inline-flex items-center gap-1 text-xs text-violet-700 dark:text-violet-300"
-                      title="Consolidating">
+                      title="Consolidation queued or running">
                   <svg class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
@@ -209,7 +212,7 @@
               {% if run.status in ['queued', 'running'] %}
               <button type="button"
                       @click="cancelRun({{ run.id }})"
-                      :disabled="cancelling[{{ run.id }}] || deleting[{{ run.id }}]"
+                      :disabled="cancelling[{{ run.id }}] || deleting[{{ run.id }}] || rerunning[{{ run.id }}]"
                       title="Cancel run"
                       aria-label="Cancel run #{{ run.id }}"
                       class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-amber-50 hover:text-amber-700 disabled:opacity-40 dark:hover:bg-amber-950/40 dark:hover:text-amber-300">
@@ -217,10 +220,21 @@
                   <path fill-rule="evenodd" d="M4.5 7.5a3 3 0 0 1 3-3h9a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3h-9a3 3 0 0 1-3-3v-9Z" clip-rule="evenodd" />
                 </svg>
               </button>
+              {% elif run.status in ['succeeded', 'failed', 'cancelled'] and run.id not in locked_run_ids %}
+              <button type="button"
+                      @click="rerunRun({{ run.id }})"
+                      :disabled="cancelling[{{ run.id }}] || deleting[{{ run.id }}] || rerunning[{{ run.id }}] || isLocked({{ run.id }})"
+                      title="Re-run with the same agent, model, and effort"
+                      aria-label="Re-run #{{ run.id }}"
+                      class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-40 dark:hover:bg-blue-950/40 dark:hover:text-blue-300">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992V4.512M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+                </svg>
+              </button>
               {% endif %}
               <button type="button"
                       @click="deleteRun({{ run.id }})"
-                      :disabled="cancelling[{{ run.id }}] || deleting[{{ run.id }}]"
+                      :disabled="cancelling[{{ run.id }}] || deleting[{{ run.id }}] || rerunning[{{ run.id }}]"
                       title="Delete run"
                       aria-label="Delete run #{{ run.id }}"
                       class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 dark:hover:bg-red-950/40 dark:hover:text-red-300">
@@ -255,7 +269,7 @@
             <th class="px-3 py-3">Tokens</th>
             <th class="px-3 py-3">Cost</th>
             <th class="px-3 py-3">Duration</th>
-            <th class="px-3 py-3">Feedback</th>
+            <th class="px-3 py-3">Feedback submitted</th>
             <th class="px-3 py-3 text-right">Actions</th>
           </tr>
         </thead>
@@ -267,7 +281,7 @@
                 <span class="inline-flex items-center gap-1.5">
                   <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
                         :class="statusChipClass(c.status)"
-                        x-text="c.status"></span>
+                        x-text="consolidationStatusLabel(c.status)"></span>
                   <svg x-show="c.status === 'queued' || c.status === 'running'" x-cloak
                        class="h-3.5 w-3.5 animate-spin text-violet-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -305,12 +319,10 @@
               <td class="px-3 py-3" x-text="formatCost(c.cost_usd)"></td>
               <td class="px-3 py-3" x-text="formatDuration(c.duration_ms)"></td>
               <td class="px-3 py-3">
-                <span x-show="c.feedback_provided" title="Feedback provided"
-                      class="inline-flex text-emerald-600 dark:text-emerald-400">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4" aria-label="Feedback provided">
-                    <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd" />
-                  </svg>
-                </span>
+                <span x-show="c.feedback_provided"
+                      class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
+                      :class="feedbackActionClass(c.gh_action)"
+                      x-text="feedbackActionLabel(c.gh_action)"></span>
                 <span x-show="!c.feedback_provided" class="text-slate-400">—</span>
               </td>
               <td class="px-3 py-3 text-right">
@@ -318,6 +330,13 @@
                   <button type="button" @click="openConsolLogs(c)"
                           class="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
                     Logs
+                  </button>
+                  <button type="button"
+                          x-show="c.status === 'succeeded'"
+                          x-cloak
+                          @click="openView(c)"
+                          class="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
+                    View
                   </button>
                   <button type="button"
                           x-show="c.status === 'succeeded' || c.status === 'failed' || c.status === 'cancelled'"
@@ -367,14 +386,22 @@
   </section>
   {% endif %}
 
-  <!-- Submit consolidation modal -->
+  <!-- Submit / view consolidation modal -->
   <div x-show="submitOpen" x-cloak class="lr-modal-backdrop" role="dialog" aria-modal="true">
     <div class="absolute inset-0 bg-slate-900/50" @click="closeSubmit()"></div>
     <div class="lr-modal-panel lr-modal-panel--wide" @click.stop>
       <div class="lr-modal-header">
         <div>
-          <h2 class="text-lg font-semibold">Submit feedback</h2>
-          <p class="mt-1 text-sm text-slate-500">Post consolidation <span x-text="submitTarget && ('#' + submitTarget.id)"></span> to GitHub.</p>
+          <h2 class="text-lg font-semibold" x-text="submitReadOnly ? 'Consolidation' : 'Submit feedback'"></h2>
+          <p class="mt-1 text-sm text-slate-500">
+            <span x-show="!submitReadOnly">Post consolidation <span x-text="submitTarget && ('#' + submitTarget.id)"></span> to GitHub.</span>
+            <span x-show="submitReadOnly">
+              Consolidation <span x-text="submitTarget && ('#' + submitTarget.id)"></span>
+              <template x-if="submitTarget && submitTarget.feedback_provided">
+                <span> · submitted as <span x-text="feedbackActionLabel(submitTarget.gh_action)"></span></span>
+              </template>
+            </span>
+          </p>
         </div>
         <button type="button" class="lr-modal-close" @click="closeSubmit()" aria-label="Close">Close</button>
       </div>
@@ -389,6 +416,11 @@
                 :class="submitView === 'source' && 'is-active'"
                 :aria-selected="submitView === 'source'"
                 @click.prevent="setSubmitView('source')">Source</button>
+        <button type="button" role="tab"
+                class="lr-modal-tab"
+                :class="submitView === 'findings' && 'is-active'"
+                :aria-selected="submitView === 'findings'"
+                @click.prevent="setSubmitView('findings')">Findings</button>
       </div>
       <div class="mt-3 lr-modal-scroll rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950">
         <div class="consol-md px-4 py-3 text-sm text-slate-800 dark:text-slate-200"
@@ -398,12 +430,47 @@
              style="white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;margin:0"
              x-show="submitView === 'source'"
              x-text="submitTarget && submitTarget.body"></pre>
+        <div class="px-4 py-3 text-sm text-slate-800 dark:text-slate-200"
+             x-show="submitView === 'findings'">
+          <template x-if="!(submitTarget && submitTarget.findings && submitTarget.findings.length)">
+            <p class="text-slate-500">No structured findings stored for this consolidation.</p>
+          </template>
+          <ul class="space-y-3" x-show="submitTarget && submitTarget.findings && submitTarget.findings.length">
+            <template x-for="(f, idx) in (submitTarget && submitTarget.findings) || []" :key="(f.external_id || f.id || idx)">
+              <li class="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium dark:bg-slate-800"
+                        x-text="f.severity || f.Severity || '—'"></span>
+                  <span class="font-medium" x-text="f.title || f.Title || ('Finding ' + (idx + 1))"></span>
+                </div>
+                <p class="mt-1 text-slate-600 dark:text-slate-400 whitespace-pre-wrap"
+                   x-text="f.body || f.Body || f.summary || ''"></p>
+                <p class="mt-1 font-mono text-xs text-slate-500"
+                   x-show="f.path || f.file"
+                   x-text="(f.path || f.file || '') + (f.line != null ? (':' + f.line) : '')"></p>
+              </li>
+            </template>
+          </ul>
+        </div>
       </div>
-      <div class="mt-4 flex shrink-0 flex-wrap gap-2">
-        <button type="button" @click="postConsolidation('comment')" class="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700">Post comment</button>
-        <button type="button" @click="postConsolidation('approve')" class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-600">Approve</button>
-        <button type="button" @click="postConsolidation('request_changes')" class="rounded-lg border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50">Request changes</button>
+      <div class="mt-4 flex shrink-0 flex-wrap items-end gap-3" x-show="!submitReadOnly">
+        <div>
+          <label class="block text-xs font-medium uppercase tracking-wide text-slate-500" for="submit-verdict">Verdict</label>
+          <select id="submit-verdict" x-model="submitVerdict"
+                  class="mt-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+            <option value="comment">Post as comment</option>
+            <option value="approve">Approve</option>
+            <option value="request_changes">Request changes</option>
+          </select>
+        </div>
+        <button type="button" @click="postConsolidation()"
+                class="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700">
+          Submit feedback
+        </button>
         <button type="button" @click="closeSubmit()" class="rounded-lg px-3 py-1.5 text-sm text-slate-500">Cancel</button>
+      </div>
+      <div class="mt-4 flex shrink-0 flex-wrap gap-2" x-show="submitReadOnly">
+        <button type="button" @click="closeSubmit()" class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-600">Close</button>
       </div>
     </div>
   </div>
@@ -419,34 +486,6 @@
       <p class="mt-1 shrink-0 truncate text-xs text-slate-500" x-text="logsStatus"></p>
       <pre class="mt-3 lr-modal-scroll rounded-lg bg-slate-50 p-3 font-mono text-xs dark:bg-slate-950"
            x-text="logsText"></pre>
-    </div>
-  </div>
-
-  <!-- Regenerate confirmation -->
-  <div x-show="regenConfirmOpen" x-cloak class="lr-modal-backdrop" role="dialog" aria-modal="true"
-       aria-labelledby="regen-confirm-title"
-       @keydown.escape.window="regenConfirmOpen && closeRegenConfirm()">
-    <div class="absolute inset-0 bg-slate-900/50" @click="closeRegenConfirm()"></div>
-    <div class="relative z-10 w-full max-w-sm rounded-xl border border-slate-200 bg-white p-5 shadow-xl dark:border-slate-700 dark:bg-slate-900"
-         @click.stop>
-      <h2 id="regen-confirm-title" class="text-lg font-semibold">Regenerate consolidation?</h2>
-      <p class="mt-2 text-sm text-slate-600 dark:text-slate-300">
-        Re-run consolidation
-        <span class="font-mono" x-text="regenConfirmId != null ? ('#' + regenConfirmId) : ''"></span>
-        with the current consolidator agent, model, effort, and prompt from Settings.
-        The previous body will be replaced.
-      </p>
-      <div class="mt-5 flex flex-wrap justify-end gap-2">
-        <button type="button" @click="closeRegenConfirm()"
-                class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
-          Cancel
-        </button>
-        <button type="button" @click="confirmRegenerate()"
-                :disabled="regenConfirmId != null && regenerating[regenConfirmId]"
-                class="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-          Regenerate
-        </button>
-      </div>
     </div>
   </div>
 
@@ -613,16 +652,17 @@ function reviewForm() {
     selected: [],
     selectableIds: {{ selectable_ids | tojson }},
     consolidatingIds: {{ consolidating_ids | tojson }},
+    lockedIds: {{ locked_run_ids | tojson }},
     consolidations: {{ consolidations | tojson }},
     consolidatingBusy: false,
     pollActive: false,
     _pollTimer: null,
     regenerating: {},
-    regenConfirmOpen: false,
-    regenConfirmId: null,
     submitOpen: false,
     submitTarget: null,
+    submitReadOnly: false,
     submitView: 'preview',
+    submitVerdict: 'comment',
     logsOpen: false,
     logsTarget: null,
     logsText: '',
@@ -635,10 +675,12 @@ function reviewForm() {
     batchComboHighlight: -1,
     batchComboStyle: {},
     batchConsolidateWhenDone: true,
+    batchDefaults: [],
     _batchKeySeq: 1,
     toast: '',
     cancelling: {},
     deleting: {},
+    rerunning: {},
     async init() {
       const toast = sessionStorage.getItem('lazyreview-toast');
       if (toast) {
@@ -646,6 +688,9 @@ function reviewForm() {
         this.toast = toast;
         setTimeout(() => { this.toast = ''; }, 4000);
       }
+      // Derive lock/badge sets from consolidation statuses so dormant never
+      // looks like an in-flight consolidating run.
+      this.syncLocksFromConsolidations(this.consolidations);
       const res = await fetch('/api/agents');
       const data = await res.json();
       this.agents = (data.agents || []).slice().sort((a, b) =>
@@ -653,11 +698,31 @@ function reviewForm() {
       );
       this.maybeStartPoll();
     },
+    _sourceRunIds(c) {
+      return (c && c.source_run_ids ? c.source_run_ids : []).map(Number).filter(n => !Number.isNaN(n));
+    },
+    syncLocksFromConsolidations(rows) {
+      const list = rows || [];
+      const pick = (statuses) => {
+        const out = [];
+        for (const c of list) {
+          if (!statuses.includes(c.status)) continue;
+          for (const id of this._sourceRunIds(c)) out.push(id);
+        }
+        return [...new Set(out)];
+      };
+      // Badge: only queued/running consolidations — never dormant.
+      this.consolidatingIds = pick(['queued', 'running']);
+      this.lockedIds = pick(['dormant', 'queued', 'running']);
+    },
     isConsolidating(id) {
-      return this.consolidatingIds.includes(id);
+      return this.consolidatingIds.includes(Number(id));
+    },
+    isLocked(id) {
+      return this.lockedIds.includes(Number(id));
     },
     canSelect(id) {
-      return this.selectableIds.includes(id) && !this.isConsolidating(id);
+      return this.selectableIds.includes(Number(id)) && !this.isLocked(id);
     },
     agentKey(name) {
       const key = String(name || '').toLowerCase();
@@ -679,8 +744,23 @@ function reviewForm() {
       if (status === 'dormant') return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
       return 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200';
     },
+    consolidationStatusLabel(status) {
+      if (status === 'dormant') return 'waiting';
+      return status || '—';
+    },
     consolidationIsActive(status) {
       return status === 'dormant' || status === 'queued' || status === 'running';
+    },
+    feedbackActionLabel(action) {
+      if (action === 'approve') return 'Approved';
+      if (action === 'request_changes') return 'Changes requested';
+      if (action === 'comment') return 'Comment';
+      return action ? String(action) : 'Submitted';
+    },
+    feedbackActionClass(action) {
+      if (action === 'approve') return 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200';
+      if (action === 'request_changes') return 'bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200';
+      return 'bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200';
     },
     formatCost(v) {
       if (v == null || v === '') return '—';
@@ -715,13 +795,9 @@ function reviewForm() {
           c.status === 'queued' || c.status === 'running'
         );
         this.consolidations = data.consolidations || [];
-        this.consolidatingIds = data.consolidating_run_ids
-          || (data.consolidations || [])
-              .filter(c => c.status === 'queued' || c.status === 'running')
-              .flatMap(c => c.source_run_ids || []);
-        const lockedIds = data.active_run_ids || this.consolidatingIds;
+        this.syncLocksFromConsolidations(this.consolidations);
         // Keep select-all / checkboxes in sync with locked consolidations.
-        this.selectableIds = this.selectableIds.filter(id => !lockedIds.includes(id));
+        this.selectableIds = this.selectableIds.filter(id => !this.lockedIds.includes(id));
         this.selected = this.selected.filter(id => this.selectableIds.includes(id));
         const stillActive = this.consolidations.some(c => this.consolidationIsActive(c.status));
         const stillRunning = this.consolidations.some(c =>
@@ -747,12 +823,61 @@ function reviewForm() {
     openBatchModal() {
       this.batchMessage = '';
       this.batchCloseCombo();
+      this._loadBatchDefaultsAndOpen();
+    },
+    async _loadBatchDefaultsAndOpen() {
+      let defaults = this.batchDefaults || [];
+      try {
+        const res = await fetch('/api/settings');
+        if (res.ok) {
+          const data = await res.json();
+          defaults = data.batch_review_defaults || [];
+          this.batchDefaults = defaults;
+        }
+      } catch (e) {
+        /* keep cached defaults */
+      }
+      this.batchRows = this._rowsFromDefaults(defaults);
       if (!this.batchRows.length) {
         this.batchRows = [this._newBatchRow()];
-      } else {
-        this.batchRows.forEach((_, i) => this.batchSyncQueries(i));
       }
       this.batchOpen = true;
+    },
+    _resolveModelId(models, wanted) {
+      if (!wanted) return models[0] ? models[0].id : '';
+      if (models.find(m => m.id === wanted)) return wanted;
+      const q = String(wanted).toLowerCase();
+      const fuzzy = models.find(m =>
+        String(m.id).toLowerCase().includes(q) || String(m.label || '').toLowerCase().includes(q)
+      );
+      return fuzzy ? fuzzy.id : (models[0] ? models[0].id : wanted);
+    },
+    _rowsFromDefaults(list) {
+      return (list || []).map(cfg => this._rowFromConfig(cfg));
+    },
+    _rowFromConfig(cfg) {
+      const first = this.agents.find(a => a.available) || this.agents[0];
+      const row = {
+        key: this._batchKeySeq++,
+        agent: (cfg && cfg.agent) || (first ? first.name : ''),
+        model: (cfg && cfg.model) || '',
+        effort: (cfg && cfg.effort) || null,
+        models: [],
+        efforts: [],
+        agentQuery: '',
+        modelQuery: '',
+        effortQuery: '',
+      };
+      this._batchApplyAgent(row, false);
+      if (cfg && cfg.model) {
+        row.model = this._resolveModelId(row.models, cfg.model);
+        this._batchApplyModel(row, false);
+      }
+      if (cfg && cfg.effort && row.efforts.includes(cfg.effort)) {
+        row.effort = cfg.effort;
+      }
+      this.batchSyncQueriesForRow(row);
+      return row;
     },
     closeBatchModal() {
       if (this.batchBusy) return;
@@ -1019,12 +1144,37 @@ function reviewForm() {
         if (!res.ok) throw new Error(data.detail || 'Cancel failed');
         window.location.reload();
       } catch (e) {
-        alert(String(e.message || e));
+        await lrAlert(String(e.message || e), { title: 'Cancel failed' });
         this.cancelling = { ...this.cancelling, [id]: false };
       }
     },
+    async rerunRun(id) {
+      const ok = await lrConfirm({
+        title: 'Re-run review?',
+        message: 'Re-run #' + id + ' with the same agent/model/effort? Prior findings for this run will be replaced.',
+        confirmLabel: 'Re-run',
+      });
+      if (!ok) return;
+      this.rerunning = { ...this.rerunning, [id]: true };
+      try {
+        const res = await fetch('/api/runs/' + id + '/rerun', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Re-run failed');
+        sessionStorage.setItem('lazyreview-toast', 'Run #' + id + ' re-queued');
+        window.location.reload();
+      } catch (e) {
+        await lrAlert(String(e.message || e), { title: 'Re-run failed' });
+        this.rerunning = { ...this.rerunning, [id]: false };
+      }
+    },
     async deleteRun(id) {
-      if (!confirm('Delete run #' + id + ' from the database and local disk?')) return;
+      const ok = await lrConfirm({
+        title: 'Delete run?',
+        message: 'Delete run #' + id + ' from the database and local disk? This cannot be undone.',
+        confirmLabel: 'Delete',
+        danger: true,
+      });
+      if (!ok) return;
       this.deleting = { ...this.deleting, [id]: true };
       try {
         const res = await fetch('/api/runs/' + id, { method: 'DELETE' });
@@ -1032,7 +1182,7 @@ function reviewForm() {
         if (!res.ok) throw new Error(data.detail || 'Delete failed');
         window.location.reload();
       } catch (e) {
-        alert(String(e.message || e));
+        await lrAlert(String(e.message || e), { title: 'Delete failed' });
         this.deleting = { ...this.deleting, [id]: false };
       }
     },
@@ -1053,7 +1203,7 @@ function reviewForm() {
         this.toast = 'Consolidation #' + data.id + ' queued';
         setTimeout(() => { this.toast = ''; }, 3000);
       } catch (e) {
-        alert(String(e.message || e));
+        await lrAlert(String(e.message || e), { title: 'Consolidation failed' });
       } finally {
         this.consolidatingBusy = false;
       }
@@ -1065,28 +1215,21 @@ function reviewForm() {
         if (!res.ok) throw new Error(data.detail || 'Cancel failed');
         await this.pollConsolidations();
       } catch (e) {
-        alert(String(e.message || e));
+        await lrAlert(String(e.message || e), { title: 'Cancel failed' });
       }
     },
-    askRegenerate(id) {
-      this.regenConfirmId = id;
-      this.regenConfirmOpen = true;
-    },
-    closeRegenConfirm() {
-      if (this.regenConfirmId != null && this.regenerating[this.regenConfirmId]) return;
-      this.regenConfirmOpen = false;
-      this.regenConfirmId = null;
-    },
-    async confirmRegenerate() {
-      const id = this.regenConfirmId;
-      if (id == null) return;
+    async askRegenerate(id) {
+      const ok = await lrConfirm({
+        title: 'Regenerate consolidation?',
+        message: 'Re-run consolidation #' + id + ' with the current consolidator agent, model, effort, and prompt from Settings. The previous body will be replaced.',
+        confirmLabel: 'Regenerate',
+      });
+      if (!ok) return;
       this.regenerating = { ...this.regenerating, [id]: true };
       try {
         const res = await fetch('/api/consolidations/' + id + '/regenerate', { method: 'POST' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(typeof data.detail === 'string' ? data.detail : 'Regenerate failed');
-        this.regenConfirmOpen = false;
-        this.regenConfirmId = null;
         await this.pollConsolidations();
         this.maybeStartPoll();
         this.toast = 'Consolidation #' + id + ' re-queued';
@@ -1100,14 +1243,28 @@ function reviewForm() {
     },
     openSubmit(c) {
       this.submitTarget = c;
+      this.submitReadOnly = false;
+      this.submitView = 'preview';
+      this.submitVerdict = 'comment';
+      this.submitOpen = true;
+    },
+    openView(c) {
+      this.submitTarget = c;
+      this.submitReadOnly = true;
       this.submitView = 'preview';
       this.submitOpen = true;
     },
     setSubmitView(view) {
-      this.submitView = view === 'source' ? 'source' : 'preview';
+      if (view === 'source' || view === 'findings') {
+        this.submitView = view;
+      } else {
+        this.submitView = 'preview';
+      }
     },
     closeSubmit() {
       this.submitOpen = false;
+      this.submitReadOnly = false;
+      this.submitVerdict = 'comment';
     },
     closeLogs() {
       this.logsOpen = false;
@@ -1126,9 +1283,16 @@ function reviewForm() {
           '</pre>';
       }
     },
-    async postConsolidation(action) {
+    async postConsolidation() {
       if (!this.submitTarget) return;
-      if (!confirm('Post ' + action + ' to GitHub?')) return;
+      const action = this.submitVerdict || 'comment';
+      const label = this.feedbackActionLabel(action);
+      const ok = await lrConfirm({
+        title: 'Submit feedback?',
+        message: 'Post as “' + label + '” to GitHub for consolidation #' + this.submitTarget.id + '?',
+        confirmLabel: 'Submit',
+      });
+      if (!ok) return;
       const id = this.submitTarget.id;
       const res = await fetch('/api/consolidations/' + id + '/post', {
         method: 'POST',
@@ -1136,7 +1300,10 @@ function reviewForm() {
         body: JSON.stringify({ action, body: this.submitTarget.body })
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { alert(data.detail || 'post failed'); return; }
+      if (!res.ok) {
+        await lrAlert(data.detail || 'post failed', { title: 'Post failed' });
+        return;
+      }
       this.closeSubmit();
       window.location.reload();
     },

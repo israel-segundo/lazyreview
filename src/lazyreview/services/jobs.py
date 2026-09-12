@@ -70,12 +70,34 @@ class JobRunner:
             daemon=True,
         )
         self._dispatcher.start()
+        # After a daemon restart, in-flight agent processes are gone but rows may
+        # still say "running". Reclaim them so the UI and dormant consolidations
+        # are not blocked forever.
+        orphaned = self.conn.execute(
+            "SELECT id FROM review_runs WHERE status = 'running' ORDER BY id ASC"
+        ).fetchall()
+        for r in orphaned:
+            rid = int(r["id"])
+            update_run(
+                self.conn,
+                rid,
+                status="failed",
+                finished_at=utcnow(),
+                error_message="Interrupted by daemon restart (orphaned running job)",
+            )
+            logger.warning("marked orphaned running run %s as failed", rid)
+            self._notify_run_finished(rid)
         rows = self.conn.execute(
             "SELECT id FROM review_runs WHERE status = 'queued' ORDER BY id ASC"
         ).fetchall()
         for r in rows:
             self._queue.put(int(r["id"]))
-        logger.info("job runner started max_concurrent_jobs=%s", workers)
+        logger.info(
+            "job runner started max_concurrent_jobs=%s queued=%s reclaimed_running=%s",
+            workers,
+            len(rows),
+            len(orphaned),
+        )
 
     def stop(self) -> None:
         self._stop.set()

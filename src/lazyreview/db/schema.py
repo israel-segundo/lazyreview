@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -34,6 +36,7 @@ CREATE TABLE IF NOT EXISTS prs (
   deletions INTEGER,
   changed_files INTEGER,
   review_requested INTEGER NOT NULL DEFAULT 0,
+  head_updated_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(owner, repo, number)
@@ -145,6 +148,12 @@ CREATE INDEX IF NOT EXISTS idx_consolidations_pr ON consolidations(pr_id);
 CREATE INDEX IF NOT EXISTS idx_consolidations_status ON consolidations(status);
 """
 
+DEFAULT_BATCH_REVIEW_DEFAULTS = [
+    {"agent": "agy", "model": "gemini-3.6-flash-high", "effort": ""},
+    {"agent": "claude", "model": "opus", "effort": "high"},
+    {"agent": "cursor", "model": "composer-2.5", "effort": ""},
+]
+
 DEFAULT_SETTINGS = {
     "run_retention_value": "1",
     "run_retention_unit": "weeks",
@@ -153,9 +162,10 @@ DEFAULT_SETTINGS = {
     "consolidator_model": "haiku",
     "consolidator_effort": "low",
     # consolidator_prompt seeded in init_db from prompts/consolidate.md
+    # batch_review_defaults seeded in init_db (JSON list of {agent,model,effort})
 }
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 10
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -169,6 +179,46 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+class ThreadLocalConnection:
+    """
+    Drop-in Connection proxy: one real sqlite3 connection per OS thread.
+
+    FastAPI runs sync routes in a threadpool, and background services
+    (PR sync, retention) use their own threads. A single shared Connection
+    raises sqlite3.InterfaceError under concurrent use even with
+    check_same_thread=False.
+    """
+
+    def __init__(self, db_path: Path) -> None:
+        self._db_path = Path(db_path)
+        self._local = threading.local()
+        self._all: list[sqlite3.Connection] = []
+        self._lock = threading.Lock()
+
+    def _conn(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = connect(self._db_path)
+            self._local.conn = conn
+            with self._lock:
+                self._all.append(conn)
+        return conn
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn(), name)
+
+    def close(self) -> None:
+        with self._lock:
+            conns = list(self._all)
+            self._all.clear()
+        for conn in conns:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+        self._local = threading.local()
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(prs)").fetchall()}
     alters = [
@@ -179,10 +229,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("additions", "ALTER TABLE prs ADD COLUMN additions INTEGER"),
         ("deletions", "ALTER TABLE prs ADD COLUMN deletions INTEGER"),
         ("changed_files", "ALTER TABLE prs ADD COLUMN changed_files INTEGER"),
+        ("head_updated_at", "ALTER TABLE prs ADD COLUMN head_updated_at TEXT"),
     ]
     for name, sql in alters:
         if name not in cols:
             conn.execute(sql)
+    # Backfill head age anchor from when we last touched the PR row.
+    if "head_updated_at" not in cols:
+        conn.execute(
+            """
+            UPDATE prs
+            SET head_updated_at = COALESCE(updated_at, created_at)
+            WHERE head_updated_at IS NULL OR head_updated_at = ''
+            """
+        )
 
     run_cols = {r["name"] for r in conn.execute("PRAGMA table_info(review_runs)").fetchall()}
     if "cost_usd" not in run_cols:
@@ -200,6 +260,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _migrate(conn)
     row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
+    prev = int(row["version"]) if row is not None else None
     if row is None:
         conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
     else:
@@ -208,10 +269,18 @@ def init_db(conn: sqlite3.Connection) -> None:
     prompt_seed = _default_consolidator_prompt()
     if prompt_seed:
         defaults["consolidator_prompt"] = prompt_seed
+    defaults["batch_review_defaults"] = json.dumps(DEFAULT_BATCH_REVIEW_DEFAULTS)
     for key, value in defaults.items():
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
             (key, value),
+        )
+    # v8: reshape consolidated comment template (tables at end, no top disclosure).
+    # v10: review-pass detection from the authenticated user's prior PR threads.
+    if prev is not None and prev < 10 and prompt_seed:
+        conn.execute(
+            "UPDATE settings SET value = ? WHERE key = 'consolidator_prompt'",
+            (prompt_seed,),
         )
     conn.commit()
 

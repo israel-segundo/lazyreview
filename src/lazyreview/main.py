@@ -23,7 +23,7 @@ from lazyreview.api import (
     settings as settings_api,
 )
 from lazyreview.config import get_settings
-from lazyreview.db.schema import connect, init_db
+from lazyreview.db.schema import ThreadLocalConnection, connect, init_db
 from lazyreview.services.consolidation_jobs import ConsolidationRunner
 from lazyreview.services.jobs import JobRunner
 from lazyreview.services.pr_sync import PrSyncer
@@ -44,17 +44,22 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        conn = connect(settings.db_path)
-        init_db(conn)
-        runner = JobRunner(settings, conn)
-        consolidation_runner = ConsolidationRunner(settings, conn)
+        # Bootstrap schema once, then hand out per-thread connections.
+        bootstrap = connect(settings.db_path)
+        try:
+            init_db(bootstrap)
+        finally:
+            bootstrap.close()
+        conn = ThreadLocalConnection(settings.db_path)
+        runner = JobRunner(settings, conn)  # type: ignore[arg-type]
+        consolidation_runner = ConsolidationRunner(settings, conn)  # type: ignore[arg-type]
         runner.on_run_finished = consolidation_runner.notify_run_finished
         sweeper = RetentionSweeper(
             settings,
-            conn,
+            conn,  # type: ignore[arg-type]
             interval_seconds=settings.retention_sweep_seconds,
         )
-        pr_syncer = PrSyncer(conn)
+        pr_syncer = PrSyncer(conn)  # type: ignore[arg-type]
         app.state.settings = settings
         app.state.db = conn
         app.state.jobs = runner
@@ -166,6 +171,7 @@ def create_app() -> FastAPI:
                 "runs": enriched,
                 "selectable_ids": selectable_ids,
                 "consolidating_ids": sorted(consolidating_ids),
+                "locked_run_ids": sorted(locked_ids),
                 "consolidations": consolidations_list,
                 "feedback": feedback,
                 "total_cost_usd": total_cost if have_cost else None,
@@ -227,13 +233,10 @@ def create_app() -> FastAPI:
 
     @app.get("/analytics", response_class=HTMLResponse)
     async def analytics_page(request: Request):
-        from lazyreview.db import analytics_combos
-
-        combos = analytics_combos(request.app.state.db)
         return TEMPLATES.TemplateResponse(
             request,
             "analytics.html",
-            {"combos": combos, "version": __version__},
+            {"version": __version__},
         )
 
     @app.get("/settings", response_class=HTMLResponse)

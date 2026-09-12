@@ -14,6 +14,8 @@ ExecStart=%h/.local/share/lazyreview/venv/bin/gunicorn lazyreview.main:app \
 Restart=on-failure
 RestartSec=3
 Environment=LAZYREVIEW_CONFIG=%h/.config/lazyreview/config.toml
+# User CLIs (agent, claude, agy) live under ~/.local/bin; systemd's default PATH omits it.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 # Single worker: in-process job runner + sqlite
 # Do not raise workers above 1 without an external job queue.

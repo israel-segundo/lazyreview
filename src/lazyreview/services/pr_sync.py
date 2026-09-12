@@ -11,11 +11,19 @@ from lazyreview.db import (
     clear_stale_review_requests,
     get_setting,
     list_stale_review_request_prs,
+    pr_internal_status,
+    record_external_pr_review,
     set_setting,
     upsert_pr,
     utcnow,
 )
-from lazyreview.services.gh import GhError, search_pending_review_prs, view_pr
+from lazyreview.services.gh import (
+    GhError,
+    gh_user_login,
+    parse_user_review_for_head,
+    search_pending_review_prs,
+    view_pr,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +60,36 @@ def _upsert_from_view(
         additions=data.get("additions"),
         deletions=data.get("deletions"),
         changed_files=data.get("changed_files"),
+        head_updated_at=data.get("head_updated_at"),
         review_requested=review_requested,
+    )
+
+
+def _sync_external_review(
+    conn: sqlite3.Connection,
+    pr: dict[str, Any],
+    data: dict[str, Any],
+    *,
+    login: str,
+) -> bool:
+    """Detect GitHub reviews posted outside lazyreview for the current head."""
+    head = (pr.get("head_sha") or "").strip()
+    if not head:
+        return False
+    review = parse_user_review_for_head(
+        data.get("reviews") or [],
+        head_sha=head,
+        login=login,
+    )
+    if not review:
+        return False
+    return record_external_pr_review(
+        conn,
+        pr,
+        gh_action=review["gh_action"],
+        gh_review_id=review["gh_review_id"],
+        body=review.get("body") or "",
+        gh_comment_url=review.get("html_url"),
     )
 
 
@@ -62,6 +99,12 @@ def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
     upserted: list[dict[str, Any]] = []
     errors: list[str] = []
     keys: list[tuple[str, str, int]] = []
+    external_synced = 0
+    try:
+        login = gh_user_login()
+    except GhError as e:
+        login = ""
+        errors.append(f"external review sync skipped: {e}")
 
     for item in items:
         owner = item["owner"]
@@ -71,6 +114,8 @@ def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
         try:
             data = view_pr(item["url"])
             pr = _upsert_from_view(conn, data, review_requested=True)
+            if login and _sync_external_review(conn, pr, data, login=login):
+                external_synced += 1
             upserted.append(pr)
         except GhError as e:
             try:
@@ -97,7 +142,9 @@ def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
     for row in stale:
         try:
             data = view_pr(row["url"])
-            _upsert_from_view(conn, data, review_requested=False)
+            pr = _upsert_from_view(conn, data, review_requested=False)
+            if login and _sync_external_review(conn, pr, data, login=login):
+                external_synced += 1
         except GhError as e:
             upsert_pr(
                 conn,
@@ -115,12 +162,34 @@ def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
             errors.append(f"stale {row['owner']}/{row['repo']}#{row['number']}: {e}")
 
     cleared = clear_stale_review_requests(conn, keys)
+
+    # PRs already reviewed on GitHub drop off the pending queue; still refresh
+    # any open local rows that look unanswered.
+    handled_ids = {int(p["id"]) for p in upserted}
+    for row in conn.execute("SELECT * FROM prs WHERE state = 'open'").fetchall():
+        pr_row = dict(row)
+        pr_id = int(pr_row["id"])
+        if pr_id in handled_ids:
+            continue
+        if pr_internal_status(conn, pr_row)["status"] != "needs_review":
+            continue
+        try:
+            data = view_pr(pr_row["url"])
+            pr = _upsert_from_view(conn, data, review_requested=None)
+            if login and _sync_external_review(conn, pr, data, login=login):
+                external_synced += 1
+        except GhError as e:
+            errors.append(
+                f"external {pr_row['owner']}/{pr_row['repo']}#{pr_row['number']}: {e}"
+            )
+
     set_setting(conn, "pr_sync_last_at", utcnow())
     conn.commit()
     return {
         "fetched": len(items),
         "upserted": len(upserted),
         "cleared_stale": cleared,
+        "external_reviews_synced": external_synced,
         "prs": upserted,
         "errors": errors,
         "synced_at": get_setting(conn, "pr_sync_last_at"),

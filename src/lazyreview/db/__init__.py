@@ -59,6 +59,7 @@ def upsert_pr(
     additions: int | None = None,
     deletions: int | None = None,
     changed_files: int | None = None,
+    head_updated_at: str | None = None,
 ) -> dict[str, Any]:
     now = utcnow()
     existing = conn.execute(
@@ -86,14 +87,26 @@ def upsert_pr(
     deletions_v = _keep("deletions", deletions)
     changed_v = _keep("changed_files", changed_files)
 
+    head_changed = bool(head_sha) and (existing is None or head_sha != old_head)
+    existing_head_at = (
+        (existing["head_updated_at"] or "") if existing is not None else ""
+    )
+    if head_updated_at:
+        # Commit time of the current head is the source of truth for age.
+        head_at = head_updated_at
+    elif head_changed or not existing_head_at:
+        head_at = now
+    else:
+        head_at = existing_head_at
+
     conn.execute(
         """
         INSERT INTO prs (
           owner, repo, number, url, title, author, base_ref, head_ref, head_sha,
           state, is_draft, additions, deletions, changed_files,
-          review_requested, created_at, updated_at
+          review_requested, head_updated_at, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(owner, repo, number) DO UPDATE SET
           url = excluded.url,
           title = excluded.title,
@@ -107,6 +120,7 @@ def upsert_pr(
           deletions = excluded.deletions,
           changed_files = excluded.changed_files,
           review_requested = excluded.review_requested,
+          head_updated_at = excluded.head_updated_at,
           updated_at = excluded.updated_at
         """,
         (
@@ -125,6 +139,7 @@ def upsert_pr(
             deletions_v,
             changed_v,
             rr,
+            head_at,
             now,
             now,
         ),
@@ -201,6 +216,87 @@ def clear_stale_review_requests(
     return int(cur.rowcount or 0)
 
 
+def pr_internal_status(conn: sqlite3.Connection, pr: dict[str, Any]) -> dict[str, Any]:
+    """
+    Lazyreview review workflow status for the PR's current head.
+
+    - needs_review: no successful consolidation submitted for this head
+    - feedback_provided: consolidation posted as a comment
+    - approved / changes_requested: consolidation posted as that review action
+
+    A new head automatically returns needs_review (prior submissions are for
+    an older head_sha).
+    """
+    head = (pr.get("head_sha") or "").strip()
+    if not head:
+        return {
+            "status": "needs_review",
+            "label": "needs review",
+            "gh_action": None,
+        }
+    row = conn.execute(
+        """
+        SELECT gh_action FROM consolidations
+        WHERE pr_id = ?
+          AND head_sha = ?
+          AND status = 'succeeded'
+          AND feedback_provided = 1
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (int(pr["id"]), head),
+    ).fetchone()
+    if not row:
+        return {
+            "status": "needs_review",
+            "label": "needs review",
+            "gh_action": None,
+        }
+    action = (row["gh_action"] or "comment").strip() or "comment"
+    if action == "approve":
+        return {"status": "approved", "label": "approved", "gh_action": action}
+    if action == "request_changes":
+        return {
+            "status": "changes_requested",
+            "label": "changes requested",
+            "gh_action": action,
+        }
+    return {
+        "status": "feedback_provided",
+        "label": "feedback provided",
+        "gh_action": action,
+    }
+
+
+def head_age_days(head_updated_at: str | None, *, now: datetime | None = None) -> int | None:
+    """Whole days since the current head started awaiting review."""
+    if not head_updated_at:
+        return None
+    raw = str(head_updated_at).strip()
+    if not raw:
+        return None
+    try:
+        then = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    else:
+        then = then.astimezone(timezone.utc)
+    current = now or datetime.now(timezone.utc)
+    return max(0, (current - then).days)
+
+
+def _attach_internal_status(conn: sqlite3.Connection, pr: dict[str, Any]) -> dict[str, Any]:
+    info = pr_internal_status(conn, pr)
+    out = dict(pr)
+    out["internal_status"] = info["status"]
+    out["internal_status_label"] = info["label"]
+    out["feedback_gh_action"] = info["gh_action"]
+    out["age_days"] = head_age_days(out.get("head_updated_at"))
+    return out
+
+
 def list_prs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
@@ -209,16 +305,22 @@ def list_prs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
           (SELECT r.status FROM review_runs r WHERE r.pr_id = p.id ORDER BY r.id DESC LIMIT 1) AS latest_status
         FROM prs p
         ORDER BY
-          p.review_requested DESC,
           CASE WHEN p.state = 'open' THEN 0 ELSE 1 END,
-          p.updated_at DESC
+          CASE WHEN p.head_updated_at IS NULL OR p.head_updated_at = '' THEN 1 ELSE 0 END,
+          p.head_updated_at ASC,
+          p.id ASC
         """
     ).fetchall()
-    return rows_to_list(rows)
+    return [_attach_internal_status(conn, dict(r)) for r in rows]
 
 
 def get_pr(conn: sqlite3.Connection, pr_id: int) -> dict[str, Any] | None:
-    return row_to_dict(conn.execute("SELECT * FROM prs WHERE id = ?", (pr_id,)).fetchone())
+    row = row_to_dict(
+        conn.execute("SELECT * FROM prs WHERE id = ?", (pr_id,)).fetchone()
+    )
+    if row is None:
+        return None
+    return _attach_internal_status(conn, row)
 
 
 def create_run(
@@ -268,6 +370,40 @@ def update_run(conn: sqlite3.Connection, run_id: int, **fields: Any) -> dict[str
     conn.execute(f"UPDATE review_runs SET {cols} WHERE id = ?", (*fields.values(), run_id))
     conn.commit()
     return get_run(conn, run_id)
+
+
+def reset_run_for_rerun(
+    conn: sqlite3.Connection,
+    run_id: int,
+    *,
+    head_sha: str | None = None,
+) -> dict[str, Any] | None:
+    """Clear prior results and queue the same run config again."""
+    replace_findings(conn, run_id, [])
+    fields: dict[str, Any] = {
+        "status": "queued",
+        "started_at": None,
+        "finished_at": None,
+        "duration_ms": None,
+        "input_tokens": None,
+        "output_tokens": None,
+        "total_tokens": None,
+        "cost_usd": None,
+        "findings_sev1": 0,
+        "findings_sev2": 0,
+        "findings_sev3": 0,
+        "report_md_path": None,
+        "report_html_path": None,
+        "prompt_path": None,
+        "log_stdout_path": None,
+        "log_stderr_path": None,
+        "cli_command": None,
+        "error_message": None,
+        "consolidated": 0,
+    }
+    if head_sha is not None:
+        fields["head_sha"] = head_sha
+    return update_run(conn, run_id, **fields)
 
 
 def deprecate_runs_for_pr(conn: sqlite3.Connection, pr_id: int) -> int:
@@ -401,6 +537,56 @@ def update_consolidation(
     return get_consolidation(conn, consolidation_id)
 
 
+def record_external_pr_review(
+    conn: sqlite3.Connection,
+    pr: dict[str, Any],
+    *,
+    gh_action: str,
+    gh_review_id: str,
+    body: str = "",
+    gh_comment_url: str | None = None,
+) -> bool:
+    """
+    Record the authenticated user's GitHub review when lazyreview has no
+    submitted consolidation for the current head.
+    """
+    pr_id = int(pr["id"])
+    head = (pr.get("head_sha") or "").strip()
+    if not head or gh_action not in ("approve", "request_changes", "comment"):
+        return False
+    if pr_internal_status(conn, pr)["status"] != "needs_review":
+        return False
+    if gh_review_id:
+        existing = conn.execute(
+            """
+            SELECT id FROM consolidations
+            WHERE pr_id = ? AND head_sha = ? AND agent = 'external'
+              AND gh_review_id = ?
+            """,
+            (pr_id, head, gh_review_id),
+        ).fetchone()
+        if existing:
+            return False
+    conn.execute(
+        """
+        INSERT INTO consolidations (
+          pr_id, head_sha, source_run_ids, agent, model, effort, status, body,
+          feedback_provided, gh_action, gh_review_id, gh_comment_url, workdir_path
+        ) VALUES (?, ?, '[]', 'external', '', NULL, 'succeeded', ?, 1, ?, ?, ?, '')
+        """,
+        (
+            pr_id,
+            head,
+            body,
+            gh_action,
+            gh_review_id or None,
+            gh_comment_url,
+        ),
+    )
+    conn.commit()
+    return True
+
+
 def mark_consolidation_feedback_provided(
     conn: sqlite3.Connection,
     consolidation_id: int,
@@ -448,8 +634,13 @@ def active_consolidation_run_ids(
 
 
 def in_flight_consolidation_run_ids(conn: sqlite3.Connection, pr_id: int) -> set[int]:
-    """Source run ids in a queued/running consolidation (not dormant)."""
+    """Source run ids in a queued/running consolidation (not dormant/waiting)."""
     return active_consolidation_run_ids(conn, pr_id, statuses=("queued", "running"))
+
+
+def dormant_consolidation_run_ids(conn: sqlite3.Connection, pr_id: int) -> set[int]:
+    """Source run ids reserved by a dormant (waiting-for-runs) consolidation."""
+    return active_consolidation_run_ids(conn, pr_id, statuses=("dormant",))
 
 
 def _normalize_consolidation(row: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -548,9 +739,14 @@ def list_feedback_actions(conn: sqlite3.Connection, pr_id: int) -> list[dict[str
     )
 
 
-def analytics_combos(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+def analytics_combos(
+    conn: sqlite3.Connection,
+    *,
+    period: str = "all",
+) -> list[dict[str, Any]]:
+    where, params = _analytics_period_clause(period)
     rows = conn.execute(
-        """
+        f"""
         SELECT
           agent,
           model,
@@ -560,16 +756,417 @@ def analytics_combos(conn: sqlite3.Connection) -> list[dict[str, Any]]:
           SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
           AVG(duration_ms) AS avg_duration_ms,
           AVG(total_tokens) AS avg_total_tokens,
+          AVG(cost_usd) AS avg_cost_usd,
+          SUM(cost_usd) AS total_cost_usd,
           AVG(findings_sev1) AS avg_sev1,
           AVG(findings_sev2) AS avg_sev2,
           AVG(findings_sev3) AS avg_sev3
         FROM review_runs
         WHERE status IN ('succeeded', 'failed')
+          {where}
         GROUP BY agent, model, COALESCE(effort, '')
         ORDER BY runs DESC, agent, model
-        """
+        """,
+        params,
     ).fetchall()
     return rows_to_list(rows)
+
+
+_ANALYTICS_PERIOD_DAYS = {
+    "week": 7,
+    "month": 30,
+    "3months": 90,
+    "6months": 180,
+    "all": None,
+}
+
+def _analytics_period_clause(period: str) -> tuple[str, list[Any]]:
+    from datetime import timedelta
+
+    key = (period or "all").strip().lower()
+    days = _ANALYTICS_PERIOD_DAYS.get(key)
+    if days is None:
+        return "", []
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).replace(
+        microsecond=0
+    ).isoformat()
+    # Prefer finished_at; fall back to created_at for odd rows.
+    return (
+        "AND COALESCE(finished_at, created_at) >= ?",
+        [cutoff],
+    )
+
+
+def _parse_run_day(iso: str | None) -> str | None:
+    """Extract YYYY-MM-DD (UTC) from a run timestamp."""
+    if not iso:
+        return None
+    text = str(iso).strip()
+    if not text:
+        return None
+    # Prefer the date prefix when present (covers +00:00 / Z / naive).
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return text[:10]
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).date().isoformat()
+
+
+def analytics_activity(conn: sqlite3.Connection, *, period: str = "month") -> dict[str, Any]:
+    """
+    Histogram of completed agent review runs (status succeeded or failed).
+
+    Uses the same period window as the rest of the analytics dashboard.
+    Buckets are daily for short windows and weekly when the span exceeds ~2 months.
+    Zero-filled so the chart always spans the full period.
+    """
+    from datetime import date, timedelta
+
+    key = (period or "month").strip().lower()
+    if key not in _ANALYTICS_PERIOD_DAYS:
+        key = "month"
+
+    today = datetime.now(timezone.utc).date()
+    days = _ANALYTICS_PERIOD_DAYS[key]
+
+    rows = rows_to_list(
+        conn.execute(
+            """
+            SELECT
+              status,
+              COALESCE(finished_at, created_at) AS at
+            FROM review_runs
+            WHERE status IN ('succeeded', 'failed')
+            """
+        ).fetchall()
+    )
+
+    by_day: dict[str, dict[str, int]] = {}
+    earliest: date | None = None
+    for row in rows:
+        day_s = _parse_run_day(row.get("at"))
+        if not day_s:
+            continue
+        day = date.fromisoformat(day_s)
+        if earliest is None or day < earliest:
+            earliest = day
+        slot = by_day.get(day_s)
+        if slot is None:
+            slot = {"succeeded": 0, "failed": 0}
+            by_day[day_s] = slot
+        status = (row.get("status") or "").lower()
+        if status == "succeeded":
+            slot["succeeded"] += 1
+        elif status == "failed":
+            slot["failed"] += 1
+
+    if days is None:
+        start = earliest or today
+    else:
+        start = today - timedelta(days=days - 1)
+
+    span = (today - start).days + 1
+    use_weekly = span > 62
+
+    buckets: list[dict[str, Any]] = []
+    if use_weekly:
+        # Align to Monday-start weeks covering [start, today].
+        cursor = start - timedelta(days=start.weekday())
+        while cursor <= today:
+            week_end = min(cursor + timedelta(days=6), today)
+            succeeded = 0
+            failed = 0
+            d = cursor
+            while d <= week_end:
+                slot = by_day.get(d.isoformat())
+                if slot:
+                    succeeded += slot["succeeded"]
+                    failed += slot["failed"]
+                d += timedelta(days=1)
+            buckets.append(
+                {
+                    "date": cursor.isoformat(),
+                    "end_date": week_end.isoformat(),
+                    "label": f"{cursor.strftime('%b')} {cursor.day}",
+                    "succeeded": succeeded,
+                    "failed": failed,
+                    "total": succeeded + failed,
+                }
+            )
+            cursor += timedelta(days=7)
+    else:
+        cursor = start
+        while cursor <= today:
+            day_s = cursor.isoformat()
+            slot = by_day.get(day_s) or {"succeeded": 0, "failed": 0}
+            succeeded = int(slot["succeeded"])
+            failed = int(slot["failed"])
+            if key == "week":
+                label = f"{cursor.strftime('%a')} {cursor.day}"
+            else:
+                label = f"{cursor.strftime('%b')} {cursor.day}"
+            buckets.append(
+                {
+                    "date": day_s,
+                    "label": label,
+                    "succeeded": succeeded,
+                    "failed": failed,
+                    "total": succeeded + failed,
+                }
+            )
+            cursor += timedelta(days=1)
+
+    return {
+        "period": key,
+        "granularity": "week" if use_weekly else "day",
+        "buckets": buckets,
+    }
+
+
+def analytics_dashboard(conn: sqlite3.Connection, *, period: str = "all") -> dict[str, Any]:
+    """Chart-ready aggregates for the analytics dashboard."""
+    from datetime import timedelta
+
+    key = (period or "all").strip().lower()
+    if key not in _ANALYTICS_PERIOD_DAYS:
+        key = "all"
+    days = _ANALYTICS_PERIOD_DAYS[key]
+    params: list[Any] = []
+    where = ""
+    if days is not None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).replace(
+            microsecond=0
+        ).isoformat()
+        where = "AND COALESCE(r.finished_at, r.created_at) >= ?"
+        params = [cutoff]
+
+    succeeded = rows_to_list(
+        conn.execute(
+            f"""
+            SELECT
+              r.id,
+              r.agent,
+              r.model,
+              COALESCE(r.effort, '') AS effort,
+              r.duration_ms,
+              r.cost_usd,
+              COALESCE(r.findings_sev1, 0) AS findings_sev1,
+              COALESCE(r.findings_sev2, 0) AS findings_sev2,
+              COALESCE(r.findings_sev3, 0) AS findings_sev3,
+              COALESCE(r.total_tokens, 0) AS total_tokens,
+              COALESCE(p.additions, 0) AS additions,
+              COALESCE(p.deletions, 0) AS deletions,
+              COALESCE(p.changed_files, 0) AS changed_files
+            FROM review_runs r
+            JOIN prs p ON p.id = r.pr_id
+            WHERE r.status = 'succeeded'
+              {where}
+            ORDER BY r.id ASC
+            """,
+            params,
+        ).fetchall()
+    )
+
+    def _cost_of(row: dict[str, Any]) -> float | None:
+        raw = row.get("cost_usd")
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
+    # Nested donut: outer = agent counts, inner = model (+effort) counts.
+    agent_counts: dict[str, int] = {}
+    model_counts: dict[str, dict[str, Any]] = {}
+    agent_spend: dict[str, float] = {}
+    model_spend: dict[str, dict[str, Any]] = {}
+    total_cost = 0.0
+    costed_runs = 0
+    for row in succeeded:
+        agent = row["agent"] or "unknown"
+        agent_counts[agent] = agent_counts.get(agent, 0) + 1
+        effort = row["effort"] or ""
+        model = row["model"] or "unknown"
+        label = f"{model}" + (f" · {effort}" if effort else "")
+        key_m = f"{agent}::{label}"
+        slot = model_counts.get(key_m)
+        if slot is None:
+            model_counts[key_m] = {
+                "agent": agent,
+                "label": label,
+                "model": model,
+                "effort": effort,
+                "count": 1,
+            }
+        else:
+            slot["count"] += 1
+
+        cost = _cost_of(row)
+        if cost is not None:
+            total_cost += cost
+            costed_runs += 1
+            agent_spend[agent] = agent_spend.get(agent, 0.0) + cost
+            spend_slot = model_spend.get(key_m)
+            if spend_slot is None:
+                model_spend[key_m] = {
+                    "agent": agent,
+                    "label": label,
+                    "model": model,
+                    "effort": effort,
+                    "cost": cost,
+                }
+            else:
+                spend_slot["cost"] += cost
+
+    agents_sorted = sorted(agent_counts.items(), key=lambda x: (-x[1], x[0]))
+    models_sorted = sorted(
+        model_counts.values(), key=lambda x: (-int(x["count"]), x["agent"], x["label"])
+    )
+    spend_agents_sorted = sorted(agent_spend.items(), key=lambda x: (-x[1], x[0]))
+    spend_models_sorted = sorted(
+        model_spend.values(), key=lambda x: (-float(x["cost"]), x["agent"], x["label"])
+    )
+
+    # Combo rollups for bar charts (successful runs only).
+    combo_map: dict[str, dict[str, Any]] = {}
+    for row in succeeded:
+        agent = row["agent"] or "unknown"
+        model = row["model"] or "unknown"
+        effort = row["effort"] or ""
+        ck = f"{agent}|{model}|{effort}"
+        slot = combo_map.get(ck)
+        if slot is None:
+            slot = {
+                "agent": agent,
+                "model": model,
+                "effort": effort,
+                "label": f"{agent} / {model}" + (f" / {effort}" if effort else ""),
+                "runs": 0,
+                "duration_sum": 0,
+                "cost_sum": 0.0,
+                "cost_n": 0,
+                "sev1_sum": 0,
+                "sev2_sum": 0,
+                "sev3_sum": 0,
+            }
+            combo_map[ck] = slot
+        slot["runs"] += 1
+        slot["duration_sum"] += int(row["duration_ms"] or 0)
+        slot["sev1_sum"] += int(row["findings_sev1"] or 0)
+        slot["sev2_sum"] += int(row["findings_sev2"] or 0)
+        slot["sev3_sum"] += int(row["findings_sev3"] or 0)
+        cost = _cost_of(row)
+        if cost is not None:
+            slot["cost_sum"] += cost
+            slot["cost_n"] += 1
+
+    combos_ok = []
+    for slot in combo_map.values():
+        n = max(1, int(slot["runs"]))
+        cost_n = int(slot["cost_n"])
+        combos_ok.append(
+            {
+                "agent": slot["agent"],
+                "model": slot["model"],
+                "effort": slot["effort"],
+                "label": slot["label"],
+                "runs": slot["runs"],
+                "avg_duration_ms": slot["duration_sum"] / n,
+                "avg_cost_usd": (slot["cost_sum"] / cost_n) if cost_n else None,
+                "total_cost_usd": slot["cost_sum"] if cost_n else None,
+                "avg_sev1": slot["sev1_sum"] / n,
+                "avg_sev2": slot["sev2_sum"] / n,
+                "avg_sev3": slot["sev3_sum"] / n,
+            }
+        )
+    combos_ok.sort(key=lambda x: (-x["runs"], x["label"]))
+
+    # Bubble points: diff size × duration/cost × findings, colored by model.
+    bubbles = []
+    for row in succeeded:
+        diff = int(row["additions"] or 0) + int(row["deletions"] or 0)
+        findings = (
+            int(row["findings_sev1"] or 0)
+            + int(row["findings_sev2"] or 0)
+            + int(row["findings_sev3"] or 0)
+        )
+        bubbles.append(
+            {
+                "id": row["id"],
+                "agent": row["agent"],
+                "model": row["model"],
+                "effort": row["effort"],
+                "diff_size": diff,
+                "duration_ms": int(row["duration_ms"] or 0),
+                "cost_usd": _cost_of(row),
+                "findings": findings,
+                "findings_sev1": int(row["findings_sev1"] or 0),
+                "findings_sev2": int(row["findings_sev2"] or 0),
+                "findings_sev3": int(row["findings_sev3"] or 0),
+                "changed_files": int(row["changed_files"] or 0),
+            }
+        )
+
+    failed_n = conn.execute(
+        f"""
+        SELECT COUNT(*) AS c FROM review_runs r
+        WHERE r.status = 'failed' {where}
+        """,
+        params,
+    ).fetchone()["c"]
+
+    return {
+        "period": key,
+        "periods": [
+            {"id": "week", "label": "Last week"},
+            {"id": "month", "label": "Last month"},
+            {"id": "3months", "label": "Last 3 months"},
+            {"id": "6months", "label": "Last 6 months"},
+            {"id": "all", "label": "All"},
+        ],
+        "summary": {
+            "succeeded": len(succeeded),
+            "failed": int(failed_n or 0),
+            "combos": len(combos_ok),
+            "total_cost_usd": total_cost if costed_runs else None,
+            "costed_runs": costed_runs,
+        },
+        "usage": {
+            "agents": [{"label": a, "count": c} for a, c in agents_sorted],
+            "models": [
+                {
+                    "agent": m["agent"],
+                    "label": m["label"],
+                    "model": m["model"],
+                    "effort": m["effort"],
+                    "count": m["count"],
+                }
+                for m in models_sorted
+            ],
+        },
+        "spend": {
+            "agents": [{"label": a, "cost": c} for a, c in spend_agents_sorted],
+            "models": [
+                {
+                    "agent": m["agent"],
+                    "label": m["label"],
+                    "model": m["model"],
+                    "effort": m["effort"],
+                    "cost": m["cost"],
+                }
+                for m in spend_models_sorted
+            ],
+        },
+        "combos": combos_ok,
+        "table": analytics_combos(conn, period=key),
+        "bubbles": bubbles,
+        "activity": analytics_activity(conn, period=key),
+    }
 
 
 def list_purgeable_runs(conn: sqlite3.Connection, cutoff_iso: str) -> list[dict[str, Any]]:
