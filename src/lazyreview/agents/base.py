@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from lazyreview.agents.names import DEFAULT_EFFORTS
+
 
 @dataclass
 class ModelInfo:
@@ -77,8 +79,6 @@ def run_capture(cmd: list[str], *, timeout: int = 60) -> str:
         raise RuntimeError((proc.stderr or proc.stdout or "").strip() or "command failed")
     return proc.stdout
 
-
-DEFAULT_EFFORTS = ["low", "medium", "high", "xhigh", "ultra"]
 
 REVIEW_PROMPT_TEMPLATE = """You are performing an agentic code review for lazyreview.
 

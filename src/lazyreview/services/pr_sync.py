@@ -11,7 +11,6 @@ from lazyreview.db import (
     clear_stale_review_requests,
     get_setting,
     list_stale_review_request_prs,
-    pr_internal_status,
     record_external_pr_review,
     set_setting,
     upsert_pr,
@@ -139,10 +138,12 @@ def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
 
     # Refresh state for PRs that dropped out of the pending queue (often merged/closed)
     stale = list_stale_review_request_prs(conn, keys)
+    handled_ids: set[int] = {int(p["id"]) for p in upserted}
     for row in stale:
         try:
             data = view_pr(row["url"])
             pr = _upsert_from_view(conn, data, review_requested=False)
+            handled_ids.add(int(pr["id"]))
             if login and _sync_external_review(conn, pr, data, login=login):
                 external_synced += 1
         except GhError as e:
@@ -159,28 +160,30 @@ def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
                 state=row.get("state") or "closed",
                 review_requested=False,
             )
+            handled_ids.add(int(row["id"]))
             errors.append(f"stale {row['owner']}/{row['repo']}#{row['number']}: {e}")
 
     cleared = clear_stale_review_requests(conn, keys)
 
-    # PRs already reviewed on GitHub drop off the pending queue; still refresh
-    # any open local rows that look unanswered.
-    handled_ids = {int(p["id"]) for p in upserted}
+    # Re-fetch every remaining open local PR so merged/closed GitHub state
+    # lands even when review_requested was already cleared (e.g. after an
+    # external approve/request-changes that dropped the PR from the queue).
+    refreshed_open = 0
     for row in conn.execute("SELECT * FROM prs WHERE state = 'open'").fetchall():
         pr_row = dict(row)
         pr_id = int(pr_row["id"])
         if pr_id in handled_ids:
             continue
-        if pr_internal_status(conn, pr_row)["status"] != "needs_review":
-            continue
         try:
             data = view_pr(pr_row["url"])
             pr = _upsert_from_view(conn, data, review_requested=None)
-            if login and _sync_external_review(conn, pr, data, login=login):
-                external_synced += 1
+            refreshed_open += 1
+            if login and (pr.get("state") or "").lower() == "open":
+                if _sync_external_review(conn, pr, data, login=login):
+                    external_synced += 1
         except GhError as e:
             errors.append(
-                f"external {pr_row['owner']}/{pr_row['repo']}#{pr_row['number']}: {e}"
+                f"open {pr_row['owner']}/{pr_row['repo']}#{pr_row['number']}: {e}"
             )
 
     set_setting(conn, "pr_sync_last_at", utcnow())
@@ -189,6 +192,7 @@ def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
         "fetched": len(items),
         "upserted": len(upserted),
         "cleared_stale": cleared,
+        "refreshed_open": refreshed_open,
         "external_reviews_synced": external_synced,
         "prs": upserted,
         "errors": errors,

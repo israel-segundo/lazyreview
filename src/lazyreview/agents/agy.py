@@ -17,15 +17,19 @@ from lazyreview.agents.base import (
     which_binary,
     write_prompt,
 )
+from lazyreview.agents.names import AgentName, EffortLevel
 from lazyreview.services.cost import extract_cost_usd_from_json
 
 # `agy models` returns ids that already encode effort/variant, e.g.
 # gemini-3.1-pro-high, gemini-3.8-flash-medium.
-_EFFORT_SUFFIX = re.compile(r"-(low|medium|high)$", re.I)
+_EFFORT_SUFFIX = re.compile(
+    rf"-({'|'.join(re.escape(e.value) for e in (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH))})$",
+    re.I,
+)
 
 
 class AgyAdapter:
-    name = "agy"
+    name = AgentName.AGY.value
     display_name = "Agy"
     binary = "agy"
 
@@ -54,8 +58,14 @@ class AgyAdapter:
             if not parts:
                 continue
             mid = parts[0]
+            # Prefer the human-readable tail when `agy models` prints
+            # "id<TAB>Friendly Name" (or id + spaces). Keeping the raw line as
+            # the label made combo UIs look like they stored option text as the
+            # value, and fuzzy id/label matching became unreliable.
+            rest = line[len(mid) :].lstrip(" \t|-–—:")
+            label = rest or mid
             # Effort is baked into the model id; a separate --effort flag conflicts.
-            models.append(ModelInfo(id=mid, label=line, efforts=[]))
+            models.append(ModelInfo(id=mid, label=label, efforts=[]))
         if not models:
             models.append(ModelInfo(id="default", label="default", efforts=[]))
         return models
@@ -70,7 +80,12 @@ class AgyAdapter:
             args.extend(["--model", model])
         # Never combine --effort with ids like gemini-3.1-pro-high — agy rejects it.
         if effort and not _EFFORT_SUFFIX.search(model or ""):
-            mapped = effort if effort in ("low", "medium", "high") else "high"
+            agy_efforts = {
+                EffortLevel.LOW.value,
+                EffortLevel.MEDIUM.value,
+                EffortLevel.HIGH.value,
+            }
+            mapped = effort if effort in agy_efforts else EffortLevel.HIGH.value
             args.extend(["--effort", mapped])
         return args
 

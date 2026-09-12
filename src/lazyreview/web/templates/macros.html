@@ -2,13 +2,13 @@
 
 {% macro agent_icon(name, size='h-4 w-4') -%}
 {%- set key = (name or '')|lower -%}
-{%- if key == 'claude' -%}
+{%- if key == AgentName.CLAUDE.value -%}
 <img src="/static/img/agents/claude.webp" alt="" width="16" height="16"
      class="{{ size }} shrink-0 object-contain" />
-{%- elif key == 'agy' -%}
+{%- elif key == AgentName.AGY.value -%}
 <img src="/static/img/agents/agy.png" alt="" width="16" height="16"
      class="{{ size }} shrink-0 object-contain" />
-{%- elif key in ['cursor', 'agent'] -%}
+{%- elif key == AgentName.CURSOR.value or key == 'agent' -%}
 <img src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
      class="{{ size }} shrink-0 object-contain dark:hidden" />
 <img src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"

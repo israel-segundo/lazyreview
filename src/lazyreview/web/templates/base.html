@@ -13,6 +13,18 @@
         }
       } catch (e) {}
     })();
+    // Canonical ids from Python enums (lazyreview.agents.names) — do not hardcode.
+    window.LR = window.LR || {};
+    window.LR.AgentName = {{ LR_AGENT_JS | tojson }};
+    window.LR.EffortLevel = {{ LR_EFFORT_JS | tojson }};
+    window.LR.ClaudeModelAlias = {{ LR_CLAUDE_MODEL_JS | tojson }};
+    window.LR.AgentColors = {{ LR_AGENT_COLORS_JS | tojson }};
+    window.LR.agentKey = function (name) {
+      const key = String(name || '').toLowerCase();
+      if (key === 'agent') return window.LR.AgentName.CURSOR;
+      if (Object.values(window.LR.AgentName).includes(key)) return key;
+      return key;
+    };
   </script>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <script src="https://unpkg.com/marked@15.0.7/marked.min.js"></script>

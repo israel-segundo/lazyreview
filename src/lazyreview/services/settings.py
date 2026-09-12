@@ -6,6 +6,12 @@ import json
 import sqlite3
 from typing import Any
 
+from lazyreview.agents.names import (
+    ALL_AGENT_NAMES,
+    AgentName,
+    ClaudeModelAlias,
+    EffortLevel,
+)
 from lazyreview.db import get_all_settings, get_setting, set_setting
 from lazyreview.db.schema import (
     DEFAULT_BATCH_REVIEW_DEFAULTS,
@@ -17,9 +23,13 @@ from lazyreview.services.pr_sync import (
 )
 
 ALLOWED_UNITS = {"hours", "days", "weeks"}
-ALLOWED_CONSOLIDATOR_AGENTS = {"claude", "cursor", "agy"}
-ALLOWED_BATCH_AGENTS = {"claude", "cursor", "agy"}
+ALLOWED_CONSOLIDATOR_AGENTS = ALL_AGENT_NAMES
+ALLOWED_BATCH_AGENTS = ALL_AGENT_NAMES
 MAX_BATCH_DEFAULTS = 20
+
+_DEFAULT_CONSOLIDATOR_AGENT = AgentName.CLAUDE.value
+_DEFAULT_CONSOLIDATOR_MODEL = ClaudeModelAlias.HAIKU.value
+_DEFAULT_CONSOLIDATOR_EFFORT = EffortLevel.LOW.value
 
 
 def normalize_batch_review_defaults(raw: Any) -> list[dict[str, str]]:
@@ -87,9 +97,9 @@ def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
             f"sync pending review PRs every {sync_minutes} minutes "
             f"(default {DEFAULT_SYNC_INTERVAL_MINUTES})"
         ),
-        "consolidator_agent": raw.get("consolidator_agent") or "claude",
-        "consolidator_model": raw.get("consolidator_model") or "haiku",
-        "consolidator_effort": raw.get("consolidator_effort") or "low",
+        "consolidator_agent": raw.get("consolidator_agent") or _DEFAULT_CONSOLIDATOR_AGENT,
+        "consolidator_model": raw.get("consolidator_model") or _DEFAULT_CONSOLIDATOR_MODEL,
+        "consolidator_effort": raw.get("consolidator_effort") or _DEFAULT_CONSOLIDATOR_EFFORT,
         "consolidator_prompt": prompt,
         "consolidator_prompt_default": _default_consolidator_prompt() or "",
         "batch_review_defaults": batch_defaults,

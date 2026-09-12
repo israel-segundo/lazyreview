@@ -298,9 +298,9 @@ function settingsPage() {
     syncHint: {{ (settings.pr_sync_summary|default('sync pending review PRs every 15 minutes (default 15)'))|tojson }},
     lastSync: {{ (settings.pr_sync_last_at or '')|tojson }},
     purgeMsg: '',
-    consolidatorAgent: {{ (settings.consolidator_agent|default('claude'))|tojson }},
-    consolidatorModel: {{ (settings.consolidator_model|default('haiku'))|tojson }},
-    consolidatorEffort: {{ (settings.consolidator_effort|default('low'))|tojson }},
+    consolidatorAgent: {{ (settings.consolidator_agent|default(AgentName.CLAUDE.value))|tojson }},
+    consolidatorModel: {{ (settings.consolidator_model|default(ClaudeModelAlias.HAIKU.value))|tojson }},
+    consolidatorEffort: {{ (settings.consolidator_effort|default(EffortLevel.LOW.value))|tojson }},
     consolidatorPrompt: {{ (settings.consolidator_prompt|default(''))|tojson }},
     defaultConsolidatorPrompt: {{ (settings.consolidator_prompt_default|default(''))|tojson }},
     consolidatorMsg: '',
@@ -331,16 +331,23 @@ function settingsPage() {
       }
       this.onAgentChange(false);
       this.syncComboQueries();
-      this.cfgRows = this._cfgRowsFromDefaults(this.batchDefaultsSeed || []);
+      this.cfgRows = this._cfgRowsFromDefaults(
+        JSON.parse(JSON.stringify(this.batchDefaultsSeed || []))
+      );
     },
     _resolveModelId(models, wanted) {
       if (!wanted) return models[0] ? models[0].id : '';
       if (models.find(m => m.id === wanted)) return wanted;
       const q = String(wanted).toLowerCase();
-      const fuzzy = models.find(m =>
-        String(m.id).toLowerCase().includes(q) || String(m.label || '').toLowerCase().includes(q)
-      );
-      return fuzzy ? fuzzy.id : (models[0] ? models[0].id : wanted);
+      // Prefer stable id prefix matches. Avoid label substring matches and
+      // models[0] fallback — those quietly rewrote saved batch defaults when
+      // the live catalog drifted after a deploy.
+      const byId = models.find(m => {
+        const id = String(m.id).toLowerCase();
+        return id === q || id.startsWith(q + '-') || q.startsWith(id + '-');
+      });
+      if (byId) return byId.id;
+      return wanted;
     },
     _cfgNewRow(cfg) {
       const first = this.agents.find(a => a.available) || this.agents[0];
@@ -526,13 +533,15 @@ function settingsPage() {
       const which = this.cfgComboWhich();
       if (!row || !which) return;
       if (which === 'agent') {
-        if (!opt || !opt.available) return;
+        if (!opt || typeof opt !== 'object' || !opt.name || !opt.available) return;
         row.agent = opt.name;
         this._cfgApplyAgent(row, true);
       } else if (which === 'model') {
+        if (!opt || typeof opt !== 'object' || !opt.id) return;
         row.model = opt.id;
         this._cfgApplyModel(row, true);
       } else {
+        if (typeof opt !== 'string') return;
         row.effort = opt;
       }
       this.cfgCloseCombo();
@@ -558,8 +567,8 @@ function settingsPage() {
         await lrAlert(typeof data.detail === 'string' ? data.detail : 'save failed', { title: 'Save failed' });
         return;
       }
-      this.batchDefaultsSeed = data.batch_review_defaults || [];
-      this.cfgRows = this._cfgRowsFromDefaults(this.batchDefaultsSeed);
+      this.batchDefaultsSeed = JSON.parse(JSON.stringify(data.batch_review_defaults || []));
+      this.cfgRows = this._cfgRowsFromDefaults(JSON.parse(JSON.stringify(this.batchDefaultsSeed)));
       this.cfgMsg = 'Saved.';
       setTimeout(() => { this.cfgMsg = ''; }, 2500);
     },

@@ -16,11 +16,12 @@ from lazyreview.agents.base import (
     which_binary,
     write_prompt,
 )
+from lazyreview.agents.names import AgentName
 from lazyreview.services.cost import extract_cost_usd_from_json
 
 
 class CursorAdapter:
-    name = "cursor"
+    name = AgentName.CURSOR.value
     display_name = "Cursor Agent"
     binary = "agent"
 

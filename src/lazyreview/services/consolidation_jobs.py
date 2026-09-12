@@ -17,6 +17,7 @@ from typing import Any
 
 from lazyreview.agents import get_adapter
 from lazyreview.agents.base import BuiltCommand, which_binary
+from lazyreview.agents.names import AgentName
 from lazyreview.config import Settings
 from lazyreview.db import (
     get_consolidation,
@@ -155,7 +156,7 @@ def build_consolidate_command(
     model_args = adapter.resolve_model_args(model, effort or None)
     work = str(work_dir)
 
-    if agent == "claude":
+    if agent == AgentName.CLAUDE.value:
         return BuiltCommand(
             argv=[
                 path,
@@ -175,7 +176,7 @@ def build_consolidate_command(
             ],
             stdin_text=prompt,
         )
-    if agent == "agy":
+    if agent == AgentName.AGY.value:
         return BuiltCommand(
             argv=[
                 path,
@@ -191,7 +192,7 @@ def build_consolidate_command(
                 work,
             ],
         )
-    if agent == "cursor":
+    if agent == AgentName.CURSOR.value:
         return BuiltCommand(
             argv=[
                 path,

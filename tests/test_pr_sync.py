@@ -297,3 +297,56 @@ def test_sync_pending_review_prs_stale_pr_gets_external_review(tmp_path: Path):
     refreshed = get_pr(conn, pr["id"])
     assert pr_internal_status(conn, refreshed)["status"] == "changes_requested"
     assert int(refreshed["review_requested"]) == 0
+
+
+def test_sync_pending_review_prs_updates_merged_open_pr(tmp_path: Path):
+    """Open local PRs with review_requested cleared still get merged/closed state."""
+    conn = _conn(tmp_path)
+    pr = _pr(conn, head="head3")
+    # Simulate: we already requested changes, flag cleared, PR later merged on GitHub.
+    record_external_pr_review(
+        conn,
+        pr,
+        gh_action="request_changes",
+        gh_review_id="55",
+        body="please fix",
+    )
+    conn.execute("UPDATE prs SET review_requested = 0 WHERE id = ?", (pr["id"],))
+    conn.commit()
+    assert pr_internal_status(conn, get_pr(conn, pr["id"]))["status"] == "changes_requested"
+
+    view_data = {
+        "owner": "o",
+        "repo": "r",
+        "number": 1,
+        "url": pr["url"],
+        "title": "t",
+        "author": "author",
+        "base_ref": "main",
+        "head_ref": "feat",
+        "head_sha": "head3",
+        "head_updated_at": "2026-01-01T00:00:00Z",
+        "state": "merged",
+        "is_draft": False,
+        "reviews": [
+            {
+                "author": {"login": "me"},
+                "state": "CHANGES_REQUESTED",
+                "commit": {"oid": "head3"},
+                "id": "55",
+                "submittedAt": "2026-01-02T00:00:00Z",
+            }
+        ],
+    }
+
+    with (
+        patch("lazyreview.services.pr_sync.search_pending_review_prs", return_value=[]),
+        patch("lazyreview.services.pr_sync.view_pr", return_value=view_data),
+        patch("lazyreview.services.pr_sync.gh_user_login", return_value="me"),
+    ):
+        result = sync_pending_review_prs(conn)
+
+    assert result["refreshed_open"] == 1
+    refreshed = get_pr(conn, pr["id"])
+    assert refreshed["state"] == "merged"
+    assert int(refreshed["review_requested"]) == 0

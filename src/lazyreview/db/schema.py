@@ -9,6 +9,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from lazyreview.agents.names import (
+    AgentName,
+    ClaudeModelAlias,
+    DEFAULT_AGY_MODEL,
+    DEFAULT_CURSOR_MODEL,
+    EffortLevel,
+)
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER NOT NULL
@@ -149,18 +157,22 @@ CREATE INDEX IF NOT EXISTS idx_consolidations_status ON consolidations(status);
 """
 
 DEFAULT_BATCH_REVIEW_DEFAULTS = [
-    {"agent": "agy", "model": "gemini-3.6-flash-high", "effort": ""},
-    {"agent": "claude", "model": "opus", "effort": "high"},
-    {"agent": "cursor", "model": "composer-2.5", "effort": ""},
+    {"agent": AgentName.AGY.value, "model": DEFAULT_AGY_MODEL, "effort": ""},
+    {
+        "agent": AgentName.CLAUDE.value,
+        "model": ClaudeModelAlias.OPUS.value,
+        "effort": EffortLevel.HIGH.value,
+    },
+    {"agent": AgentName.CURSOR.value, "model": DEFAULT_CURSOR_MODEL, "effort": ""},
 ]
 
 DEFAULT_SETTINGS = {
     "run_retention_value": "1",
     "run_retention_unit": "weeks",
     "pr_sync_interval_minutes": "15",
-    "consolidator_agent": "claude",
-    "consolidator_model": "haiku",
-    "consolidator_effort": "low",
+    "consolidator_agent": AgentName.CLAUDE.value,
+    "consolidator_model": ClaudeModelAlias.HAIKU.value,
+    "consolidator_effort": EffortLevel.LOW.value,
     # consolidator_prompt seeded in init_db from prompts/consolidate.md
     # batch_review_defaults seeded in init_db (JSON list of {agent,model,effort})
 }

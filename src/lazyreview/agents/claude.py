@@ -17,17 +17,30 @@ from lazyreview.agents.base import (
     which_binary,
     write_prompt,
 )
+from lazyreview.agents.names import AgentName, ClaudeModelAlias, EffortLevel
 from lazyreview.services.cost import extract_cost_usd_from_json
 
 CLAUDE_MODELS = [
-    ModelInfo(id="sonnet", label="Sonnet (alias)", efforts=DEFAULT_EFFORTS),
-    ModelInfo(id="opus", label="Opus (alias)", efforts=DEFAULT_EFFORTS),
-    ModelInfo(id="haiku", label="Haiku (alias)", efforts=DEFAULT_EFFORTS),
+    ModelInfo(
+        id=ClaudeModelAlias.SONNET.value,
+        label="Sonnet (alias)",
+        efforts=list(DEFAULT_EFFORTS),
+    ),
+    ModelInfo(
+        id=ClaudeModelAlias.OPUS.value,
+        label="Opus (alias)",
+        efforts=list(DEFAULT_EFFORTS),
+    ),
+    ModelInfo(
+        id=ClaudeModelAlias.HAIKU.value,
+        label="Haiku (alias)",
+        efforts=list(DEFAULT_EFFORTS),
+    ),
 ]
 
 
 class ClaudeAdapter:
-    name = "claude"
+    name = AgentName.CLAUDE.value
     display_name = "Claude Code"
     binary = "claude"
 
@@ -43,7 +56,11 @@ class ClaudeAdapter:
     def resolve_model_args(self, model: str, effort: str | None) -> list[str]:
         args = ["--model", model]
         if effort:
-            mapped = "high" if effort == "ultra" else effort
+            mapped = (
+                EffortLevel.HIGH.value
+                if effort == EffortLevel.ULTRA.value
+                else effort
+            )
             args.extend(["--effort", mapped])
         return args
 

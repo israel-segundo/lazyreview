@@ -291,16 +291,16 @@
               </td>
               <td class="px-3 py-3">
                 <span class="inline-flex items-center gap-1.5 align-middle">
-                  <img x-show="agentKey(c.agent) === 'claude'" x-cloak
+                  <img x-show="agentKey(c.agent) === LR.AgentName.CLAUDE" x-cloak
                        src="/static/img/agents/claude.webp" alt="" width="16" height="16"
                        class="h-4 w-4 shrink-0 object-contain" />
-                  <img x-show="agentKey(c.agent) === 'agy'" x-cloak
+                  <img x-show="agentKey(c.agent) === LR.AgentName.AGY" x-cloak
                        src="/static/img/agents/agy.png" alt="" width="16" height="16"
                        class="h-4 w-4 shrink-0 object-contain" />
-                  <img x-show="agentKey(c.agent) === 'cursor'" x-cloak
+                  <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
                        src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
                        class="h-4 w-4 shrink-0 object-contain dark:hidden" />
-                  <img x-show="agentKey(c.agent) === 'cursor'" x-cloak
+                  <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
                        src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
                        class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
                   <span x-text="agentTitle(c.agent)"></span>
@@ -676,6 +676,7 @@ function reviewForm() {
     batchComboStyle: {},
     batchConsolidateWhenDone: true,
     batchDefaults: [],
+    _agentsReady: false,
     _batchKeySeq: 1,
     toast: '',
     cancelling: {},
@@ -691,12 +692,21 @@ function reviewForm() {
       // Derive lock/badge sets from consolidation statuses so dormant never
       // looks like an in-flight consolidating run.
       this.syncLocksFromConsolidations(this.consolidations);
-      const res = await fetch('/api/agents');
-      const data = await res.json();
-      this.agents = (data.agents || []).slice().sort((a, b) =>
-        String(a.display_name || a.name).localeCompare(String(b.display_name || b.name), undefined, { sensitivity: 'base' })
-      );
+      try {
+        const res = await fetch('/api/agents');
+        const data = await res.json();
+        this.agents = (data.agents || []).slice().sort((a, b) =>
+          String(a.display_name || a.name).localeCompare(String(b.display_name || b.name), undefined, { sensitivity: 'base' })
+        );
+      } finally {
+        // Always mark ready so the batch modal does not wait forever when
+        // /api/agents fails; row building then keeps configured ids as-is.
+        this._agentsReady = true;
+      }
       this.maybeStartPoll();
+    },
+    _cloneJson(value) {
+      return JSON.parse(JSON.stringify(value == null ? null : value));
     },
     _sourceRunIds(c) {
       return (c && c.source_run_ids ? c.source_run_ids : []).map(Number).filter(n => !Number.isNaN(n));
@@ -725,11 +735,7 @@ function reviewForm() {
       return this.selectableIds.includes(Number(id)) && !this.isLocked(id);
     },
     agentKey(name) {
-      const key = String(name || '').toLowerCase();
-      if (key === 'claude') return 'claude';
-      if (key === 'agy') return 'agy';
-      if (key === 'cursor' || key === 'agent') return 'cursor';
-      return key;
+      return (window.LR && window.LR.agentKey) ? window.LR.agentKey(name) : String(name || '').toLowerCase();
     },
     agentTitle(name) {
       const s = String(name || '');
@@ -825,19 +831,32 @@ function reviewForm() {
       this.batchCloseCombo();
       this._loadBatchDefaultsAndOpen();
     },
+    async _awaitAgentsReady() {
+      // /api/agents can be slow (agy model list). Opening the modal before the
+      // catalog arrives builds rows against []; the next open resolves against
+      // the full catalog and the predefined agents look "different".
+      for (let i = 0; i < 100 && !this._agentsReady; i++) {
+        await new Promise(r => setTimeout(r, 50));
+      }
+    },
     async _loadBatchDefaultsAndOpen() {
-      let defaults = this.batchDefaults || [];
+      await this._awaitAgentsReady();
+      let defaults = [];
       try {
         const res = await fetch('/api/settings');
         if (res.ok) {
           const data = await res.json();
           defaults = data.batch_review_defaults || [];
-          this.batchDefaults = defaults;
+        } else {
+          defaults = this._cloneJson(this.batchDefaults || []) || [];
         }
       } catch (e) {
-        /* keep cached defaults */
+        defaults = this._cloneJson(this.batchDefaults || []) || [];
       }
-      this.batchRows = this._rowsFromDefaults(defaults);
+      // Inert snapshot: never share references with batchRows / Alpine proxies,
+      // so combo edits cannot corrupt the cached predefined-agent list.
+      this.batchDefaults = this._cloneJson(defaults) || [];
+      this.batchRows = this._rowsFromDefaults(this._cloneJson(defaults) || []);
       if (!this.batchRows.length) {
         this.batchRows = [this._newBatchRow()];
       }
@@ -847,10 +866,15 @@ function reviewForm() {
       if (!wanted) return models[0] ? models[0].id : '';
       if (models.find(m => m.id === wanted)) return wanted;
       const q = String(wanted).toLowerCase();
-      const fuzzy = models.find(m =>
-        String(m.id).toLowerCase().includes(q) || String(m.label || '').toLowerCase().includes(q)
-      );
-      return fuzzy ? fuzzy.id : (models[0] ? models[0].id : wanted);
+      // Prefer stable id prefix matches. Do not substring-match labels (agy labels
+      // used to be the raw "id\\tFriendly Name" line) and do not fall back to
+      // models[0] — that made reopen after catalog load swap in unrelated models.
+      const byId = models.find(m => {
+        const id = String(m.id).toLowerCase();
+        return id === q || id.startsWith(q + '-') || q.startsWith(id + '-');
+      });
+      if (byId) return byId.id;
+      return wanted;
     },
     _rowsFromDefaults(list) {
       return (list || []).map(cfg => this._rowFromConfig(cfg));
@@ -1063,13 +1087,16 @@ function reviewForm() {
       const which = this.batchComboWhich();
       if (!row || !which) return;
       if (which === 'agent') {
-        if (!opt || !opt.available) return;
+        // Require a real agent object with a name id — never the display label.
+        if (!opt || typeof opt !== 'object' || !opt.name || !opt.available) return;
         row.agent = opt.name;
         this._batchApplyAgent(row, true);
       } else if (which === 'model') {
+        if (!opt || typeof opt !== 'object' || !opt.id) return;
         row.model = opt.id;
         this._batchApplyModel(row, true);
       } else {
+        if (typeof opt !== 'string') return;
         row.effort = opt;
       }
       this.batchCloseCombo();

@@ -289,10 +289,10 @@ function analyticsPage() {
       return LR_PALETTE[(h + (idx || 0)) % LR_PALETTE.length];
     },
     agentColor(agent) {
-      const a = String(agent || '').toLowerCase();
-      if (a === 'claude') return '#be123c';
-      if (a === 'cursor') return '#0369a1';
-      if (a === 'agy') return '#15803d';
+      const a = (window.LR && window.LR.agentKey) ? window.LR.agentKey(agent) : String(agent || '').toLowerCase();
+      if (window.LR && window.LR.AgentColors && window.LR.AgentColors[a]) {
+        return window.LR.AgentColors[a];
+      }
       return this.colorFor(agent, 0);
     },
     _mixHex(hex, other, t) {

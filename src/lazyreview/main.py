@@ -29,6 +29,15 @@ from lazyreview.services.jobs import JobRunner
 from lazyreview.services.pr_sync import PrSyncer
 from lazyreview.services.retention import RetentionSweeper
 from lazyreview.web.formatters import format_cost_usd, format_duration_ms
+from lazyreview.agents.names import (
+    AgentName,
+    ClaudeModelAlias,
+    EffortLevel,
+    agent_colors_js_dict,
+    agents_js_dict,
+    claude_models_js_dict,
+    efforts_js_dict,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +45,13 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 TEMPLATES = Jinja2Templates(directory=str(WEB_DIR / "templates"))
 TEMPLATES.env.filters["duration"] = format_duration_ms
 TEMPLATES.env.filters["cost"] = format_cost_usd
+TEMPLATES.env.globals["AgentName"] = AgentName
+TEMPLATES.env.globals["EffortLevel"] = EffortLevel
+TEMPLATES.env.globals["ClaudeModelAlias"] = ClaudeModelAlias
+TEMPLATES.env.globals["LR_AGENT_JS"] = agents_js_dict()
+TEMPLATES.env.globals["LR_EFFORT_JS"] = efforts_js_dict()
+TEMPLATES.env.globals["LR_CLAUDE_MODEL_JS"] = claude_models_js_dict()
+TEMPLATES.env.globals["LR_AGENT_COLORS_JS"] = agent_colors_js_dict()
 
 
 def create_app() -> FastAPI:
@@ -103,15 +119,22 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
         from lazyreview.db import get_setting, list_prs
+        from lazyreview.services.gh import GhError, gh_user_login
 
         prs_list = list_prs(request.app.state.db)
         last_sync = get_setting(request.app.state.db, "pr_sync_last_at")
+        gh_login = None
+        try:
+            gh_login = gh_user_login()
+        except GhError:
+            pass
         return TEMPLATES.TemplateResponse(
             request,
             "home.html",
             {
                 "prs": prs_list,
                 "last_sync": last_sync,
+                "gh_login": gh_login,
                 "version": __version__,
             },
         )
