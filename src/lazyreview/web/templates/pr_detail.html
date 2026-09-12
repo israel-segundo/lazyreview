@@ -25,7 +25,8 @@
   <div class="flex flex-wrap items-center gap-2 text-xs">
     {% set pr_label = 'draft' if pr.is_draft else (pr.state or 'open') %}
     <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
-      <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">PR</span>
+      <a class="bg-slate-100 px-2 py-1 font-medium text-blue-600 hover:underline dark:bg-slate-800 dark:text-blue-400"
+         href="{{ pr.url }}" target="_blank" rel="noopener">PR #{{ pr.number }}</a>
       <span class="px-2 py-1 font-medium
         {% if pr_label == 'draft' %}bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200
         {% elif pr_label == 'open' %}bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200
@@ -52,6 +53,42 @@
       <span class="bg-white px-2 py-1 font-medium text-slate-500 dark:bg-slate-900 dark:text-slate-400">—</span>
       {% endif %}
     </span>
+    <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
+      <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Author</span>
+      <span class="bg-white px-2 py-1 font-medium text-slate-700 dark:bg-slate-900 dark:text-slate-200">{{ pr.author or '—' }}</span>
+    </span>
+    <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
+      <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Diff</span>
+      <span class="bg-white px-2 py-1 font-medium dark:bg-slate-900">
+        {% if pr.additions is not none or pr.deletions is not none %}
+        <span class="text-emerald-700 dark:text-emerald-400">+{{ pr.additions or 0 }}</span>
+        <span class="text-slate-400">/</span>
+        <span class="text-red-700 dark:text-red-400">−{{ pr.deletions or 0 }}</span>
+        {% if pr.changed_files is not none %}
+        <span class="text-slate-500">· {{ pr.changed_files }} files</span>
+        {% endif %}
+        {% else %}
+        <span class="text-slate-500">—</span>
+        {% endif %}
+      </span>
+    </span>
+    <span class="inline-flex max-w-full items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
+      <span class="shrink-0 bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Branch</span>
+      <span class="min-w-0 truncate bg-white px-2 py-1 font-medium text-slate-700 dark:bg-slate-900 dark:text-slate-200"
+            title="{{ pr.head_ref or '—' }} → {{ pr.base_ref or '—' }}">
+        {% if pr.head_ref %}
+        <a class="text-blue-600 hover:underline dark:text-blue-400"
+           href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/tree/{{ pr.head_ref }}"
+           target="_blank" rel="noopener">{{ pr.head_ref }}</a>
+        {% else %}—{% endif %}
+        <span class="text-slate-400"> → </span>
+        {% if pr.base_ref %}
+        <a class="text-blue-600 hover:underline dark:text-blue-400"
+           href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/tree/{{ pr.base_ref }}"
+           target="_blank" rel="noopener">{{ pr.base_ref }}</a>
+        {% else %}—{% endif %}
+      </span>
+    </span>
     {% if runs_stale %}
     <span class="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 font-medium text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
           title="Current head has no review runs — previous runs are obsolete">
@@ -75,12 +112,7 @@
       {# Tabs #}
       <div>
         <div class="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-700" role="tablist">
-          <template x-for="t in [
-            {id:'general', label:'General'},
-            {id:'runs', label:'Runs'},
-            {id:'consolidations', label:'Consolidations'},
-            {id:'history', label:'History'}
-          ]" :key="t.id">
+          <template x-for="t in tabItems()" :key="t.id">
             <button type="button" role="tab"
                     @click="tab = t.id"
                     :aria-selected="tab === t.id"
@@ -92,71 +124,8 @@
           </template>
         </div>
 
-        {# General #}
-        <div x-show="tab === 'general'" x-cloak class="mt-4 space-y-4">
-          <section class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-            <div class="lr-pr-meta text-sm">
-              <div class="min-w-0">
-                <div class="text-xs uppercase tracking-wide text-slate-500">Author</div>
-                <div class="mt-0.5 truncate font-medium" title="{{ pr.author or '' }}">{{ pr.author or '—' }}</div>
-              </div>
-              <div class="min-w-0">
-                <div class="text-xs uppercase tracking-wide text-slate-500">Repository</div>
-                <div class="mt-0.5 truncate font-medium" title="{{ pr.owner }}/{{ pr.repo }}">{{ pr.owner }}/{{ pr.repo }}</div>
-              </div>
-              <div class="min-w-0">
-                <div class="text-xs uppercase tracking-wide text-slate-500">Head</div>
-                <div class="mt-0.5 font-mono text-xs">
-                  {% if pr.head_sha %}
-                  <a class="text-blue-600 hover:underline dark:text-blue-400"
-                     href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/commit/{{ pr.head_sha }}"
-                     target="_blank" rel="noopener">{{ pr.head_sha[:12] }}</a>
-                  {% else %}—{% endif %}
-                </div>
-              </div>
-              <div class="min-w-0">
-                <div class="text-xs uppercase tracking-wide text-slate-500">Diff</div>
-                <div class="mt-0.5">
-                  {% if pr.additions is not none or pr.deletions is not none %}
-                  <span class="text-emerald-700 dark:text-emerald-400">+{{ pr.additions or 0 }}</span>
-                  /
-                  <span class="text-red-700 dark:text-red-400">−{{ pr.deletions or 0 }}</span>
-                  {% if pr.changed_files is not none %}
-                  <span class="text-slate-500">· {{ pr.changed_files }} files</span>
-                  {% endif %}
-                  {% else %}—{% endif %}
-                </div>
-              </div>
-              <div class="lr-pr-meta-wide">
-                <div class="text-xs uppercase tracking-wide text-slate-500">Branches</div>
-                <div class="mt-0.5 break-words text-xs text-slate-600 dark:text-slate-300">
-                  {% if pr.head_ref %}
-                  <a class="text-blue-600 hover:underline dark:text-blue-400"
-                     href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/tree/{{ pr.head_ref }}"
-                     target="_blank" rel="noopener">{{ pr.head_ref }}</a>
-                  {% else %}—{% endif %}
-                  →
-                  {% if pr.base_ref %}
-                  <a class="text-blue-600 hover:underline dark:text-blue-400"
-                     href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/tree/{{ pr.base_ref }}"
-                     target="_blank" rel="noopener">{{ pr.base_ref }}</a>
-                  {% else %}—{% endif %}
-                </div>
-              </div>
-              <div class="min-w-0">
-                <div class="text-xs uppercase tracking-wide text-slate-500">Total cost</div>
-                <div class="mt-0.5 font-medium">{{ total_cost_usd|cost }}</div>
-              </div>
-              <div class="min-w-0">
-                <div class="text-xs uppercase tracking-wide text-slate-500">Runs</div>
-                <div class="mt-0.5 font-medium">{{ runs|length }}{% if runs_stale %} <span class="text-amber-700 dark:text-amber-300">(stale)</span>{% endif %}</div>
-              </div>
-              <div class="min-w-0">
-                <div class="text-xs uppercase tracking-wide text-slate-500">Consolidations</div>
-                <div class="mt-0.5 font-medium" x-text="consolidations.length"></div>
-              </div>
-            </div>
-          </section>
+        {# Overview #}
+        <div x-show="tab === 'overview'" x-cloak class="mt-4 space-y-4">
         </div>
 
         {# Runs #}
@@ -1059,7 +1028,7 @@ function reviewForm() {
     _agentsReady: false,
     _batchKeySeq: 1,
     toast: '',
-    tab: 'general',
+    tab: 'overview',
     sidebarOpen: true,
     sidebarRunsOpen: true,
     sidebarConsolOpen: true,
@@ -1101,6 +1070,16 @@ function reviewForm() {
       try {
         localStorage.setItem('lazyreview-pr-sidebar-open', this.sidebarOpen ? '1' : '0');
       } catch (_) { /* ignore */ }
+    },
+    tabItems() {
+      const nRuns = (this.runsForHistory || []).length;
+      const nConsol = (this.consolidations || []).length;
+      return [
+        { id: 'overview', label: 'Overview' },
+        { id: 'runs', label: nRuns ? ('Runs (' + nRuns + ')') : 'Runs' },
+        { id: 'consolidations', label: nConsol ? ('Consolidations (' + nConsol + ')') : 'Consolidations' },
+        { id: 'history', label: 'History' },
+      ];
     },
     _cloneJson(value) {
       return JSON.parse(JSON.stringify(value == null ? null : value));
