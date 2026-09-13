@@ -21,6 +21,7 @@ from lazyreview.agents.names import AgentName
 from lazyreview.config import Settings
 from lazyreview.db import (
     get_consolidation,
+    get_current_pr_analysis,
     get_pr,
     get_run,
     list_findings,
@@ -30,7 +31,7 @@ from lazyreview.db import (
 )
 from lazyreview.db.schema import connect
 from lazyreview.services.gh import GhError, list_pr_comments
-from lazyreview.services.settings import get_consolidator_config
+from lazyreview.services.settings import get_consolidator_config, get_publish_config
 
 logger = logging.getLogger(__name__)
 
@@ -213,22 +214,50 @@ def build_consolidate_command(
     raise RuntimeError(f"Unsupported consolidator agent: {agent}")
 
 
+_VALID_RECOMMENDED_ACTIONS = frozenset({"approve", "request_changes", "comment"})
+
+
+def parse_consolidation_meta(raw: str | None) -> tuple[str, str]:
+    """Return (recommended_action, rationale) from meta.json contents."""
+    action = "comment"
+    rationale = ""
+    if not (raw or "").strip():
+        return action, rationale
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return action, rationale
+    if not isinstance(data, dict):
+        return action, rationale
+    cand = str(data.get("recommended_action") or "").strip()
+    if cand in _VALID_RECOMMENDED_ACTIONS:
+        action = cand
+    rationale = str(data.get("rationale") or "").strip()
+    return action, rationale
+
+
 def render_consolidator_prompt(
     template: str,
     *,
     body_path: Path,
     findings_json_path: Path,
+    meta_json_path: Path,
     source_runs_label: str,
     pr_url: str = "",
 ) -> str:
     return (
         template.replace("{body_path}", str(body_path))
         .replace("{findings_json_path}", str(findings_json_path))
+        .replace("{meta_json_path}", str(meta_json_path))
         .replace("{source_runs_label}", source_runs_label)
         .replace("{pr_url}", pr_url or "")
         # Back-compat for older saved prompts that still use {model_label}
         .replace("{model_label}", source_runs_label)
     )
+
+
+def render_publish_prompt(template: str, *, publish_body_path: Path) -> str:
+    return template.replace("{publish_body_path}", str(publish_body_path))
 
 
 def format_source_runs_label(findings_by_run: list[dict[str, Any]]) -> str:
@@ -258,6 +287,8 @@ class ConsolidationRunner:
         self._cancel_requested: set[int] = set()
         self._procs: dict[int, subprocess.Popen[str]] = {}
         self._inflight: set[int] = set()
+        # Ids that should re-run only the GitHub publish transform.
+        self._publish_only: set[int] = set()
 
     @property
     def max_workers(self) -> int:
@@ -320,6 +351,12 @@ class ConsolidationRunner:
 
     def enqueue(self, consolidation_id: int) -> None:
         self._queue.put(consolidation_id)
+
+    def enqueue_publish(self, consolidation_id: int) -> None:
+        """Re-run only the GitHub publish transform for an existing consolidation."""
+        with self._lock:
+            self._publish_only.add(int(consolidation_id))
+        self.enqueue(int(consolidation_id))
 
     def notify_run_finished(self, run_id: int) -> None:
         """Observer: wake dormant consolidations that were waiting on this review run."""
@@ -465,6 +502,14 @@ class ConsolidationRunner:
         row = get_consolidation(conn, consolidation_id)
         if not row:
             return
+        publish_only = False
+        with self._lock:
+            if consolidation_id in self._publish_only:
+                self._publish_only.discard(consolidation_id)
+                publish_only = True
+        if publish_only:
+            self._execute_publish_only(consolidation_id, conn, row)
+            return
         if row["status"] not in ("queued", "running"):
             return
         if self._is_cancel_requested(consolidation_id, conn):
@@ -487,10 +532,16 @@ class ConsolidationRunner:
         work_dir.mkdir(parents=True, exist_ok=True)
         body_path = work_dir / "body.md"
         findings_out = work_dir / "findings.json"
+        meta_path = work_dir / "meta.json"
+        publish_body_path = work_dir / "publish-body.md"
+        analysis_brief_path = work_dir / "analysis-brief.md"
         prompt_path = work_dir / "prompt.md"
         stdout_path = work_dir / "stdout.log"
         stderr_path = work_dir / "stderr.log"
         cli_path = work_dir / "cli.json"
+        publish_prompt_path = work_dir / "publish-prompt.md"
+        publish_stdout_path = work_dir / "publish-stdout.log"
+        publish_stderr_path = work_dir / "publish-stderr.log"
 
         started = time.monotonic()
         started_at = utcnow()
@@ -503,6 +554,10 @@ class ConsolidationRunner:
             prompt_path=str(prompt_path),
             log_stdout_path=str(stdout_path),
             log_stderr_path=str(stderr_path),
+            publish_body=None,
+            ready_to_post=0,
+            recommended_action=None,
+            recommended_action_rationale=None,
         )
 
         try:
@@ -549,6 +604,18 @@ class ConsolidationRunner:
                 comments = []
                 logger.warning("list_pr_comments failed for consolidation %s: %s", consolidation_id, e)
 
+            analysis = get_current_pr_analysis(conn, int(pr["id"]))
+            brief = ""
+            if analysis and (analysis.get("brief_markdown") or "").strip():
+                brief = str(analysis["brief_markdown"])
+            if brief.strip():
+                analysis_brief_path.write_text(brief, encoding="utf-8")
+            else:
+                analysis_brief_path.write_text(
+                    "(No PR analysis brief available for this head.)\n",
+                    encoding="utf-8",
+                )
+
             (work_dir / "findings-by-run.json").write_text(
                 json.dumps(findings_by_run, indent=2), encoding="utf-8"
             )
@@ -576,6 +643,7 @@ class ConsolidationRunner:
                 cfg["prompt"],
                 body_path=body_path,
                 findings_json_path=findings_out,
+                meta_json_path=meta_path,
                 source_runs_label=source_runs_label,
                 pr_url=str(pr.get("url") or ""),
             )
@@ -692,6 +760,109 @@ class ConsolidationRunner:
                 f"({source_runs_label})"
             )
 
+            meta_raw = meta_path.read_text(encoding="utf-8") if meta_path.exists() else ""
+            recommended_action, rationale = parse_consolidation_meta(meta_raw)
+
+            # Keep status=running through publish so UI polling stays active.
+            update_consolidation(
+                conn,
+                consolidation_id,
+                body=body,
+                findings_json=findings_json,
+                dedup_summary=dedup_summary,
+                recommended_action=recommended_action,
+                recommended_action_rationale=rationale or None,
+                input_tokens=parsed.input_tokens,
+                output_tokens=parsed.output_tokens,
+                total_tokens=parsed.total_tokens,
+                cost_usd=cost_usd,
+                error_message=None,
+                ready_to_post=0,
+                publish_body=None,
+            )
+
+            publish_cfg = get_publish_config(conn)
+            publish_prompt_text = render_publish_prompt(
+                publish_cfg["prompt"],
+                publish_body_path=publish_body_path,
+            )
+            publish_prompt_path.write_text(publish_prompt_text, encoding="utf-8")
+
+            if self._is_cancel_requested(consolidation_id, conn):
+                update_consolidation(
+                    conn,
+                    consolidation_id,
+                    status="cancelled",
+                    finished_at=utcnow(),
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                    error_message="Cancelled by user",
+                )
+                return
+
+            pub_built = build_consolidate_command(
+                agent=agent,
+                model=model,
+                effort=effort,
+                prompt=publish_prompt_text,
+                work_dir=work_dir,
+            )
+            pub_rc = self._run_process(
+                consolidation_id,
+                pub_built.argv,
+                cwd=work_dir,
+                stdout_path=publish_stdout_path,
+                stderr_path=publish_stderr_path,
+                conn=conn,
+                stdin_text=pub_built.stdin_text,
+            )
+
+            duration_ms = int((time.monotonic() - started) * 1000)
+            finished_at = utcnow()
+
+            if self._is_cancel_requested(consolidation_id, conn):
+                update_consolidation(
+                    conn,
+                    consolidation_id,
+                    status="cancelled",
+                    finished_at=finished_at,
+                    duration_ms=duration_ms,
+                    error_message="Cancelled by user",
+                )
+                return
+
+            publish_body = (
+                publish_body_path.read_text(encoding="utf-8")
+                if publish_body_path.exists()
+                else ""
+            )
+            if pub_rc != 0 or not publish_body.strip():
+                pub_err = ""
+                if publish_stderr_path.exists():
+                    pub_err = publish_stderr_path.read_text(
+                        encoding="utf-8", errors="replace"
+                    )[-1500:]
+                if not pub_err and publish_stdout_path.exists():
+                    pub_err = publish_stdout_path.read_text(
+                        encoding="utf-8", errors="replace"
+                    )[-1500:]
+                if not pub_err:
+                    pub_err = (
+                        "Publish transform failed or publish-body.md was empty"
+                        if pub_rc == 0
+                        else f"Publish transform exit {pub_rc}"
+                    )
+                update_consolidation(
+                    conn,
+                    consolidation_id,
+                    status="failed",
+                    finished_at=finished_at,
+                    duration_ms=duration_ms,
+                    ready_to_post=0,
+                    publish_body=publish_body or None,
+                    error_message=pub_err[-2000:],
+                )
+                return
+
             update_consolidation(
                 conn,
                 consolidation_id,
@@ -701,6 +872,10 @@ class ConsolidationRunner:
                 body=body,
                 findings_json=findings_json,
                 dedup_summary=dedup_summary,
+                recommended_action=recommended_action,
+                recommended_action_rationale=rationale or None,
+                publish_body=publish_body,
+                ready_to_post=1,
                 input_tokens=parsed.input_tokens,
                 output_tokens=parsed.output_tokens,
                 total_tokens=parsed.total_tokens,
@@ -730,6 +905,184 @@ class ConsolidationRunner:
                 error_message=str(e)[-2000:],
             )
             raise
+
+    def _execute_publish_only(
+        self,
+        consolidation_id: int,
+        conn: sqlite3.Connection,
+        row: dict[str, Any],
+    ) -> None:
+        """Re-run only the publish transform using the existing internal report."""
+        body = (row.get("body") or "").strip()
+        if not body:
+            update_consolidation(
+                conn,
+                consolidation_id,
+                ready_to_post=0,
+                error_message="Cannot regenerate publish draft: internal report is empty",
+            )
+            return
+        if int(row.get("feedback_provided") or 0):
+            return
+        if self._is_cancel_requested(consolidation_id, conn):
+            return
+
+        pr = get_pr(conn, int(row["pr_id"]))
+        if not pr:
+            update_consolidation(
+                conn,
+                consolidation_id,
+                ready_to_post=0,
+                error_message="PR not found",
+            )
+            return
+
+        work_dir = Path(
+            row.get("workdir_path")
+            or consolidations_dir(self.settings) / str(consolidation_id)
+        )
+        work_dir.mkdir(parents=True, exist_ok=True)
+        body_path = work_dir / "body.md"
+        findings_out = work_dir / "findings.json"
+        meta_path = work_dir / "meta.json"
+        publish_body_path = work_dir / "publish-body.md"
+        analysis_brief_path = work_dir / "analysis-brief.md"
+        publish_prompt_path = work_dir / "publish-prompt.md"
+        publish_stdout_path = work_dir / "publish-stdout.log"
+        publish_stderr_path = work_dir / "publish-stderr.log"
+        pr_json_path = work_dir / "pr.json"
+
+        # Refresh inputs from DB so republish works even if the workdir was pruned.
+        body_path.write_text(body + ("\n" if not body.endswith("\n") else ""), encoding="utf-8")
+        findings_json = row.get("findings_json")
+        if findings_json:
+            findings_out.write_text(str(findings_json), encoding="utf-8")
+        elif not findings_out.exists():
+            findings_out.write_text("[]\n", encoding="utf-8")
+        meta_path.write_text(
+            json.dumps(
+                {
+                    "recommended_action": row.get("recommended_action") or "comment",
+                    "rationale": row.get("recommended_action_rationale") or "",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        pr_json_path.write_text(
+            json.dumps(
+                {
+                    "id": pr["id"],
+                    "owner": pr["owner"],
+                    "repo": pr["repo"],
+                    "number": pr["number"],
+                    "url": pr.get("url"),
+                    "title": pr.get("title"),
+                    "head_sha": pr.get("head_sha"),
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        analysis = get_current_pr_analysis(conn, int(pr["id"]))
+        brief = ""
+        if analysis and (analysis.get("brief_markdown") or "").strip():
+            brief = str(analysis["brief_markdown"])
+        analysis_brief_path.write_text(
+            brief if brief.strip() else "(No PR analysis brief available for this head.)\n",
+            encoding="utf-8",
+        )
+        if publish_body_path.exists():
+            try:
+                publish_body_path.unlink()
+            except OSError:
+                pass
+
+        prior_status = row.get("status") or "succeeded"
+        update_consolidation(
+            conn,
+            consolidation_id,
+            ready_to_post=0,
+            error_message=None,
+            workdir_path=str(work_dir),
+        )
+
+        cfg = get_consolidator_config(conn)
+        agent = cfg["agent"]
+        model = cfg["model"]
+        effort = cfg.get("effort") or None
+        publish_cfg = get_publish_config(conn)
+        publish_prompt_text = render_publish_prompt(
+            publish_cfg["prompt"],
+            publish_body_path=publish_body_path,
+        )
+        publish_prompt_path.write_text(publish_prompt_text, encoding="utf-8")
+
+        if self._is_cancel_requested(consolidation_id, conn):
+            return
+
+        pub_built = build_consolidate_command(
+            agent=agent,
+            model=model,
+            effort=effort,
+            prompt=publish_prompt_text,
+            work_dir=work_dir,
+        )
+        pub_rc = self._run_process(
+            consolidation_id,
+            pub_built.argv,
+            cwd=work_dir,
+            stdout_path=publish_stdout_path,
+            stderr_path=publish_stderr_path,
+            conn=conn,
+            stdin_text=pub_built.stdin_text,
+        )
+        if self._is_cancel_requested(consolidation_id, conn):
+            return
+
+        publish_body = (
+            publish_body_path.read_text(encoding="utf-8")
+            if publish_body_path.exists()
+            else ""
+        )
+        if pub_rc != 0 or not publish_body.strip():
+            pub_err = ""
+            if publish_stderr_path.exists():
+                pub_err = publish_stderr_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )[-1500:]
+            if not pub_err and publish_stdout_path.exists():
+                pub_err = publish_stdout_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )[-1500:]
+            if not pub_err:
+                pub_err = (
+                    "Publish transform failed or publish-body.md was empty"
+                    if pub_rc == 0
+                    else f"Publish transform exit {pub_rc}"
+                )
+            update_consolidation(
+                conn,
+                consolidation_id,
+                # Keep prior status when republishing a succeeded consolidation;
+                # only flip failed→failed with a fresh error.
+                status="failed" if prior_status == "failed" else prior_status,
+                ready_to_post=0,
+                publish_body=publish_body or row.get("publish_body"),
+                error_message=pub_err[-2000:],
+            )
+            return
+
+        update_consolidation(
+            conn,
+            consolidation_id,
+            status="succeeded",
+            publish_body=publish_body,
+            ready_to_post=1,
+            error_message=None,
+        )
 
     def _run_process(
         self,

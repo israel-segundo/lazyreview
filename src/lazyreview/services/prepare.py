@@ -84,9 +84,33 @@ def _install_host_skills(repo_dir: Path, skill: str) -> list[str]:
     return installed
 
 
+def _git_common_dir(repo_dir: Path) -> Path | None:
+    """Resolve the real git dir (handles worktrees where ``.git`` is a file)."""
+    git = repo_dir / ".git"
+    if git.is_dir():
+        return git
+    if not git.is_file():
+        return None
+    # Linked worktree: `.git` contains `gitdir: /path/to/.../worktrees/<id>`
+    for line in git.read_text(encoding="utf-8").splitlines():
+        if line.lower().startswith("gitdir:"):
+            raw = line.split(":", 1)[1].strip()
+            if not raw:
+                return None
+            gitdir = Path(raw)
+            if not gitdir.is_absolute():
+                gitdir = (repo_dir / gitdir).resolve()
+            return gitdir
+    return None
+
+
 def _ensure_gitignore(repo_dir: Path) -> None:
     """Keep review artifacts out of the agent's notion of dirty source."""
-    gi = repo_dir / ".git" / "info" / "exclude"
+    git_dir = _git_common_dir(repo_dir)
+    if git_dir is None:
+        logger.warning("no .git dir/file under %s; skip exclude update", repo_dir)
+        return
+    gi = git_dir / "info" / "exclude"
     gi.parent.mkdir(parents=True, exist_ok=True)
     line = ".lazyreview/"
     existing = gi.read_text(encoding="utf-8") if gi.exists() else ""

@@ -156,6 +156,11 @@
                 :class="agentsTab === 'analysis' && 'lr-settings-tab--active'"
                 :aria-selected="agentsTab === 'analysis'"
                 @click="agentsTab = 'analysis'">PR analysis</button>
+        <button type="button" role="tab"
+                class="lr-settings-tab"
+                :class="agentsTab === 'publish' && 'lr-settings-tab--active'"
+                :aria-selected="agentsTab === 'publish'"
+                @click="agentsTab = 'publish'">Publish</button>
       </div>
 
       {# Reviews tab #}
@@ -442,14 +447,16 @@
                         @click="consolidatorPromptMode = 'source'">Markdown</button>
               </div>
             </div>
-            <div class="lr-prompt-body"
-                 x-show="consolidatorPromptMode === 'preview'" x-cloak
-                 x-html="renderMarkdown(consolidatorPrompt)"></div>
-            <textarea x-show="consolidatorPromptMode === 'source'" x-cloak
-                      x-model="consolidatorPrompt"
-                      spellcheck="false"
-                      class="lr-prompt-source"
-                      aria-label="Consolidation prompt markdown"></textarea>
+            <div class="lr-prompt-canvas">
+              <div class="lr-prompt-body"
+                   x-show="consolidatorPromptMode === 'preview'" x-cloak
+                   x-html="renderMarkdown(consolidatorPrompt)"></div>
+              <textarea x-show="consolidatorPromptMode === 'source'" x-cloak
+                        x-model="consolidatorPrompt"
+                        spellcheck="false"
+                        class="lr-prompt-source"
+                        aria-label="Consolidation prompt markdown"></textarea>
+            </div>
             <p class="lr-prompt-hint">
               Placeholders:
               <code>{source_runs_label}</code>,
@@ -600,14 +607,16 @@
                         @click="analysisPromptMode = 'source'">Markdown</button>
               </div>
             </div>
-            <div class="lr-prompt-body"
-                 x-show="analysisPromptMode === 'preview'" x-cloak
-                 x-html="renderMarkdown(analysisPrompt)"></div>
-            <textarea x-show="analysisPromptMode === 'source'" x-cloak
-                      x-model="analysisPrompt"
-                      spellcheck="false"
-                      class="lr-prompt-source"
-                      aria-label="PR analysis prompt markdown"></textarea>
+            <div class="lr-prompt-canvas">
+              <div class="lr-prompt-body"
+                   x-show="analysisPromptMode === 'preview'" x-cloak
+                   x-html="renderMarkdown(analysisPrompt)"></div>
+              <textarea x-show="analysisPromptMode === 'source'" x-cloak
+                        x-model="analysisPrompt"
+                        spellcheck="false"
+                        class="lr-prompt-source"
+                        aria-label="PR analysis prompt markdown"></textarea>
+            </div>
           </div>
 
           <div class="lr-prompt-footer">
@@ -620,6 +629,60 @@
               Reset prompt to default
             </button>
             <span class="text-sm text-slate-500 dark:text-slate-400" x-text="analysisMsg"></span>
+          </div>
+        </div>
+      </div>
+
+      {# Publish tab #}
+      <div x-show="agentsTab === 'publish'" x-cloak class="lr-settings-tab-body lr-settings-tab-body--prompt" role="tabpanel">
+        <div class="lr-prompt-shell">
+          <div class="lr-prompt-meta">
+            <p class="text-sm text-slate-600 dark:text-slate-400">
+              Prompt that transforms the internal consolidation report into the GitHub-facing draft.
+              Uses the consolidator agent/model/effort. Humans still confirm before posting.
+            </p>
+          </div>
+
+          <div class="lr-prompt-editor">
+            <div class="lr-prompt-toolbar">
+              <span class="text-sm font-medium text-slate-800 dark:text-slate-200">Prompt</span>
+              <div class="lr-prompt-mode">
+                <button type="button"
+                        class="lr-prompt-mode-btn"
+                        :class="publishPromptMode === 'preview' && 'lr-prompt-mode-btn--active'"
+                        @click="publishPromptMode = 'preview'">Preview</button>
+                <button type="button"
+                        class="lr-prompt-mode-btn"
+                        :class="publishPromptMode === 'source' && 'lr-prompt-mode-btn--active'"
+                        @click="publishPromptMode = 'source'">Markdown</button>
+              </div>
+            </div>
+            <div class="lr-prompt-canvas">
+              <div class="lr-prompt-body"
+                   x-show="publishPromptMode === 'preview'" x-cloak
+                   x-html="renderMarkdown(publishPrompt)"></div>
+              <textarea x-show="publishPromptMode === 'source'" x-cloak
+                        x-model="publishPrompt"
+                        spellcheck="false"
+                        class="lr-prompt-source"
+                        aria-label="Publish prompt markdown"></textarea>
+            </div>
+            <p class="lr-prompt-hint">
+              Placeholders:
+              <code>{publish_body_path}</code>
+            </p>
+          </div>
+
+          <div class="lr-prompt-footer">
+            <button type="button" @click="savePublish()"
+                    class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+              Save
+            </button>
+            <button type="button" @click="resetPublishPrompt()"
+                    class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+              Reset prompt to default
+            </button>
+            <span class="text-sm text-slate-500 dark:text-slate-400" x-text="publishMsg"></span>
           </div>
         </div>
       </div>
@@ -643,7 +706,9 @@ function settingsPage() {
       let html;
       try {
         if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
-          html = marked.parse(raw, { breaks: true });
+          // Prompt .md files use soft line wraps (~80 cols). breaks:true would turn
+          // those into <br> and make the preview wrap mid-sentence before the pane edge.
+          html = marked.parse(raw, { breaks: false });
         } else {
           html = raw
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -679,6 +744,10 @@ function settingsPage() {
     analysisPrompt: {{ (settings.pr_analysis_prompt|default(''))|tojson }},
     defaultAnalysisPrompt: {{ (settings.pr_analysis_prompt_default|default(''))|tojson }},
     analysisMsg: '',
+    publishPrompt: {{ (settings.publish_prompt|default(''))|tojson }},
+    defaultPublishPrompt: {{ (settings.publish_prompt_default|default(''))|tojson }},
+    publishMsg: '',
+    publishPromptMode: 'preview',
     analysisModels: [],
     analysisEfforts: [],
     analysisOpenCombo: null,
@@ -1051,6 +1120,40 @@ function settingsPage() {
       this.analysisMsg = 'Saved.';
       setTimeout(() => { this.analysisMsg = ''; }, 2500);
     },
+
+    async savePublish() {
+      this.publishMsg = 'Saving…';
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          publish_prompt: this.publishPrompt
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        this.publishMsg = '';
+        await lrAlert(data.detail || 'Save failed', { title: 'Settings' });
+        return;
+      }
+      this.publishPrompt = data.publish_prompt || '';
+      this.publishMsg = 'Saved';
+      setTimeout(() => { this.publishMsg = ''; }, 2500);
+    },
+    async resetPublishPrompt() {
+      const ok = await lrConfirm({
+        title: 'Reset prompt?',
+        message: 'Replace the publish prompt with the built-in default?',
+        confirmLabel: 'Reset',
+        danger: true,
+      });
+      if (!ok) return;
+      this.publishPrompt = this.defaultPublishPrompt || this.publishPrompt;
+      await this.savePublish();
+      this.publishMsg = 'Prompt reset to default';
+      setTimeout(() => { this.publishMsg = ''; }, 2500);
+    },
+
     async resetAnalysisPrompt() {
       const ok = await lrConfirm({
         title: 'Reset prompt?',

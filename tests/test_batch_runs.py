@@ -96,7 +96,6 @@ def test_batch_creates_multiple_runs(tmp_path: Path):
                     "/api/runs/batch",
                     json={
                         "pr_id": pr["id"],
-                        "consolidate_when_done": False,
                         "runs": [
                             {"agent": "claude", "model": "opus", "effort": "high"},
                             {"agent": "claude", "model": "haiku", "effort": "low"},
@@ -107,7 +106,8 @@ def test_batch_creates_multiple_runs(tmp_path: Path):
             data = res.json()
             assert data["count"] == 2
             assert len(data["runs"]) == 2
-            assert data["consolidation"] is None
+            assert data["consolidation"] is not None
+            assert data["consolidation"]["status"] == "dormant"
             assert {r["model"] for r in data["runs"]} == {"opus", "haiku"}
             assert all(r["status"] == "queued" for r in data["runs"])
 

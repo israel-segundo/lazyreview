@@ -1,8 +1,13 @@
 # Consolidation prompt
 
 You consolidate findings from multiple **orchestrated agentic code-review** runs into
-a single PR comment. Deduplicate across those runs **and** against existing unresolved
-human PR feedback. Do not invent findings. Do not post to GitHub yourself.
+an **internal consensus report** for a human. Deduplicate across those runs **and**
+against existing unresolved human PR feedback. Do not invent findings. Do not post to
+GitHub yourself.
+
+A separate publish step (not you) will transform this report into the GitHub-facing
+comment. Your `body.md` is the internal source of truth — it may be slightly richer than
+what eventually posts, but it must stay accurate and evidence-based.
 
 This report must read clearly as an **orchestrated agentic code review**: multiple
 independent review agents ran; you merged and deduped their findings for a human to
@@ -10,6 +15,9 @@ confirm before posting.
 
 ## Inputs (in this workdir)
 
+- `analysis-brief.md` — PR analysis orientation brief for the current head (before/after
+  intent, coverage, diagrams). Use it for context. If it is only a stub saying analysis
+  is missing, say so once and proceed from the findings alone.
 - `findings-by-run.json` — array of `{ run, findings[] }` from selected review runs
   (`run.agent`, `run.model`, `run.effort`; findings have `severity` 1|2|3)
 - `pr.json` — PR metadata (`url`, `owner`, `repo`, `number`, `title`, `head_sha`, …)
@@ -44,7 +52,7 @@ feedback dedup.
 
 ## Which review pass is this? (required)
 
-Before writing the comment, determine whether this is the **1st, 2nd, 3rd, …** code
+Before writing the report, determine whether this is the **1st, 2nd, 3rd, …** code
 review **you** (the authenticated `gh` user from `gh api user`) have posted on this PR.
 
 Count prior **top-level** threads authored by your login on this PR that are previous
@@ -79,18 +87,34 @@ allows (new head, remaining gaps, or re-check) — do not invent history you can
    short comment saying so. Include the "Already addressed…" section only when there is
    at least one S1/S2 duplicate.
 
+## Recommended GitHub action (required)
+
+Choose exactly one `recommended_action` for the human submit modal:
+
+| Value | When |
+|-------|------|
+| `approve` | No kept S1 or S2 findings remain after dedup (S3-only or empty is fine). |
+| `request_changes` | Any kept S1, or material kept S2 that should block merge. |
+| `comment` | Everything else (e.g. only non-blocking S2/S3, or mixed signals). |
+
+Do **not** post. Only recommend. Put the choice in `meta.json` (below).
+
 ## Output files (required)
 
-1. Write the final GitHub markdown to exactly:
+1. Write the **internal consensus report** markdown to exactly:
    `{body_path}`
 2. Write machine-readable kept findings to exactly:
    `{findings_json_path}`
    as a JSON array of objects (main findings only — not the already-addressed duplicates):
    `{ "id", "severity" (1|2|3), "title", "body", "path"?, "line"?, "disposition"? }`
+3. Write recommendation metadata to exactly:
+   `{meta_json_path}`
+   as a JSON object:
+   `{ "recommended_action": "approve"|"request_changes"|"comment", "rationale": "<one or two sentences>" }`
 
-When both files are written, stop. No challenge loop. No GitHub posts.
+When all three files are written, stop. No challenge loop. No GitHub posts.
 
-## The posted PR comment (body.md shape)
+## The internal report (body.md shape)
 
 Exact shape, in order. Do **not** put a "How this was produced" block or coverage
 tables near the top — those belong at the end.
@@ -102,9 +126,9 @@ tables near the top — those belong at the end.
 - 3rd+: same pattern with the ordinal (`3rd`, `4th`, …)
 
 **2. Stance paragraph** — **2–4 sentences**, immediately after the title (no
-blockquote, no tables yet). What's good about the PR, what the kept findings are
-about, blast radius if any. On a 2nd+ pass, say so in plain language (e.g. this is
-the second code review on this PR).
+blockquote, no tables yet). Ground this in `analysis-brief.md` when present: what was
+true before, what this PR changes, what's good, what the kept findings are about, blast
+radius if any. On a 2nd+ pass, say so in plain language.
 
 **3. Findings — severity-ranked list. NOT a table.** One paragraph per kept finding
 (new / not already covered by humans):
@@ -135,9 +159,9 @@ Do **not** include S3 duplicates here.
 
 **5. Verified while consolidating** — heading `## Verified while consolidating`, then
 one short paragraph: which source review agents/models you merged
-(`{source_runs_label}`), that you fetched existing PR feedback with `gh` and deduped
-against it (including the S1/S2 already-addressed list), which review pass this is
-(1st / 2nd / …), and limits.
+(`{source_runs_label}`), that you used the analysis brief when present, that you
+fetched existing PR feedback with `gh` and deduped against it (including the S1/S2
+already-addressed list), which review pass this is (1st / 2nd / …), and limits.
 
 **6. Suggested split** — heading `## Suggested split`, then one or two sentences
 separating fix-before-merge from follow-ups.

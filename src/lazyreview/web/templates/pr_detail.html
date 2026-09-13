@@ -134,11 +134,15 @@
             <button type="button" role="tab"
                     @click="tab = t.id"
                     :aria-selected="tab === t.id"
-                    class="border-b-2 px-3 py-2 text-sm font-medium transition-colors"
+                    class="inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors"
                     :class="tab === t.id
                       ? 'border-blue-600 text-blue-700 dark:border-blue-400 dark:text-blue-300'
-                      : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'"
-                    x-text="t.label"></button>
+                      : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'">
+              <span x-text="t.label"></span>
+              <svg x-show="t.warn" x-cloak class="h-3.5 w-3.5 text-amber-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" title="Report is for a deprecated commit">
+                <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+              </svg>
+            </button>
           </template>
         </div>
         {# Overview #}
@@ -370,7 +374,7 @@
             <th class="px-3 py-3">Tokens</th>
             <th class="px-3 py-3">Cost</th>
             <th class="px-3 py-3">Duration</th>
-            <th class="px-3 py-3">Feedback submitted</th>
+            <th class="px-3 py-3">Disposition</th>
             <th class="px-3 py-3 text-right">Actions</th>
           </tr>
         </thead>
@@ -378,12 +382,11 @@
           <template x-for="c in consolidations" :key="c.id">
             <tr>
               <td class="px-3 py-3 font-mono text-xs">
-                <button type="button"
-                        x-show="c.status === 'succeeded'"
-                        x-cloak
-                        class="text-blue-600 hover:underline dark:text-blue-400"
-                        @click="openView(c)"
-                        x-text="'#' + c.id"></button>
+                <a x-show="c.status === 'succeeded'"
+                   x-cloak
+                   class="text-blue-600 hover:underline dark:text-blue-400"
+                   :href="'/consolidations/' + c.id"
+                   x-text="'#' + c.id"></a>
                 <span x-show="c.status !== 'succeeded'" x-text="'#' + c.id"></span>
               </td>
               <td class="px-3 py-3">
@@ -437,24 +440,18 @@
               <td class="px-3 py-3" x-text="formatCost(c.cost_usd)"></td>
               <td class="px-3 py-3" x-text="formatDuration(c.duration_ms)"></td>
               <td class="px-3 py-3">
-                <span x-show="c.feedback_provided"
+                <span x-show="dispositionLabel(c)"
                       class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
-                      :class="feedbackActionClass(c.gh_action)"
-                      x-text="feedbackActionLabel(c.gh_action)"></span>
-                <span x-show="!c.feedback_provided" class="text-slate-400">—</span>
+                      :class="dispositionClass(c)"
+                      :title="dispositionTitle(c)"
+                      x-text="dispositionLabel(c)"></span>
+                <span x-show="!dispositionLabel(c)" class="text-slate-400">—</span>
               </td>
               <td class="px-3 py-3 text-right">
                 <div class="inline-flex items-center justify-end gap-1">
                   <button type="button" @click="openConsolLogs(c)"
                           class="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
                     Logs
-                  </button>
-                  <button type="button"
-                          x-show="c.status === 'succeeded'"
-                          x-cloak
-                          @click="openView(c)"
-                          class="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
-                    View
                   </button>
                   <button type="button"
                           x-show="c.status === 'succeeded' || c.status === 'failed' || c.status === 'cancelled'"
@@ -471,12 +468,19 @@
                           class="rounded-lg px-2 py-1 text-xs text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-950/40">
                     Cancel
                   </button>
-                  <button type="button"
-                          x-show="c.status === 'succeeded' && !c.feedback_provided"
-                          @click="openSubmit(c)"
-                          class="rounded-lg bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700">
-                    Submit
-                  </button>
+                  <span class="text-xs text-slate-500"
+                        x-show="c.status === 'succeeded' && !c.feedback_provided && !c.ready_to_post"
+                        x-cloak>Preparing GitHub draft…</span>
+                  <a x-show="c.status === 'succeeded'"
+                     x-cloak
+                     :href="'/consolidations/' + c.id"
+                     class="rounded-lg px-2 py-1 text-xs font-medium"
+                     :class="c.feedback_provided
+                       ? 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                       : (c.ready_to_post
+                         ? 'bg-blue-600 text-white hover:bg-blue-700'
+                         : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800')"
+                     x-text="c.feedback_provided ? 'View' : (c.ready_to_post ? 'Submit' : 'View')"></a>
                 </div>
               </td>
             </tr>
@@ -491,25 +495,129 @@
 
         </div>
 
+
+        {# Findings — latest consolidation report #}
+        <div x-show="tab === 'findings'" x-cloak class="mt-4 space-y-3" id="tab-findings">
+          <template x-if="latestConsolidation()">
+            <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+              <div class="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Latest consolidation report</h2>
+                    <span class="font-mono text-xs text-slate-500" x-text="'#' + latestConsolidation().id"></span>
+                    <span class="lr-status-ball h-2.5 w-2.5"
+                          :class="statusBallClass(latestConsolidation().status, {consolidating: true})"
+                          role="img"
+                          :aria-label="consolidationStatusLabel(latestConsolidation().status)"
+                          :title="consolidationStatusLabel(latestConsolidation().status)"></span>
+                  </div>
+                  <p class="mt-1 text-xs text-slate-500">
+                    <span x-show="latestConsolidation().head_sha">
+                      Commit
+                      <a class="font-mono text-blue-600 hover:underline dark:text-blue-400"
+                         :href="'https://github.com/{{ pr.owner }}/{{ pr.repo }}/commit/' + latestConsolidation().head_sha"
+                         target="_blank" rel="noopener"
+                         x-text="(latestConsolidation().head_sha || '').slice(0, 12)"></a>
+                    </span>
+                    <span x-show="latestConsolidation().finished_at || latestConsolidation().created_at">
+                      ·
+                      <span :title="latestConsolidation().finished_at || latestConsolidation().created_at"
+                            x-text="timeAgo(latestConsolidation().finished_at || latestConsolidation().created_at)"></span>
+                    </span>
+                  </p>
+                </div>
+                <a class="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
+                   :href="'/consolidations/' + latestConsolidation().id"
+                   x-show="latestConsolidation().status === 'succeeded'">
+                  Open full view
+                </a>
+              </div>
+
+              <div x-show="findingsAreDeprecated()" x-cloak
+                   class="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+                <svg class="mt-0.5 h-4 w-4 shrink-0 text-amber-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+                </svg>
+                <div>
+                  <p class="font-medium">Report is for a deprecated commit</p>
+                  <p class="text-xs opacity-90">
+                    This consolidation was produced for
+                    <span class="font-mono" x-text="(latestConsolidation().head_sha || '').slice(0, 12)"></span>,
+                    but the PR head is now
+                    <span class="font-mono">{{ (pr.head_sha or '')[:12] }}</span>.
+                    Re-run reviews/consolidation on the current head before posting feedback.
+                  </p>
+                </div>
+              </div>
+
+              <div class="p-4">
+                <template x-if="latestConsolidation().status === 'succeeded' && String(latestConsolidation().body || '').trim()">
+                  <div class="consol-md prose-sm max-w-none text-sm text-slate-800 dark:text-slate-200"
+                       x-html="_renderMarkdown(latestConsolidation().body || '')"></div>
+                </template>
+                <template x-if="consolidationIsActive(latestConsolidation().status)">
+                  <p class="text-sm text-slate-500">
+                    Consolidation
+                    <span x-text="consolidationStatusLabel(latestConsolidation().status).toLowerCase()"></span>…
+                    The report will appear here when it finishes.
+                  </p>
+                </template>
+                <template x-if="latestConsolidation().status === 'failed'">
+                  <p class="text-sm text-red-600 dark:text-red-400"
+                     x-text="latestConsolidation().error_message || 'Consolidation failed.'"></p>
+                </template>
+                <template x-if="latestConsolidation().status === 'succeeded' && !String(latestConsolidation().body || '').trim()">
+                  <p class="text-sm text-slate-500">Consolidation succeeded but the report body is empty.</p>
+                </template>
+                <template x-if="!['succeeded','failed'].includes(latestConsolidation().status) && !consolidationIsActive(latestConsolidation().status)">
+                  <p class="text-sm text-slate-500"
+                     x-text="'Status: ' + consolidationStatusLabel(latestConsolidation().status)"></p>
+                </template>
+              </div>
+            </section>
+          </template>
+          <p x-show="!latestConsolidation()" class="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-600 dark:bg-slate-900">
+            No consolidation report yet.
+          </p>
+        </div>
+
+        {# Feedback Provided #}
+        <div x-show="tab === 'feedback'" x-cloak class="mt-4 space-y-3" id="tab-feedback">
+          <template x-for="f in (feedback || [])" :key="f.id">
+            <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+              <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
+                        :class="feedbackActionClass(f.action)"
+                        x-text="feedbackActionLabel(f.action)"></span>
+                  <span class="text-xs text-slate-500"
+                        :title="f.created_at"
+                        x-text="timeAgo(f.created_at) || f.created_at"></span>
+                </div>
+                <a x-show="f.gh_comment_url" x-cloak
+                   :href="f.gh_comment_url" target="_blank" rel="noopener"
+                   class="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400">
+                  View on GitHub
+                </a>
+              </div>
+              <div class="p-4">
+                <div class="consol-md prose-sm max-w-none text-sm text-slate-800 dark:text-slate-200"
+                     x-show="String(f.body || '').trim()"
+                     x-html="_renderMarkdown(f.body || '')"></div>
+                <p x-show="!String(f.body || '').trim()" class="text-sm text-slate-500">No body stored for this feedback.</p>
+                <p x-show="f.dedup_summary" class="mt-3 text-xs text-slate-500" x-text="f.dedup_summary"></p>
+              </div>
+            </section>
+          </template>
+          <p x-show="!(feedback || []).length"
+             class="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-600 dark:bg-slate-900">
+            No feedback posted to GitHub yet.
+          </p>
+        </div>
+
+
         {# History #}
         <div x-show="tab === 'history'" x-cloak class="mt-4 space-y-3">
-  {% if feedback %}
-  <section>
-    <h2 class="text-lg font-semibold">Feedback history</h2>
-    <ul class="mt-3 space-y-2 text-sm">
-      {% for f in feedback %}
-      <li class="rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
-        <span class="font-medium">{{ f.action }}</span>
-        <span class="text-slate-400">·
-          <span title="{{ f.created_at }}"
-                x-text='timeAgo({{ f.created_at|tojson }}) || {{ f.created_at|tojson }}'></span>
-        </span>
-        {% if f.dedup_summary %}<div class="text-slate-500">{{ f.dedup_summary }}</div>{% endif %}
-      </li>
-      {% endfor %}
-    </ul>
-  </section>
-  {% endif %}
 
           <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
             <h2 class="border-b border-slate-100 px-4 py-3 text-sm font-semibold dark:border-slate-800">Timeline</h2>
@@ -746,172 +854,6 @@
   </div>
 
 
-  <!-- Submit / view consolidation modal -->
-  <div x-show="submitOpen" x-cloak class="lr-modal-backdrop" role="dialog" aria-modal="true">
-    <div class="absolute inset-0 bg-slate-900/50" @click="closeSubmit()"></div>
-    <div class="lr-modal-panel lr-modal-panel--large" @click.stop>
-      <div class="lr-modal-header">
-        <div class="min-w-0">
-          <h2 class="text-lg font-semibold"
-              x-text="submitReadOnly
-                ? ('#' + (submitTarget && submitTarget.id) + ' Consolidation Details')
-                : ('#' + (submitTarget && submitTarget.id) + ' Submit Feedback')"></h2>
-          <p class="mt-1 text-sm text-slate-500"
-             x-show="submitReadOnly && submitTarget && submitTarget.feedback_provided">
-            Submitted as <span x-text="feedbackActionLabel(submitTarget.gh_action)"></span>
-          </p>
-        </div>
-        <button type="button" class="lr-modal-close" @click="closeSubmit()" aria-label="Close">Close</button>
-      </div>
-
-      <!-- Single scroll region for Runs, Findings, and future sections -->
-      <div class="mt-3 lr-modal-scroll space-y-8">
-        <section class="py-3">
-          <h3 class="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-200">Runs</h3>
-          <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-            <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
-              <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
-                <tr>
-                  <th class="px-3 py-2">ID</th>
-                  <th class="px-3 py-2">Status</th>
-                  <th class="px-3 py-2">Agent / Model / Effort</th>
-                  <th class="px-3 py-2">Findings</th>
-                  <th class="px-3 py-2">Tokens</th>
-                  <th class="px-3 py-2">Cost</th>
-                  <th class="px-3 py-2">Duration</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-                <template x-for="row in submitSourceRunRows()" :key="row.id">
-                  <tr>
-                    <td class="px-3 py-2 font-mono text-xs">
-                      <button type="button"
-                              class="text-blue-600 hover:underline dark:text-blue-400"
-                              @click="closeSubmit(); openSidebarRun(row.id)"
-                              x-text="'#' + row.id"></button>
-                    </td>
-                    <td class="px-3 py-2">
-                      <span class="lr-status-ball h-2.5 w-2.5"
-                            :class="statusBallClass(row.status)"
-                            :title="row.status"
-                            role="img"
-                            :aria-label="row.status"></span>
-                    </td>
-                    <td class="px-3 py-2">
-                      <span class="inline-flex items-center gap-1.5 align-middle">
-                        <img x-show="agentKey(row.agent) === LR.AgentName.CLAUDE" x-cloak
-                             src="/static/img/agents/claude.webp" alt="" width="16" height="16"
-                             class="h-4 w-4 shrink-0 object-contain" />
-                        <img x-show="agentKey(row.agent) === LR.AgentName.AGY" x-cloak
-                             src="/static/img/agents/agy.png" alt="" width="16" height="16"
-                             class="h-4 w-4 shrink-0 object-contain" />
-                        <img x-show="agentKey(row.agent) === LR.AgentName.CURSOR" x-cloak
-                             src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
-                             class="h-4 w-4 shrink-0 object-contain dark:hidden" />
-                        <img x-show="agentKey(row.agent) === LR.AgentName.CURSOR" x-cloak
-                             src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
-                             class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
-                        <span x-text="agentTitle(row.agent) || '—'"></span>
-                      </span>
-                      <span class="text-slate-400" x-show="row.model"> · </span>
-                      <span x-text="row.model || ''"></span>
-                      <span class="text-slate-400" x-show="row.effort"> · </span>
-                      <span x-text="row.effort || ''"></span>
-                    </td>
-                    <td class="px-3 py-2 font-mono text-xs"
-                        x-text="runFindingsLabel(row)"></td>
-                    <td class="px-3 py-2" x-text="row.total_tokens != null ? row.total_tokens : '—'"></td>
-                    <td class="px-3 py-2" x-text="formatCost(row.cost_usd)"></td>
-                    <td class="px-3 py-2" x-text="formatDuration(row.duration_ms)"></td>
-                  </tr>
-                </template>
-                <tr class="bg-slate-50 font-medium dark:bg-slate-800/60" x-show="submitSourceRunRows().length">
-                  <td class="px-3 py-2" colspan="3">Total</td>
-                  <td class="px-3 py-2 font-mono text-xs" x-text="submitRunsFindingsTotalLabel()"></td>
-                  <td class="px-3 py-2" x-text="submitRunsTokensTotal()"></td>
-                  <td class="px-3 py-2" x-text="submitRunsCostTotal()"></td>
-                  <td class="px-3 py-2" x-text="submitRunsDurationTotal()"></td>
-                </tr>
-                <tr x-show="!submitSourceRunRows().length">
-                  <td colspan="7" class="px-3 py-4 text-center text-slate-500">No source runs.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="py-3">
-          <h3 class="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-200"
-              x-text="'Findings (#' + submitFindingsCount() + ')'"></h3>
-          <template x-if="!submitFindingsCount()">
-            <p class="text-sm text-slate-500">No structured findings stored for this consolidation.</p>
-          </template>
-          <div x-show="submitFindingsCount()">
-            <div class="lr-modal-tabs" role="tablist">
-              <button type="button" role="tab"
-                      class="lr-modal-tab"
-                      :class="viewFindingsTab === 'High' && 'is-active'"
-                      :aria-selected="viewFindingsTab === 'High'"
-                      @click.prevent="viewFindingsTab = 'High'"
-                      x-text="'High (' + submitFindingsForTab('High').length + ')'"></button>
-              <button type="button" role="tab"
-                      class="lr-modal-tab"
-                      :class="viewFindingsTab === 'Medium' && 'is-active'"
-                      :aria-selected="viewFindingsTab === 'Medium'"
-                      @click.prevent="viewFindingsTab = 'Medium'"
-                      x-text="'Medium (' + submitFindingsForTab('Medium').length + ')'"></button>
-              <button type="button" role="tab"
-                      class="lr-modal-tab"
-                      :class="viewFindingsTab === 'Low' && 'is-active'"
-                      :aria-selected="viewFindingsTab === 'Low'"
-                      @click.prevent="viewFindingsTab = 'Low'"
-                      x-text="'Low (' + submitFindingsForTab('Low').length + ')'"></button>
-            </div>
-            <div class="mt-3">
-              <p class="text-sm text-slate-500"
-                 x-show="!submitFindingsForTab(viewFindingsTab).length"
-                 x-text="'No ' + viewFindingsTab.toLowerCase() + ' findings.'"></p>
-              <div class="lr-findings" x-show="submitFindingsForTab(viewFindingsTab).length">
-                <template x-for="(f, idx) in submitFindingsForTab(viewFindingsTab)" :key="(f.external_id || f.id || idx)">
-                  <article class="lr-finding">
-                    <div class="lr-finding-head">
-                      <div class="lr-finding-title">
-                        <span class="lr-finding-id" x-show="f.external_id || f.id" x-text="f.external_id || ('#' + f.id)"></span><span x-show="f.external_id || f.id"> </span><span x-html="renderedFindingTitle(f, idx)"></span>
-                      </div>
-                      <span class="lr-finding-sev" :class="findingSeverityClass(f.severity || f.Severity)"
-                            x-text="findingSeverityLabel(f.severity || f.Severity)"></span>
-                    </div>
-                    <div class="lr-finding-path"
-                         x-show="f.path || f.file"
-                         x-text="(f.path || f.file || '') + (f.line != null ? (':' + f.line) : '')"></div>
-                    <div class="lr-finding-body" x-html="renderedFindingBody(f)"></div>
-                  </article>
-                </template>
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div class="lr-modal-footer flex flex-wrap items-end justify-end gap-3"
-           x-show="!submitReadOnly">
-        <div>
-          <label class="block text-xs font-medium uppercase tracking-wide text-slate-500" for="submit-verdict">Verdict</label>
-          <select id="submit-verdict" x-model="submitVerdict"
-                  class="mt-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
-            <option value="comment">Post as comment</option>
-            <option value="approve">Approve</option>
-            <option value="request_changes">Request changes</option>
-          </select>
-        </div>
-        <button type="button" @click="postConsolidation()"
-                class="rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700">
-          Submit feedback
-        </button>
-        <button type="button" @click="closeSubmit()" class="rounded-lg px-3 py-1.5 text-sm text-slate-500">Cancel</button>
-      </div>
-    </div>
-  </div>
 
   <!-- Consolidation logs modal -->
   <div x-show="logsOpen" x-cloak class="lr-modal-backdrop" role="dialog" aria-modal="true">
@@ -1128,17 +1070,10 @@
 
       <p class="mt-3 text-sm text-red-600 dark:text-red-400" x-show="batchMessage" x-text="batchMessage"></p>
       <div class="mt-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
-        <div class="flex flex-wrap items-center gap-3">
-          <button type="button" @click="addBatchRow()" :disabled="batchBusy || batchRows.length >= 20"
-                  class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
-            Add run
-          </button>
-          <label class="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-            <input type="checkbox" x-model="batchConsolidateWhenDone" :disabled="batchBusy"
-                   class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-950" />
-            Consolidate when all runs finish
-          </label>
-        </div>
+        <button type="button" @click="addBatchRow()" :disabled="batchBusy || batchRows.length >= 20"
+                class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+          Add run
+        </button>
         <div class="flex gap-2">
           <button type="button" @click="closeBatchModal()" :disabled="batchBusy"
                   class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
@@ -1170,15 +1105,12 @@ function reviewForm() {
     consolidatingIds: {{ consolidating_ids | tojson }},
     lockedIds: {{ locked_run_ids | tojson }},
     consolidations: {{ consolidations | tojson }},
+    feedback: {{ feedback | tojson }},
+    prHeadSha: {{ (pr.head_sha or '')|tojson }},
     prEvents: {{ pr_events | tojson }},
     pollActive: false,
     _pollTimer: null,
     regenerating: {},
-    submitOpen: false,
-    submitTarget: null,
-    submitReadOnly: false,
-    viewFindingsTab: 'High',
-    submitVerdict: 'comment',
     logsOpen: false,
     logsTarget: null,
     logsText: '',
@@ -1197,7 +1129,6 @@ function reviewForm() {
     batchCombo: null,
     batchComboHighlight: -1,
     batchComboStyle: {},
-    batchConsolidateWhenDone: true,
     batchDefaults: [],
     _agentsReady: false,
     _batchKeySeq: 1,
@@ -1466,6 +1397,14 @@ function reviewForm() {
     rerunning: {},
     async init() {
       try {
+        const params = new URLSearchParams(window.location.search);
+        const tab = params.get('tab');
+        if (tab && ['overview','runs','consolidations','findings','feedback','history'].includes(tab)) {
+          this.tab = tab;
+        }
+      } catch (_) { /* ignore */ }
+      this.$nextTick(() => this.ensureTabVisible());
+      try {
         const saved = localStorage.getItem('lazyreview-pr-sidebar-open');
         if (saved === '0') this.sidebarOpen = false;
         else if (saved === '1') this.sidebarOpen = true;
@@ -1502,12 +1441,50 @@ function reviewForm() {
     tabItems() {
       const nRuns = (this.runsForHistory || []).length;
       const nConsol = (this.consolidations || []).length;
-      return [
+      const nFeedback = (this.feedback || []).length;
+      const items = [
         { id: 'overview', label: 'Overview' },
         { id: 'runs', label: nRuns ? ('Runs (' + nRuns + ')') : 'Runs' },
-        { id: 'consolidations', label: nConsol ? ('Consolidations (' + nConsol + ')') : 'Consolidations' },
-        { id: 'history', label: 'History' },
       ];
+      if (nConsol) {
+        items.push({
+          id: 'findings',
+          label: 'Findings',
+          warn: this.findingsAreDeprecated(),
+        });
+      }
+      items.push({
+        id: 'consolidations',
+        label: nConsol ? ('Consolidations (' + nConsol + ')') : 'Consolidations',
+      });
+      if (nFeedback) {
+        items.push({
+          id: 'feedback',
+          label: nFeedback > 1 ? ('Feedback Provided (' + nFeedback + ')') : 'Feedback Provided',
+        });
+      }
+      items.push({ id: 'history', label: 'History' });
+      return items;
+    },
+    latestConsolidation() {
+      const rows = this.consolidations || [];
+      if (!rows.length) return null;
+      // Already ordered newest-first from the API.
+      return rows.find(c => c.status === 'succeeded' && String(c.body || '').trim())
+        || rows.find(c => c.status === 'succeeded')
+        || rows[0]
+        || null;
+    },
+    findingsAreDeprecated() {
+      const c = this.latestConsolidation();
+      if (!c) return false;
+      const head = String(this.prHeadSha || '').trim();
+      const sha = String(c.head_sha || '').trim();
+      return !!(head && sha && head !== sha);
+    },
+    ensureTabVisible() {
+      const ids = new Set(this.tabItems().map(t => t.id));
+      if (!ids.has(this.tab)) this.tab = 'overview';
     },
     _cloneJson(value) {
       return JSON.parse(JSON.stringify(value == null ? null : value));
@@ -1604,6 +1581,30 @@ function reviewForm() {
       if (action === 'request_changes') return 'bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200';
       return 'bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200';
     },
+
+    dispositionLabel(c) {
+      if (!c) return '';
+      if (c.feedback_provided) {
+        if (c.gh_action === 'approve') return 'Human approved';
+        if (c.gh_action === 'request_changes') return 'Human requested changes';
+        return 'Human commented';
+      }
+      if (c.recommended_action === 'approve') return 'Approve';
+      if (c.recommended_action === 'request_changes') return 'Request changes';
+      if (c.recommended_action === 'comment') return 'Comment';
+      return '';
+    },
+    dispositionTitle(c) {
+      if (!c) return '';
+      if (c.feedback_provided) return 'Posted to GitHub';
+      return c.recommended_action_rationale || 'Agent recommendation';
+    },
+    dispositionClass(c) {
+      if (!c) return '';
+      const a = c.feedback_provided ? c.gh_action : c.recommended_action;
+      return this.feedbackActionClass(a);
+    },
+
     formatCost(v) {
       if (v == null || v === '') return '—';
       const n = Number(v);
@@ -1636,8 +1637,15 @@ function reviewForm() {
         const prevRunning = (this.consolidations || []).some(c =>
           c.status === 'queued' || c.status === 'running'
         );
+        const prevCount = (this.consolidations || []).length;
         this.consolidations = data.consolidations || [];
+        if (Array.isArray(data.feedback)) this.feedback = data.feedback;
         this.syncLocksFromConsolidations(this.consolidations);
+        this.ensureTabVisible();
+        // If Findings just became available, land there once.
+        if (!prevCount && this.consolidations.length && this.tab === 'overview') {
+          this.tab = 'findings';
+        }
         const stillActive = this.consolidations.some(c => this.consolidationIsActive(c.status));
         const stillRunning = this.consolidations.some(c =>
           c.status === 'queued' || c.status === 'running'
@@ -1772,13 +1780,14 @@ function reviewForm() {
       });
     },
     openSidebarConsolidation(id) {
-      this.tab = 'consolidations';
       const c = (this.consolidations || []).find(x => Number(x.id) === Number(id));
+      if (c && c.status === 'succeeded') {
+        window.location.href = '/consolidations/' + c.id;
+        return;
+      }
+      this.tab = 'consolidations';
       if (!c) return;
-      this.$nextTick(() => {
-        if (c.status === 'succeeded') this.openView(c);
-        else this.openConsolLogs(c);
-      });
+      this.$nextTick(() => this.openConsolLogs(c));
     },
     openBatchModal() {
       if (!this.analysisReady) {
@@ -2080,7 +2089,6 @@ function reviewForm() {
           body: JSON.stringify({
             pr_id: {{ pr.id }},
             skill: 'pr-code-review-batch',
-            consolidate_when_done: !!this.batchConsolidateWhenDone,
             runs: this.batchRows.map(r => ({
               agent: r.agent,
               model: r.model,
@@ -2188,35 +2196,14 @@ function reviewForm() {
       }
     },
     openSubmit(c) {
-      this.submitTarget = c;
-      this.submitReadOnly = false;
-      this.submitVerdict = 'comment';
-      this.viewFindingsTab = this.defaultViewFindingsTab(c);
-      this.submitOpen = true;
+      if (!c) return;
+      window.location.href = '/consolidations/' + c.id;
     },
     runById(id) {
       const n = Number(id);
       return (this.runsForHistory || []).find(r => Number(r.id) === n) || null;
     },
-    submitSourceRunRows() {
-      return this._sourceRunIds(this.submitTarget).map(id => {
-        const run = this.runById(id);
-        if (run) return run;
-        return {
-          id,
-          status: '',
-          agent: '',
-          model: '',
-          effort: '',
-          findings_sev1: 0,
-          findings_sev2: 0,
-          findings_sev3: 0,
-          total_tokens: null,
-          cost_usd: null,
-          duration_ms: null,
-        };
-      });
-    },
+
     runFindingsLabel(run) {
       if (!run) return '—';
       const h = Number(run.findings_sev1 || 0);
@@ -2234,69 +2221,19 @@ function reviewForm() {
       }
       return { h, m, l };
     },
-    submitRunsFindingsTotalLabel() {
-      const t = this.submitRunsFindingsTotals();
-      if (!t.h && !t.m && !t.l) return '—';
-      return 'H' + t.h + ' M' + t.m + ' L' + t.l;
-    },
-    submitRunsTokensTotal() {
-      let sum = 0, any = false;
-      for (const run of this.submitSourceRunRows()) {
-        if (run.total_tokens != null && run.total_tokens !== '') {
-          sum += Number(run.total_tokens) || 0;
-          any = true;
-        }
-      }
-      return any ? sum : '—';
-    },
-    submitRunsCostTotal() {
-      let sum = 0, any = false;
-      for (const run of this.submitSourceRunRows()) {
-        if (run.cost_usd != null && run.cost_usd !== '') {
-          sum += Number(run.cost_usd) || 0;
-          any = true;
-        }
-      }
-      return any ? this.formatCost(sum) : '—';
-    },
-    submitRunsDurationTotal() {
-      let sum = 0, any = false;
-      for (const run of this.submitSourceRunRows()) {
-        if (run.duration_ms != null && run.duration_ms !== '') {
-          sum += Number(run.duration_ms) || 0;
-          any = true;
-        }
-      }
-      return any ? this.formatDuration(sum) : '—';
-    },
-    submitFindings() {
-      return (this.submitTarget && this.submitTarget.findings) || [];
-    },
-    submitFindingsCount() {
-      return this.submitFindings().length;
-    },
-    submitFindingsForTab(tab) {
-      const label = tab || this.viewFindingsTab || 'High';
-      return this.submitFindings().filter(f => this.findingSeverityLabel(f.severity || f.Severity) === label);
-    },
-    defaultViewFindingsTab(c) {
-      const items = (c && c.findings) || [];
-      for (const label of ['High', 'Medium', 'Low']) {
-        if (items.some(f => this.findingSeverityLabel(f.severity || f.Severity) === label)) return label;
-      }
-      return 'High';
-    },
+
+
+
+
+
+
+
+
     openView(c) {
-      this.submitTarget = c;
-      this.submitReadOnly = true;
-      this.viewFindingsTab = this.defaultViewFindingsTab(c);
-      this.submitOpen = true;
+      if (!c) return;
+      window.location.href = '/consolidations/' + c.id;
     },
-    closeSubmit() {
-      this.submitOpen = false;
-      this.submitReadOnly = false;
-      this.submitVerdict = 'comment';
-    },
+
     closeLogs() {
       this.logsOpen = false;
       this.logsTarget = null;
@@ -2401,30 +2338,7 @@ function reviewForm() {
       this.findingsLoading = false;
       this.runFindingsTab = 'High';
     },
-    async postConsolidation() {
-      if (!this.submitTarget) return;
-      const action = this.submitVerdict || 'comment';
-      const label = this.feedbackActionLabel(action);
-      const ok = await lrConfirm({
-        title: 'Submit feedback?',
-        message: 'Post as “' + label + '” to GitHub for consolidation #' + this.submitTarget.id + '?',
-        confirmLabel: 'Submit',
-      });
-      if (!ok) return;
-      const id = this.submitTarget.id;
-      const res = await fetch('/api/consolidations/' + id + '/post', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ action, body: this.submitTarget.body })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        await lrAlert(data.detail || 'post failed', { title: 'Post failed' });
-        return;
-      }
-      this.closeSubmit();
-      window.location.reload();
-    },
+
     async openConsolLogs(c) {
       this.logsTarget = c;
       this.logsError = '';

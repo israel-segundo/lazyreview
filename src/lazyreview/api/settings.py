@@ -28,6 +28,7 @@ class SettingsBody(BaseModel):
     pr_analysis_model: str | None = None
     pr_analysis_effort: str | None = None
     pr_analysis_prompt: str | None = None
+    publish_prompt: str | None = None
     batch_review_defaults: list[BatchReviewDefault] | None = None
 
 
@@ -56,6 +57,7 @@ def write_settings(body: SettingsBody, request: Request):
             pr_analysis_model=body.pr_analysis_model,
             pr_analysis_effort=body.pr_analysis_effort,
             pr_analysis_prompt=body.pr_analysis_prompt,
+            publish_prompt=body.publish_prompt,
             batch_review_defaults=batch,
         )
     except ValueError as e:

@@ -139,6 +139,10 @@ CREATE TABLE IF NOT EXISTS consolidations (
   gh_action TEXT,
   gh_comment_url TEXT,
   gh_review_id TEXT,
+  recommended_action TEXT,
+  recommended_action_rationale TEXT,
+  publish_body TEXT,
+  ready_to_post INTEGER NOT NULL DEFAULT 0,
   started_at TEXT,
   finished_at TEXT,
   duration_ms INTEGER,
@@ -227,7 +231,7 @@ DEFAULT_SETTINGS = {
     # batch_review_defaults seeded in init_db (JSON list of {agent,model,effort})
 }
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 19
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -389,6 +393,9 @@ def init_db(conn: sqlite3.Connection) -> None:
     analysis_prompt_seed = _default_pr_analysis_prompt()
     if analysis_prompt_seed:
         defaults["pr_analysis_prompt"] = analysis_prompt_seed
+    publish_prompt_seed = _default_publish_prompt()
+    if publish_prompt_seed:
+        defaults["publish_prompt"] = publish_prompt_seed
     defaults["batch_review_defaults"] = json.dumps(DEFAULT_BATCH_REVIEW_DEFAULTS)
     for key, value in defaults.items():
         conn.execute(
@@ -510,6 +517,51 @@ def init_db(conn: sqlite3.Connection) -> None:
                 (analysis_prompt_seed,),
             )
 
+    if prev is not None and prev < 18:
+        # Consolidation recommendation + publish draft columns.
+        for col, decl in (
+            ("recommended_action", "TEXT"),
+            ("recommended_action_rationale", "TEXT"),
+            ("publish_body", "TEXT"),
+            ("ready_to_post", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            cols = {
+                r["name"]
+                for r in conn.execute("PRAGMA table_info(consolidations)").fetchall()
+            }
+            if col not in cols:
+                conn.execute(f"ALTER TABLE consolidations ADD COLUMN {col} {decl}")
+        # Refresh consolidator prompt (analysis context + meta.json recommendation).
+        if prompt_seed:
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'consolidator_prompt'",
+                (prompt_seed,),
+            )
+        publish_prompt_seed = _default_publish_prompt()
+        if publish_prompt_seed:
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("publish_prompt", publish_prompt_seed),
+            )
+            # Always refresh default publish prompt content on upgrade.
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'publish_prompt'",
+                (publish_prompt_seed,),
+            )
+
+    if prev is not None and prev < 19:
+        # Publish draft: disposition lead-in; drop agent/dedup tables from GitHub body.
+        publish_prompt_seed = _default_publish_prompt()
+        if publish_prompt_seed:
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("publish_prompt", publish_prompt_seed),
+            )
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'publish_prompt'",
+                (publish_prompt_seed,),
+            )
+
     if prev is not None and prev < 10 and prompt_seed:
         conn.execute(
             "UPDATE settings SET value = ? WHERE key = 'consolidator_prompt'",
@@ -528,6 +580,14 @@ def _default_consolidator_prompt() -> str:
 
 def _default_pr_analysis_prompt() -> str:
     path = Path(__file__).resolve().parent.parent / "prompts" / "pr_analysis.md"
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _default_publish_prompt() -> str:
+    path = Path(__file__).resolve().parent.parent / "prompts" / "publish_github.md"
     try:
         return path.read_text(encoding="utf-8")
     except OSError:

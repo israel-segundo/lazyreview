@@ -307,6 +307,46 @@ def create_app() -> FastAPI:
             },
         )
 
+    @app.get("/consolidations/{consolidation_id}", response_class=HTMLResponse)
+    async def consolidation_detail(request: Request, consolidation_id: int):
+        from lazyreview.db import get_consolidation, get_pr, get_run
+
+        consolidation = get_consolidation(request.app.state.db, consolidation_id)
+        if not consolidation:
+            return HTMLResponse("Consolidation not found", status_code=404)
+        pr = get_pr(request.app.state.db, int(consolidation["pr_id"]))
+        source_runs = []
+        for rid in consolidation.get("source_run_ids") or []:
+            run = get_run(request.app.state.db, int(rid))
+            if run:
+                source_runs.append(run)
+            else:
+                source_runs.append(
+                    {
+                        "id": int(rid),
+                        "status": "",
+                        "agent": "",
+                        "model": "",
+                        "effort": None,
+                        "findings_sev1": 0,
+                        "findings_sev2": 0,
+                        "findings_sev3": 0,
+                        "total_tokens": None,
+                        "cost_usd": None,
+                        "duration_ms": None,
+                    }
+                )
+        return TEMPLATES.TemplateResponse(
+            request,
+            "consolidation_detail.html",
+            {
+                "consolidation": consolidation,
+                "pr": pr,
+                "source_runs": source_runs,
+                "version": __version__,
+            },
+        )
+
     @app.get("/analytics", response_class=HTMLResponse)
     async def analytics_page(request: Request):
         return TEMPLATES.TemplateResponse(

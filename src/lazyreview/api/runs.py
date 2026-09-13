@@ -34,7 +34,6 @@ class BatchCreateBody(BaseModel):
     pr_id: int
     runs: list[BatchRunItem] = Field(..., min_length=1, max_length=20)
     skill: str = "pr-code-review-batch"
-    consolidate_when_done: bool = True
 
 
 def _create_one_run(conn, settings, jobs, *, pr, agent: str, model: str, effort: str | None, skill: str):
@@ -122,22 +121,20 @@ def create_review_runs_batch(body: BatchCreateBody, request: Request):
         raise HTTPException(status_code=404, detail="PR not found")
     settings.ensure_dirs()
 
-    consolidator_cfg = None
-    if body.consolidate_when_done:
-        from lazyreview.services.settings import get_consolidator_config
+    from lazyreview.services.settings import get_consolidator_config
 
-        consolidator_cfg = get_consolidator_config(conn)
-        try:
-            adapter = get_adapter(consolidator_cfg["agent"])
-        except KeyError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-        if not adapter.available():
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Consolidator agent {consolidator_cfg['agent']} binary not available on PATH"
-                ),
-            )
+    consolidator_cfg = get_consolidator_config(conn)
+    try:
+        adapter = get_adapter(consolidator_cfg["agent"])
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not adapter.available():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Consolidator agent {consolidator_cfg['agent']} binary not available on PATH"
+            ),
+        )
 
     created = []
     for item in body.runs:
@@ -154,31 +151,28 @@ def create_review_runs_batch(body: BatchCreateBody, request: Request):
             )
         )
 
-    consolidation = None
-    if body.consolidate_when_done:
-        from lazyreview.db import create_consolidation, update_consolidation
-        from lazyreview.services.consolidation_jobs import consolidations_dir
+    from lazyreview.db import create_consolidation, update_consolidation
+    from lazyreview.services.consolidation_jobs import consolidations_dir
 
-        assert consolidator_cfg is not None
-        consolidation = create_consolidation(
-            conn,
-            pr_id=int(pr["id"]),
-            head_sha=pr.get("head_sha") or "",
-            source_run_ids=[int(r["id"]) for r in created],
-            agent=consolidator_cfg["agent"],
-            model=consolidator_cfg["model"],
-            effort=consolidator_cfg["effort"] or None,
-            workdir_path="",
-            status="dormant",
+    consolidation = create_consolidation(
+        conn,
+        pr_id=int(pr["id"]),
+        head_sha=pr.get("head_sha") or "",
+        source_run_ids=[int(r["id"]) for r in created],
+        agent=consolidator_cfg["agent"],
+        model=consolidator_cfg["model"],
+        effort=consolidator_cfg["effort"] or None,
+        workdir_path="",
+        status="dormant",
+    )
+    work_dir = consolidations_dir(settings) / str(consolidation["id"])
+    work_dir.mkdir(parents=True, exist_ok=True)
+    consolidation = (
+        update_consolidation(
+            conn, int(consolidation["id"]), workdir_path=str(work_dir)
         )
-        work_dir = consolidations_dir(settings) / str(consolidation["id"])
-        work_dir.mkdir(parents=True, exist_ok=True)
-        consolidation = (
-            update_consolidation(
-                conn, int(consolidation["id"]), workdir_path=str(work_dir)
-            )
-            or consolidation
-        )
+        or consolidation
+    )
 
     return {
         "runs": created,

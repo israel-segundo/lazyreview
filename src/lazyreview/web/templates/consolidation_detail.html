@@ -1,0 +1,502 @@
+{% extends "base.html" %}
+{% from "macros.html" import agent_label %}
+{% block title %} — Consolidation #{{ consolidation.id }}{% endblock %}
+{% block main_width %}max-w-none{% endblock %}
+{% block footer_width %}max-w-none{% endblock %}
+{% block content %}
+{# JSON in a script tag — never dump large markdown into an HTML attribute (breaks Alpine). #}
+<script type="application/json" id="consolidation-data">{{ consolidation | tojson | replace("</", "<\\/") }}</script>
+
+<div class="lr-consol"
+     x-data="consolidationDetail()"
+     x-init="init()">
+
+  {# —— Header —— #}
+  <div class="lr-consol-head flex flex-wrap items-start justify-between gap-3">
+    <div>
+      {% if pr %}
+      <a href="/prs/{{ pr.id }}?tab=consolidations"
+         class="text-sm text-blue-600 hover:underline dark:text-blue-400">← {{ pr.repo }}#{{ pr.number }}</a>
+      {% endif %}
+      <h1 class="mt-2 text-2xl font-semibold tracking-tight">
+        Consolidation #{{ consolidation.id }}
+      </h1>
+      <p class="mt-1 text-sm text-slate-500">
+        <span class="inline-flex items-center gap-1.5">
+          <span class="lr-status-ball h-2.5 w-2.5"
+                :class="statusBallClass(c.status, {consolidating: true})"
+                role="img"
+                :aria-label="c.status"></span>
+          <span x-text="c.status"></span>
+        </span>
+        <span class="text-slate-400" aria-hidden="true"> · </span>
+        {{ agent_label(consolidation.agent) }}
+        <span class="text-slate-400" aria-hidden="true"> · </span>
+        {{ consolidation.model }}
+        {% if consolidation.effort %}
+        <span class="text-slate-400" aria-hidden="true"> · </span>
+        {{ consolidation.effort }}
+        {% endif %}
+        {% if consolidation.head_sha %}
+        <span class="text-slate-400" aria-hidden="true"> · </span>
+        <span class="font-mono text-xs">{{ consolidation.head_sha[:12] }}</span>
+        {% endif %}
+      </p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      {% if consolidation.gh_comment_url %}
+      <a href="{{ consolidation.gh_comment_url }}" target="_blank" rel="noopener"
+         class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+        Open on GitHub
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  {# —— Tabbed card —— #}
+  <div class="lr-consol-card">
+    <div class="lr-consol-tabbar">
+      <div class="lr-consol-tabbar-row">
+        <div class="lr-modal-tabs" role="tablist" aria-label="Consolidation sections">
+          <button type="button" role="tab" class="lr-modal-tab"
+                  :class="pageTab === 'runs' && 'is-active'"
+                  :aria-selected="pageTab === 'runs'"
+                  @click.prevent="pageTab = 'runs'">
+            Source runs
+          </button>
+          <button type="button" role="tab" class="lr-modal-tab"
+                  :class="pageTab === 'findings' && 'is-active'"
+                  :aria-selected="pageTab === 'findings'"
+                  @click.prevent="pageTab = 'findings'"
+                  x-text="'Findings (' + findingsCount() + ')'"></button>
+          <button type="button" role="tab" class="lr-modal-tab"
+                  :class="pageTab === 'report' && 'is-active'"
+                  :aria-selected="pageTab === 'report'"
+                  @click.prevent="pageTab = 'report'"
+                  x-show="c.body"
+                  x-cloak>
+            Internal report
+          </button>
+          <button type="button" role="tab" class="lr-modal-tab"
+                  :class="pageTab === 'submit' && 'is-active'"
+                  :aria-selected="pageTab === 'submit'"
+                  @click.prevent="pageTab = 'submit'"
+                  x-text="canSubmit() ? 'Submit to GitHub' : 'GitHub feedback'"></button>
+        </div>
+
+        <div class="lr-consol-verdict" x-show="pageTab === 'submit' && canSubmit()" x-cloak>
+          <span class="text-xs font-medium uppercase tracking-wide text-slate-500">Verdict</span>
+          <select id="verdict" x-model="verdict" aria-label="Verdict"
+                  class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+            <option value="comment">Comment</option>
+            <option value="approve">Approve</option>
+            <option value="request_changes">Request changes</option>
+          </select>
+          <button type="button"
+                  @click="post()"
+                  :disabled="posting || !c.ready_to_post || !(publishBody || '').trim()"
+                  class="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+            <span x-text="posting ? 'Posting…' : 'Submit feedback'"></span>
+          </button>
+          {% if pr %}
+          <a href="/prs/{{ pr.id }}?tab=consolidations"
+             class="rounded-lg px-2.5 py-1.5 text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">Back</a>
+          {% endif %}
+        </div>
+      </div>
+      <p class="lr-consol-tabbar-error" x-show="pageTab === 'submit' && postError" x-cloak x-text="postError"></p>
+    </div>
+
+    <div class="lr-consol-panels">
+      {# —— Source runs —— #}
+      <div class="lr-consol-panel" x-show="pageTab === 'runs'" x-cloak role="tabpanel">
+        <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+          <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
+            <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
+              <tr>
+                <th class="px-3 py-2">ID</th>
+                <th class="px-3 py-2">Status</th>
+                <th class="px-3 py-2">Agent / Model / Effort</th>
+                <th class="px-3 py-2">Findings</th>
+                <th class="px-3 py-2">Tokens</th>
+                <th class="px-3 py-2">Cost</th>
+                <th class="px-3 py-2">Duration</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+              {% for row in source_runs %}
+              <tr>
+                <td class="px-3 py-2 font-mono text-xs">
+                  <a href="/runs/{{ row.id }}" class="text-blue-600 hover:underline dark:text-blue-400">#{{ row.id }}</a>
+                </td>
+                <td class="px-3 py-2">
+                  <span class="lr-status-ball h-2.5 w-2.5 {{ 'lr-status-ball--succeeded' if row.status == 'succeeded' else ('lr-status-ball--failed' if row.status == 'failed' else 'lr-status-ball--dormant') }}"
+                        title="{{ row.status }}" role="img" aria-label="{{ row.status }}"></span>
+                </td>
+                <td class="px-3 py-2">
+                  {{ agent_label(row.agent) }}
+                  {% if row.model %}<span class="text-slate-400"> · </span>{{ row.model }}{% endif %}
+                  {% if row.effort %}<span class="text-slate-400"> · </span>{{ row.effort }}{% endif %}
+                </td>
+                <td class="px-3 py-2 font-mono text-xs">
+                  {{ (row.findings_sev1 or 0) }}/{{ (row.findings_sev2 or 0) }}/{{ (row.findings_sev3 or 0) }}
+                </td>
+                <td class="px-3 py-2">{{ row.total_tokens if row.total_tokens is not none else '—' }}</td>
+                <td class="px-3 py-2">
+                  {% if row.cost_usd is not none %}${{ '%.4f'|format(row.cost_usd) if row.cost_usd < 0.01 else '%.2f'|format(row.cost_usd) }}{% else %}—{% endif %}
+                </td>
+                <td class="px-3 py-2">
+                  {% if row.duration_ms is not none %}{{ (row.duration_ms / 1000)|round|int }}s{% else %}—{% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="7" class="px-3 py-4 text-center text-slate-500">No source runs.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {# —— Findings —— #}
+      <div class="lr-consol-panel lr-consol-panel--fill" x-show="pageTab === 'findings'" x-cloak role="tabpanel">
+        <template x-if="!findingsCount()">
+          <p class="text-sm text-slate-500">No structured findings stored for this consolidation.</p>
+        </template>
+        <div class="flex min-h-0 flex-1 flex-col overflow-hidden" x-show="findingsCount()">
+          <div class="lr-modal-tabs shrink-0" role="tablist" aria-label="Finding severity">
+            <button type="button" role="tab" class="lr-modal-tab"
+                    :class="findingsTab === 'High' && 'is-active'"
+                    @click.prevent="findingsTab = 'High'"
+                    x-text="'High (' + findingsForTab('High').length + ')'"></button>
+            <button type="button" role="tab" class="lr-modal-tab"
+                    :class="findingsTab === 'Medium' && 'is-active'"
+                    @click.prevent="findingsTab = 'Medium'"
+                    x-text="'Medium (' + findingsForTab('Medium').length + ')'"></button>
+            <button type="button" role="tab" class="lr-modal-tab"
+                    :class="findingsTab === 'Low' && 'is-active'"
+                    @click.prevent="findingsTab = 'Low'"
+                    x-text="'Low (' + findingsForTab('Low').length + ')'"></button>
+          </div>
+          <div class="mt-4 min-h-0 flex-1 overflow-auto">
+            <p class="text-sm text-slate-500"
+               x-show="!findingsForTab(findingsTab).length"
+               x-text="'No ' + findingsTab.toLowerCase() + ' findings.'"></p>
+            <div class="lr-findings" x-show="findingsForTab(findingsTab).length">
+              <template x-for="(f, idx) in findingsForTab(findingsTab)" :key="(f.external_id || f.id || idx)">
+                <article class="lr-finding">
+                  <div class="lr-finding-head">
+                    <div class="lr-finding-title">
+                      <span class="lr-finding-id" x-show="f.external_id || f.id"
+                            x-text="f.external_id || ('#' + f.id)"></span>
+                      <span x-show="f.external_id || f.id"> </span>
+                      <span x-html="renderInline(f.title || f.Title || ('Finding ' + (idx + 1)))"></span>
+                    </div>
+                    <span class="lr-finding-sev" :class="severityClass(f.severity || f.Severity)"
+                          x-text="severityLabel(f.severity || f.Severity)"></span>
+                  </div>
+                  <div class="lr-finding-path"
+                       x-show="f.path || f.file"
+                       x-text="(f.path || f.file || '') + (f.line != null ? (':' + f.line) : '')"></div>
+                  <div class="lr-finding-body" x-html="renderMd(f.body || f.Body || f.summary || '')"></div>
+                </article>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {# —— Internal report —— #}
+      <div class="lr-consol-panel lr-consol-panel--fill" x-show="pageTab === 'report'" x-cloak role="tabpanel">
+        <div class="lr-consol-md min-h-0 flex-1 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-950/50"
+             x-html="renderMd(c.body || '')"></div>
+      </div>
+
+      {# —— Submit to GitHub (preview/markdown toggle + controls) —— #}
+      <div class="lr-consol-panel lr-consol-panel--fill" x-show="pageTab === 'submit'" x-cloak role="tabpanel">
+        <div class="shrink-0"
+             x-show="c.recommended_action || c.recommended_action_rationale"
+             x-cloak>
+          <div class="rounded-lg border px-3 py-2.5 text-sm"
+               :class="recommendationAlertClass()"
+               role="status">
+            <div class="font-medium" x-text="recommendationLabel()"></div>
+            <p class="mt-0.5 opacity-90"
+               x-show="c.recommended_action_rationale"
+               x-text="c.recommended_action_rationale || ''"></p>
+          </div>
+        </div>
+
+        <div class="lr-prompt-editor mt-3 min-h-0 flex-1">
+          <div class="lr-prompt-toolbar">
+            <span class="text-sm font-medium text-slate-800 dark:text-slate-200">GitHub draft</span>
+            <div class="flex flex-wrap items-center gap-2">
+              <button type="button"
+                      class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                      x-show="canRegeneratePublish()"
+                      x-cloak
+                      @click="regeneratePublish()"
+                      :disabled="regeneratingPublish || posting || !c.ready_to_post"
+                      :aria-busy="regeneratingPublish || !c.ready_to_post">
+                <svg x-show="regeneratingPublish || !c.ready_to_post" x-cloak
+                     class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg"
+                     fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span x-text="regeneratingPublish || !c.ready_to_post ? 'Regenerating…' : 'Regenerate draft'"></span>
+              </button>
+              <div class="lr-prompt-mode">
+                <button type="button"
+                        class="lr-prompt-mode-btn"
+                        :class="draftMode === 'preview' && 'lr-prompt-mode-btn--active'"
+                        @click="draftMode = 'preview'">Preview</button>
+                <button type="button"
+                        class="lr-prompt-mode-btn"
+                        :class="draftMode === 'source' && 'lr-prompt-mode-btn--active'"
+                        @click="draftMode = 'source'">Markdown</button>
+              </div>
+            </div>
+          </div>
+          <div class="lr-prompt-canvas">
+            <div class="lr-prompt-body"
+                 x-show="draftMode === 'preview'" x-cloak
+                 x-html="renderMd(publishBody || '')"></div>
+            <textarea x-show="draftMode === 'source'" x-cloak
+                      x-model="publishBody"
+                      :readonly="!canSubmit()"
+                      spellcheck="false"
+                      class="lr-prompt-source"
+                      aria-label="GitHub draft markdown"></textarea>
+          </div>
+        </div>
+
+        <div class="mt-4 shrink-0" x-show="!canSubmit() && c.gh_comment_url" x-cloak>
+          <a :href="c.gh_comment_url" target="_blank" rel="noopener"
+             class="inline-flex rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+            Open posted feedback on GitHub
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function consolidationDetail() {
+  let initial = {};
+  try {
+    const el = document.getElementById('consolidation-data');
+    if (el && el.textContent) initial = JSON.parse(el.textContent);
+  } catch (e) {
+    console.warn('failed to parse consolidation JSON', e);
+  }
+  return {
+    c: initial || {},
+    publishBody: (initial && initial.publish_body) || '',
+    verdict: 'comment',
+    pageTab: 'runs',
+    findingsTab: 'High',
+    draftMode: 'preview',
+    posting: false,
+    postError: '',
+    regeneratingPublish: false,
+    _poll: null,
+    _edited: false,
+    init() {
+      const rec = (this.c && this.c.recommended_action) || 'comment';
+      this.verdict = ['approve', 'request_changes', 'comment'].includes(rec) ? rec : 'comment';
+      for (const label of ['High', 'Medium', 'Low']) {
+        if (this.findingsForTab(label).length) { this.findingsTab = label; break; }
+      }
+      if (this.canSubmit()) this.pageTab = 'submit';
+      else if (this.findingsCount()) this.pageTab = 'findings';
+      else if (this.c && this.c.body) this.pageTab = 'report';
+      else this.pageTab = 'runs';
+
+      this.$watch('publishBody', () => { this._edited = true; });
+      if (this.canSubmit() && !this.c.ready_to_post) {
+        this._startPublishPoll();
+      }
+    },
+    canSubmit() {
+      return this.c && this.c.status === 'succeeded' && !this.c.feedback_provided;
+    },
+    canRegeneratePublish() {
+      return this.c
+        && !this.c.feedback_provided
+        && !!String(this.c.body || '').trim()
+        && (this.c.status === 'succeeded' || this.c.status === 'failed');
+    },
+    _startPublishPoll() {
+      if (this._poll) return;
+      this._poll = setInterval(() => this.refresh(), 2500);
+    },
+    recommendationLabel() {
+      const a = (this.c && this.c.recommended_action) || '';
+      if (a === 'approve') return 'Recommendation: Approve';
+      if (a === 'request_changes') return 'Recommendation: Request changes';
+      if (a === 'comment') return 'Recommendation: Comment';
+      return 'Recommendation';
+    },
+    recommendationAlertClass() {
+      const a = (this.c && this.c.recommended_action) || '';
+      if (a === 'approve') {
+        return 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-100';
+      }
+      if (a === 'request_changes') {
+        return 'border-red-200 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950/50 dark:text-red-100';
+      }
+      return 'border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-100';
+    },
+    statusBallClass(status, opts) {
+      const consolidatingFlavor = !!(opts && opts.consolidating);
+      if (status === 'succeeded') return 'lr-status-ball--succeeded';
+      if (status === 'failed') return 'lr-status-ball--failed';
+      if (status === 'cancelled') return 'lr-status-ball--cancelled';
+      if (status === 'dormant') return 'lr-status-ball--dormant';
+      if (status === 'running' || status === 'queued') {
+        const kind = consolidatingFlavor ? 'consolidating' : 'running';
+        return 'lr-status-ball--' + kind + ' lr-status-ball--pulse';
+      }
+      return 'lr-status-ball--queued lr-status-ball--pulse';
+    },
+    findings() { return (this.c && this.c.findings) || []; },
+    findingsCount() { return this.findings().length; },
+    severityLabel(sev) {
+      const n = Number(sev);
+      if (n === 1) return 'High';
+      if (n === 2) return 'Medium';
+      if (n === 3) return 'Low';
+      const s = String(sev || '').toLowerCase();
+      if (s === 'high' || s === 'sev1') return 'High';
+      if (s === 'medium' || s === 'sev2') return 'Medium';
+      if (s === 'low' || s === 'sev3') return 'Low';
+      return String(sev || '—');
+    },
+    severityClass(sev) {
+      const label = this.severityLabel(sev);
+      if (label === 'High') return 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200';
+      if (label === 'Medium') return 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200';
+      return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+    },
+    findingsForTab(tab) {
+      return this.findings().filter(f => this.severityLabel(f.severity || f.Severity) === tab);
+    },
+    _escape(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    },
+    renderMd(raw) {
+      // Soften hard breaks like settings prompts: collapse 3+ newlines, keep paragraphs.
+      const text = String(raw || '').replace(/\n{3,}/g, '\n\n').trim();
+      if (!text) return '';
+      try {
+        const html = (typeof marked !== 'undefined')
+          ? marked.parse(text, { breaks: true })
+          : ('<p>' + this._escape(text).replace(/\n/g, '<br>') + '</p>');
+        return (typeof DOMPurify !== 'undefined') ? DOMPurify.sanitize(html) : html;
+      } catch (e) {
+        return '<p>' + this._escape(text).replace(/\n/g, '<br>') + '</p>';
+      }
+    },
+    renderInline(raw) {
+      const text = String(raw || '').trim();
+      if (!text) return '';
+      try {
+        const html = (typeof marked !== 'undefined' && marked.parseInline)
+          ? marked.parseInline(text, { breaks: true })
+          : this._escape(text);
+        return (typeof DOMPurify !== 'undefined') ? DOMPurify.sanitize(html) : html;
+      } catch (e) {
+        return this._escape(text);
+      }
+    },
+    async refresh() {
+      try {
+        const res = await fetch('/api/consolidations/' + this.c.id);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.ready_to_post && this._poll) {
+          clearInterval(this._poll);
+          this._poll = null;
+          this.regeneratingPublish = false;
+          window.location.reload();
+          return;
+        }
+        this.c = data;
+        if (data.publish_body && !this.publishBody) this.publishBody = data.publish_body;
+        else if (data.publish_body && !this._edited) this.publishBody = data.publish_body;
+      } catch (e) {}
+    },
+    async regeneratePublish() {
+      if (!this.canRegeneratePublish() || this.regeneratingPublish) return;
+      const ok = await lrConfirm({
+        title: 'Regenerate GitHub draft?',
+        message: 'Re-run the publish transform for consolidation #' + this.c.id + ' using the current publish prompt. The internal report is left unchanged.',
+        confirmLabel: 'Regenerate',
+      });
+      if (!ok) return;
+      this.regeneratingPublish = true;
+      this.postError = '';
+      this._edited = false;
+      try {
+        const res = await fetch('/api/consolidations/' + this.c.id + '/regenerate-publish', {
+          method: 'POST',
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          this.postError = (typeof data.detail === 'string') ? data.detail : 'Regenerate failed';
+          this.regeneratingPublish = false;
+          return;
+        }
+        this.c = { ...this.c, ...data, ready_to_post: 0 };
+        this._startPublishPoll();
+      } catch (e) {
+        this.postError = String(e.message || e);
+        this.regeneratingPublish = false;
+      }
+    },
+    async post() {
+      this.postError = '';
+      const action = this.verdict || 'comment';
+      const labels = {
+        comment: 'comment',
+        approve: 'approve',
+        request_changes: 'request changes',
+      };
+      const ok = await lrConfirm({
+        title: 'Submit feedback?',
+        message: 'Post as “' + (labels[action] || action) + '” to GitHub for consolidation #' + this.c.id + '?',
+        confirmLabel: 'Submit',
+      });
+      if (!ok) return;
+      this.posting = true;
+      try {
+        const res = await fetch('/api/consolidations/' + this.c.id + '/post', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action, body: this.publishBody }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          this.postError = (typeof data.detail === 'string') ? data.detail : 'Post failed';
+          return;
+        }
+        sessionStorage.setItem('lazyreview-toast', 'Feedback posted to GitHub');
+        {% if pr %}
+        window.location.href = '/prs/{{ pr.id }}?tab=feedback';
+        {% else %}
+        window.location.reload();
+        {% endif %}
+      } catch (e) {
+        this.postError = String(e.message || e);
+      } finally {
+        this.posting = false;
+      }
+    },
+  };
+}
+</script>
+{% endblock %}

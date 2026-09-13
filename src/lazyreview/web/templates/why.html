@@ -1,31 +1,234 @@
 {% extends "base.html" %}
 {% block title %} — Why lazyreview?{% endblock %}
 {% block content %}
-<article class="mx-auto max-w-2xl space-y-8">
-  <section class="space-y-3">
-    <h2 class="text-lg font-semibold">What is this?</h2>
+<article class="mx-auto max-w-3xl space-y-10">
+  <header class="space-y-3">
+    <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Why lazyreview?</h1>
     <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
-      lazyreview is a local tool for managing agentic pull-request reviews. It keeps
-      track of the PRs waiting on you, kicks off review runs with your preferred agent
-      and model, stores the findings, and helps you consolidate feedback before anything
-      hits GitHub. The work stays on your machine — clones, logs, and history included —
-      so you can review at your own pace without babysitting a chat session.
+      lazyreview is a local, human-in-the-loop desk for agentic pull-request review.
+      It finds the PRs waiting on you, orients with an analysis brief, runs several
+      review agents in parallel, consolidates them into one consensus, drafts the
+      GitHub-facing comment — and stops. Nothing posts until you say so.
+    </p>
+  </header>
+
+  <section class="space-y-3">
+    <h2 class="text-lg font-semibold">What it does today</h2>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700 dark:text-slate-300 leading-relaxed">
+      <li>
+        <strong class="font-medium text-slate-900 dark:text-slate-100">Discovers review-requested PRs</strong>
+        via <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">gh</code> and keeps a local
+        SQLite history of runs, costs, and feedback.
+      </li>
+      <li>
+        <strong class="font-medium text-slate-900 dark:text-slate-100">Gates on PR analysis</strong>
+        — an orientation brief for the current head must succeed before reviews or
+        consolidations can start.
+      </li>
+      <li>
+        <strong class="font-medium text-slate-900 dark:text-slate-100">Batch multi-agent reviews</strong>
+        (Claude, Agy, Cursor) with your default models and effort from Settings.
+      </li>
+      <li>
+        <strong class="font-medium text-slate-900 dark:text-slate-100">Consolidates into one report</strong>
+        with a recommended GitHub action (<code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">approve</code>,
+        <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">request_changes</code>, or
+        <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">comment</code>).
+      </li>
+      <li>
+        <strong class="font-medium text-slate-900 dark:text-slate-100">Publish transform</strong>
+        turns the internal report into a GitHub draft you can edit, then submit yourself.
+      </li>
+      <li>
+        <strong class="font-medium text-slate-900 dark:text-slate-100">Head-aware</strong>
+        — when the PR moves, stale runs and reports are flagged so you don’t post yesterday’s review.
+      </li>
+    </ul>
+  </section>
+
+  <section class="space-y-4">
+    <div class="space-y-2">
+      <h2 class="text-lg font-semibold">Workflow</h2>
+      <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
+        After the analysis brief, you kick off one or more agentic reviews.
+        Those runs feed a single consolidate-and-publish step; you iterate on that
+        draft until it is ready, then post to GitHub yourself.
+      </p>
+    </div>
+    <figure class="lr-mermaid overflow-x-auto">
+      <div class="lr-mermaid-toolbar">
+        <span class="lr-mermaid-label">End-to-end flow</span>
+      </div>
+      <pre class="mermaid px-3 py-4 text-sm">flowchart TD
+  sync[PR sync] --> analysis[PR analysis brief]
+  analysis --> order[Human starts reviews]
+  order --> r1[Claude review]
+  order --> r2[Cursor review]
+  order --> r3[Agy review]
+  r1 --> consol[Consolidate and publish draft]
+  r2 --> consol
+  r3 --> consol
+  consol &lt;--&gt; challenge[Human challenges]
+  challenge --> github[Post to GitHub]</pre>
+    </figure>
+  </section>
+
+  <section class="space-y-4">
+    <div class="space-y-2">
+      <h2 class="text-lg font-semibold">Local architecture</h2>
+      <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
+        Everything durable stays on your machine. Sync and post talk to GitHub through
+        <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">gh</code>;
+        analysis and every review share one detached worktree per PR (backed by a bare
+        mirror). Findings and the analysis brief are written into SQLite. Consolidate /
+        publish / human challenge reuse that stored context in a consolidation job
+        directory — they do not need a second checkout.
+      </p>
+    </div>
+    <figure class="lr-mermaid overflow-x-auto">
+      <div class="lr-mermaid-toolbar">
+        <span class="lr-mermaid-label">Containers and data stores</span>
+      </div>
+      <pre class="mermaid px-3 py-4 text-sm">flowchart TB
+  You[You]
+  GH[GitHub]
+
+  subgraph Local["Local machine"]
+    direction TB
+    Daemon["lazyreview daemon - UI, API, sync, job runners"]
+
+    subgraph Stores["Data stores"]
+      direction LR
+      DB[("SQLite lazyreview.db")]
+      Mirror["Bare mirror workspaces/mirrors"]
+      WT["Shared PR worktree workspaces/prs"]
+      ADir["analyses/"]
+      RDir["runs/"]
+      CDir["consolidations/"]
+    end
+
+    Agents["Agent CLIs - claude, agent, agy"]
+  end
+
+  You &lt;--&gt;|browser| Daemon
+  Daemon &lt;--&gt;|gh sync and post| GH
+  Daemon &lt;--&gt;|PRs, briefs, findings, drafts, feedback| DB
+
+  Mirror -->|git worktree add detach| WT
+  Daemon -->|create or hold on first analysis or review| WT
+
+  Daemon -->|run analysis and reviews| Agents
+  Agents -->|cwd shared worktree| WT
+  Agents -->|brief.md| ADir
+  Agents -->|findings and logs| RDir
+  ADir -->|brief_markdown| DB
+  RDir -->|findings rows| DB
+
+  Daemon -->|stage brief and findings from DB| CDir
+  Daemon -->|run consolidate and publish| Agents
+  Agents -->|cwd consolidation job dir| CDir
+  CDir -->|body.md publish draft meta| DB
+
+  You -->|challenge - edit or regenerate| Daemon
+  Daemon -->|rewrite draft in place| CDir
+  Daemon -->|update publish_body| DB
+  You -->|confirm post| Daemon
+  Daemon -->|gh comment or review| GH
+  Daemon -->|feedback_actions| DB</pre>
+    </figure>
+    <ul class="list-disc space-y-2 pl-5 text-slate-700 dark:text-slate-300 leading-relaxed">
+      <li>
+        <strong class="font-medium text-slate-900 dark:text-slate-100">One worktree per PR</strong>
+        — created lazily, held while analysis or review jobs run, reused across agents
+        for the same head.
+      </li>
+      <li>
+        <strong class="font-medium text-slate-900 dark:text-slate-100">SQLite is the handoff</strong>
+        — consolidate does not re-read the worktree; it loads the brief and findings from
+        the DB into <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">consolidations/{id}/</code>.
+      </li>
+      <li>
+        <strong class="font-medium text-slate-900 dark:text-slate-100">Human challenges stay local</strong>
+        — edit or regenerate the draft against that consolidation dir + DB until you post.
+      </li>
+    </ul>
+  </section>
+
+  <section class="space-y-4">
+    <div class="space-y-2">
+      <h2 class="text-lg font-semibold">Prompt chaining</h2>
+      <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
+        Each stage has its own prompt. Analysis, consolidator, and publish prompts
+        are editable under
+        <a class="text-blue-600 hover:underline dark:text-blue-400" href="/settings">Settings</a>;
+        review runs use the review skill. Outputs of earlier stages become inputs to later ones —
+        not a single mega-prompt.
+      </p>
+    </div>
+    <figure class="lr-mermaid overflow-x-auto">
+      <div class="lr-mermaid-toolbar">
+        <span class="lr-mermaid-label">Prompt chain</span>
+      </div>
+      <pre class="mermaid px-3 py-4 text-sm">flowchart TD
+  p1["Analysis prompt produces brief.md"]
+  p2["Review skill produces findings per run"]
+  p3["Consolidator prompt produces body.md and meta.json"]
+  p4["Publish prompt produces GitHub draft"]
+  p5["You edit and submit via gh"]
+  p1 --> p2 --> p3 --> p4 --> p5
+  p3 -->|recommended_action| ui[Submit modal preselect]
+  p4 -->|ready_to_post| ui</pre>
+    </figure>
+    <ol class="list-decimal space-y-2 pl-5 text-slate-700 dark:text-slate-300 leading-relaxed">
+      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Analysis</strong> — orientation brief for the current head (intent, coverage, blast radius).</li>
+      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Reviews</strong> — independent agentic passes; findings stored per run.</li>
+      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Consolidate</strong> — dedupe across runs and existing PR comments; emit an internal report plus <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">meta.json</code>.</li>
+      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Publish</strong> — rewrite that report into concise GitHub-facing markdown (still local).</li>
+      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Submit</strong> — you choose the action, edit the draft, and post. Never auto-posted.</li>
+    </ol>
+  </section>
+
+  <section class="space-y-3">
+    <h2 class="text-lg font-semibold">Not another auto-review bot</h2>
+    <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
+      Generic AI PR bots drop comments straight onto GitHub. lazyreview is the opposite:
+      multi-agent signal in, one consensus out, human still owns the write.
+      Worktrees, logs, and history stay on your machine. When the head moves, stale work
+      is marked so you don’t ship a review for the wrong commit.
     </p>
   </section>
 
   <section class="space-y-3">
-    <h2 class="text-lg font-semibold">Why “lazyreview”?</h2>
+    <h2 class="text-lg font-semibold">Why the name?</h2>
     <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
-      I’m a fan of
+      A nod to
       <a class="text-blue-600 hover:underline dark:text-blue-400" href="https://github.com/jesseduffield/lazygit" target="_blank" rel="noopener">lazygit</a>,
       <a class="text-blue-600 hover:underline dark:text-blue-400" href="https://github.com/LazyVim/LazyVim" target="_blank" rel="noopener">lazyvim</a>,
       and
       <a class="text-blue-600 hover:underline dark:text-blue-400" href="https://github.com/jesseduffield/lazydocker" target="_blank" rel="noopener">lazydocker</a>
       — tools that take a tedious everyday workflow and make it feel light without
-      stripping away power. This project is a nod to that family: same spirit, applied to
-      code review with AI agents. Less ceremony in the loop, more time actually reading
-      the diff.
+      stripping away power. Same spirit, applied to code review with AI agents:
+      less ceremony in the loop, more time actually reading the diff.
     </p>
   </section>
 </article>
+
+<script>
+  document.addEventListener('DOMContentLoaded', async function () {
+    if (!window.mermaid) return;
+    try {
+      if (window.LR && typeof window.LR.mermaidTheme === 'function') {
+        window.mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: 'strict',
+          theme: window.LR.mermaidTheme(),
+          fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+        });
+      }
+      await window.mermaid.run({ querySelector: '.mermaid' });
+    } catch (e) {
+      console.warn('mermaid render failed', e);
+    }
+  });
+</script>
 {% endblock %}

@@ -17,6 +17,7 @@ from lazyreview.db.schema import (
     DEFAULT_BATCH_REVIEW_DEFAULTS,
     _default_consolidator_prompt,
     _default_pr_analysis_prompt,
+    _default_publish_prompt,
 )
 from lazyreview.services.pr_sync import (
     DEFAULT_SYNC_INTERVAL_MINUTES,
@@ -95,6 +96,7 @@ def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
     sync_minutes = get_pr_sync_interval_minutes(conn)
     prompt = raw.get("consolidator_prompt") or _default_consolidator_prompt() or ""
     analysis_prompt = raw.get("pr_analysis_prompt") or _default_pr_analysis_prompt() or ""
+    publish_prompt = raw.get("publish_prompt") or _default_publish_prompt() or ""
     batch_defaults = parse_batch_review_defaults(raw.get("batch_review_defaults"))
     display_timezone = normalize_display_timezone(raw.get("display_timezone"))
     return {
@@ -123,6 +125,8 @@ def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
         "pr_analysis_effort": raw.get("pr_analysis_effort") or _DEFAULT_PR_ANALYSIS_EFFORT,
         "pr_analysis_prompt": analysis_prompt,
         "pr_analysis_prompt_default": _default_pr_analysis_prompt() or "",
+        "publish_prompt": publish_prompt,
+        "publish_prompt_default": _default_publish_prompt() or "",
         "batch_review_defaults": batch_defaults,
     }
 
@@ -142,6 +146,7 @@ def update_app_settings(
     pr_analysis_model: str | None = None,
     pr_analysis_effort: str | None = None,
     pr_analysis_prompt: str | None = None,
+    publish_prompt: str | None = None,
     batch_review_defaults: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if run_retention_value is not None:
@@ -191,6 +196,8 @@ def update_app_settings(
         set_setting(conn, "pr_analysis_effort", pr_analysis_effort.strip())
     if pr_analysis_prompt is not None:
         set_setting(conn, "pr_analysis_prompt", pr_analysis_prompt)
+    if publish_prompt is not None:
+        set_setting(conn, "publish_prompt", publish_prompt)
     if batch_review_defaults is not None:
         normalized = normalize_batch_review_defaults(batch_review_defaults)
         set_setting(conn, "batch_review_defaults", json.dumps(normalized))
@@ -223,6 +230,13 @@ def get_pr_analysis_config(conn: sqlite3.Connection) -> dict[str, str]:
         "model": view["pr_analysis_model"],
         "effort": view["pr_analysis_effort"] or "",
         "prompt": view["pr_analysis_prompt"],
+    }
+
+
+def get_publish_config(conn: sqlite3.Connection) -> dict[str, str]:
+    view = get_settings_view(conn)
+    return {
+        "prompt": view["publish_prompt"],
     }
 
 

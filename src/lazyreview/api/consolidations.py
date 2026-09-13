@@ -112,11 +112,15 @@ def list_pr_consolidations(pr_id: int, request: Request):
     pr = get_pr(conn, pr_id)
     if not pr:
         raise HTTPException(status_code=404, detail="PR not found")
+    from lazyreview.db import list_feedback_actions
+
     rows = list_consolidations_for_pr(conn, pr_id)
     active = sorted(active_consolidation_run_ids(conn, pr_id))
     consolidating = sorted(in_flight_consolidation_run_ids(conn, pr_id))
+    feedback = list_feedback_actions(conn, pr_id)
     return {
         "consolidations": rows,
+        "feedback": feedback,
         "active_run_ids": active,
         "consolidating_run_ids": consolidating,
     }
@@ -236,9 +240,64 @@ def regenerate_consolidation(consolidation_id: int, request: Request):
         finished_at=None,
         duration_ms=None,
         cli_command=None,
+        recommended_action=None,
+        recommended_action_rationale=None,
+        publish_body=None,
+        ready_to_post=0,
         # Keep workdir / log paths; worker overwrites logs on the next run.
     )
     request.app.state.consolidations.enqueue(consolidation_id)
+    return updated
+
+
+@router.post("/consolidations/{consolidation_id}/regenerate-publish")
+def regenerate_publish(consolidation_id: int, request: Request):
+    """Re-run only the GitHub publish transform (keeps the internal report)."""
+    from lazyreview.db import update_consolidation
+
+    conn = request.app.state.db
+    row = get_consolidation(conn, consolidation_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Consolidation not found")
+    if int(row.get("feedback_provided") or 0):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot regenerate publish draft after feedback was posted to GitHub",
+        )
+    if row["status"] in ("queued", "running", "dormant"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Consolidation is {row['status']}, wait for it to finish",
+        )
+    if row["status"] not in ("succeeded", "failed"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Consolidation is {row['status']}, cannot regenerate publish draft",
+        )
+    if not (row.get("body") or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="No internal report to publish from",
+        )
+
+    cfg = get_consolidator_config(conn)
+    try:
+        adapter = get_adapter(cfg["agent"])
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not adapter.available():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Consolidator agent {cfg['agent']} binary not available on PATH",
+        )
+
+    updated = update_consolidation(
+        conn,
+        consolidation_id,
+        ready_to_post=0,
+        error_message=None,
+    )
+    request.app.state.consolidations.enqueue_publish(consolidation_id)
     return updated
 
 
@@ -255,14 +314,19 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
         )
     if int(row.get("feedback_provided") or 0):
         raise HTTPException(status_code=400, detail="Feedback already provided")
+    if not int(row.get("ready_to_post") or 0) or not (row.get("publish_body") or "").strip():
+        raise HTTPException(
+            status_code=409,
+            detail="GitHub draft is not ready yet (publish transform incomplete)",
+        )
 
     pr = get_pr(conn, int(row["pr_id"]))
     if not pr:
         raise HTTPException(status_code=404, detail="PR not found")
 
-    text = body.body if body.body is not None else (row.get("body") or "")
+    text = body.body if body.body is not None else (row.get("publish_body") or "")
     if not text.strip():
-        raise HTTPException(status_code=400, detail="Empty consolidation body")
+        raise HTTPException(status_code=400, detail="Empty publish body")
 
     gh_url = None
     gh_review_id = None
