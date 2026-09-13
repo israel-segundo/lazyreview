@@ -25,6 +25,7 @@ from lazyreview.db import (
 )
 from lazyreview.db.schema import connect
 from lazyreview.services.clone import clone_pr_head, remove_repo_dir
+from lazyreview.services.pr_workspace import hold_worktree
 from lazyreview.services.findings_parse import load_findings_from_workdir, severity_counts
 from lazyreview.services.prepare import collect_review_artifacts, prepare_review_workspace
 
@@ -141,6 +142,26 @@ class JobRunner:
         self._notify_run_finished(run_id)
         return updated
 
+
+    def cancel_for_pr(self, pr_id: int) -> list[int]:
+        rows = self.conn.execute(
+            """
+            SELECT id FROM review_runs
+            WHERE pr_id = ? AND status IN ('queued', 'running')
+            ORDER BY id ASC
+            """,
+            (pr_id,),
+        ).fetchall()
+        cancelled: list[int] = []
+        for r in rows:
+            rid = int(r["id"])
+            try:
+                self.cancel(rid)
+                cancelled.append(rid)
+            except (KeyError, ValueError):
+                continue
+        return cancelled
+
     def _notify_run_finished(self, run_id: int) -> None:
         hook = self.on_run_finished
         if hook is None:
@@ -243,6 +264,8 @@ class JobRunner:
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "artifacts").mkdir(exist_ok=True)
         repo_dir = run_dir / "repo"
+        _shared_worktree = False
+        _wt_cm = None
         prompt_path = run_dir / "prompt.md"
         stdout_path = run_dir / "stdout.log"
         stderr_path = run_dir / "stderr.log"
@@ -266,12 +289,15 @@ class JobRunner:
             if self._is_cancel_requested(run_id, conn):
                 return
 
-            clone_pr_head(
-                owner=pr["owner"],
-                repo=pr["repo"],
-                head_sha=run["head_sha"] or pr["head_sha"],
-                dest=repo_dir,
+            # Shared PR worktree (no throwaway per-run clone).
+            _wt_cm = hold_worktree(
+                self.settings,
+                pr,
+                run["head_sha"] or pr["head_sha"],
+                conn=conn,
             )
+            repo_dir = _wt_cm.__enter__()
+            _shared_worktree = True
             if self._is_cancel_requested(run_id, conn):
                 return
 
@@ -452,7 +478,10 @@ class JobRunner:
             )
             raise
         finally:
-            remove_repo_dir(repo_dir)
+            if _shared_worktree and _wt_cm is not None:
+                _wt_cm.__exit__(None, None, None)
+            elif not _shared_worktree:
+                remove_repo_dir(repo_dir)
 
     def _run_process(
         self,

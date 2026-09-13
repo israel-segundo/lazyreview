@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from lazyreview.services.analysis_gate import require_succeeded_analysis
+
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -44,6 +46,7 @@ def _create_one_run(conn, settings, jobs, *, pr, agent: str, model: str, effort:
         raise HTTPException(
             status_code=400, detail=f"Agent {agent} binary not available on PATH"
         )
+    require_succeeded_analysis(conn, int(pr["id"]))
     run = create_run(
         conn,
         pr_id=int(pr["id"]),

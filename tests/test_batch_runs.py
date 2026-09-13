@@ -21,6 +21,28 @@ from lazyreview.services.consolidation_jobs import (
 )
 
 
+
+def _seed_succeeded_analysis(conn, pr):
+    """Satisfy the PR-analysis gate for API tests."""
+    from lazyreview.db import create_pr_analysis, update_pr_analysis
+
+    row = create_pr_analysis(
+        conn,
+        pr_id=int(pr["id"]),
+        head_sha=pr["head_sha"],
+        agent="claude",
+        model="haiku",
+        effort="low",
+    )
+    update_pr_analysis(
+        conn,
+        int(row["id"]),
+        status="succeeded",
+        brief_markdown="# ok",
+        finished_at="2026-01-01T00:00:00+00:00",
+    )
+    return row
+
 def _settings(tmp_path: Path) -> Settings:
     data = tmp_path / "data"
     data.mkdir(exist_ok=True)
@@ -57,6 +79,7 @@ def test_batch_creates_multiple_runs(tmp_path: Path):
         head_ref="feat",
         head_sha="bbb",
     )
+    _seed_succeeded_analysis(conn, pr)
     conn.close()
 
     fake = MagicMock()
@@ -107,6 +130,7 @@ def test_batch_creates_dormant_consolidation_by_default(tmp_path: Path):
         head_ref="feat",
         head_sha="ccc",
     )
+    _seed_succeeded_analysis(conn, pr)
     conn.close()
 
     fake = MagicMock()
@@ -160,6 +184,7 @@ def test_dormant_consolidation_queues_when_all_runs_succeed(tmp_path: Path):
         head_ref="feat",
         head_sha="ddd",
     )
+    _seed_succeeded_analysis(conn, pr)
     conn.execute(
         """
         INSERT INTO review_runs (pr_id, agent, model, status, head_sha, workdir_path)
@@ -218,6 +243,7 @@ def test_dormant_consolidation_proceeds_when_some_fail_but_one_succeeds(tmp_path
         head_ref="feat",
         head_sha="fff",
     )
+    _seed_succeeded_analysis(conn, pr)
     conn.execute(
         """
         INSERT INTO review_runs (pr_id, agent, model, status, head_sha, workdir_path)
@@ -272,6 +298,7 @@ def test_dormant_consolidation_cancels_when_no_successes(tmp_path: Path):
         head_ref="feat",
         head_sha="eee",
     )
+    _seed_succeeded_analysis(conn, pr)
     conn.execute(
         """
         INSERT INTO review_runs (pr_id, agent, model, status, head_sha, workdir_path)

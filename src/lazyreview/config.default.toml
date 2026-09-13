@@ -18,6 +18,8 @@ job_timeout_seconds = 3600
 retention_sweep_seconds = 3600
 # How many agent reviews may run at once across all PRs (each is a full CLI process).
 max_concurrent_jobs = 10
+# How many PR analyses may run at once (rest stay queued).
+max_concurrent_analyses = 2
 
 [service]
 unit_name = "lazyreview.service"

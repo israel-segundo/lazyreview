@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import agent_label, agent_icon, commit_hash, status_ball, run_status_balls %}
+{% from "macros.html" import agent_label, agent_icon, commit_hash, status_ball, run_status_balls, analysis_status_ball %}
 {% block title %} — {{ pr.owner }}/{{ pr.repo }}#{{ pr.number }}{% endblock %}
 {% block main_width %}max-w-none w-full{% endblock %}
 {% block footer_width %}max-w-none w-full{% endblock %}
@@ -16,7 +16,9 @@
       <span class="ml-1.5 text-slate-900 dark:text-slate-100">{{ pr.title }}</span>
     </h1>
     <button type="button" @click="openBatchModal()"
-            class="shrink-0 rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+            :disabled="!analysisReady"
+            :title="analysisReady ? 'Start a new review' : 'PR analysis must succeed before reviewing'"
+            class="shrink-0 rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
       New Review
     </button>
   </div>
@@ -41,6 +43,22 @@
         {% elif istatus == 'changes_requested' %}bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200
         {% elif istatus == 'feedback_provided' %}bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200
         {% else %}bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200{% endif %}">{{ pr.internal_status_label or 'needs review' }}</span>
+    </span>
+    <span class="inline-flex items-center gap-0 overflow-hidden rounded-md border border-slate-200 dark:border-slate-600"
+          :title="analysisTitle()">
+      <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Analysis</span>
+      <span class="inline-flex items-center gap-1.5 px-2 py-1 font-medium"
+            :class="{
+              'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200': analysisStatus === 'succeeded',
+              'bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200': analysisStatus === 'failed',
+              'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200': analysisStatus === 'cancelled',
+              'bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-200': analysisStatus === 'running' || analysisStatus === 'queued',
+              'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200': !analysisStatus
+            }">
+        <span class="lr-status-ball h-2.5 w-2.5"
+              :class="analysisBallClass(analysisStatus)"></span>
+        <span x-text="analysisLabel()"></span>
+      </span>
     </span>
     <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
       <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Commit head</span>
@@ -103,7 +121,7 @@
             class="ml-auto rounded-md border border-slate-200 bg-white px-2 py-1 font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
             :aria-expanded="sidebarOpen"
             aria-controls="pr-sidebar-panels"
-            x-text="sidebarOpen ? 'Hide runs' : 'Show runs'"></button>
+            x-text="sidebarOpen ? 'Hide sidebar' : 'Show sidebar'"></button>
   </div>
 
   <div class="lr-pr-layout">
@@ -123,10 +141,94 @@
                     x-text="t.label"></button>
           </template>
         </div>
-
         {# Overview #}
         <div x-show="tab === 'overview'" x-cloak class="mt-4 space-y-4">
+          <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+            <div class="flex flex-wrap items-center gap-3">
+              <h2 id="pr-analysis" class="text-sm font-semibold text-slate-800 dark:text-slate-100">PR Analysis</h2>
+              <span class="lr-status-ball h-2.5 w-2.5" :class="analysisBallClass(analysisStatus)"></span>
+              <span class="text-xs text-slate-500" x-text="analysisLabel()"></span>
+              <span class="text-xs text-slate-500 tabular-nums"
+                    x-show="['succeeded','failed','cancelled'].includes(analysisStatus) && analysisDurationMs != null"
+                    x-cloak
+                    x-text="formatDuration(analysisDurationMs)"
+                    title="Analysis duration"></span>
+              <span class="inline-flex min-w-0 items-center gap-1.5 text-xs text-slate-700 dark:text-slate-300"
+                    x-show="analysisAgent"
+                    x-cloak>
+                <img x-show="agentKey(analysisAgent) === LR.AgentName.CLAUDE" x-cloak
+                     src="/static/img/agents/claude.webp" alt="" width="14" height="14"
+                     class="h-3.5 w-3.5 shrink-0 object-contain" />
+                <img x-show="agentKey(analysisAgent) === LR.AgentName.AGY" x-cloak
+                     src="/static/img/agents/agy.png" alt="" width="14" height="14"
+                     class="h-3.5 w-3.5 shrink-0 object-contain" />
+                <img x-show="agentKey(analysisAgent) === LR.AgentName.CURSOR" x-cloak
+                     src="/static/img/agents/cursor-light.png" alt="" width="14" height="14"
+                     class="h-3.5 w-3.5 shrink-0 object-contain dark:hidden" />
+                <img x-show="agentKey(analysisAgent) === LR.AgentName.CURSOR" x-cloak
+                     src="/static/img/agents/cursor-dark.png" alt="" width="14" height="14"
+                     class="h-3.5 w-3.5 shrink-0 object-contain hidden dark:inline" />
+                <span class="shrink-0" x-text="agentTitle(analysisAgent)"></span>
+                <template x-if="analysisModel">
+                  <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
+                    <span class="shrink-0 text-slate-400" aria-hidden="true">/</span>
+                    <span class="min-w-0 truncate" x-text="analysisModel"></span>
+                  </span>
+                </template>
+                <template x-if="analysisEffort">
+                  <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
+                    <span class="shrink-0 text-slate-400" aria-hidden="true">/</span>
+                    <span class="min-w-0 truncate" x-text="analysisEffort"></span>
+                  </span>
+                </template>
+              </span>
+              <div class="ml-auto flex flex-wrap gap-2">
+                <button type="button"
+                        x-show="!analysisStatus || analysisStatus === 'failed' || analysisStatus === 'cancelled'"
+                        x-cloak
+                        @click="startAnalysis()"
+                        :disabled="analysisBusy"
+                        class="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-700 disabled:opacity-50">
+                  Run analysis
+                </button>
+                <button type="button"
+                        x-show="analysisStatus === 'failed' || analysisStatus === 'cancelled' || analysisStatus === 'succeeded'"
+                        x-cloak
+                        @click="retryAnalysis()"
+                        :disabled="analysisBusy"
+                        class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                  Retry analysis
+                </button>
+              </div>
+            </div>
+            <p class="mt-2 text-xs text-red-600 dark:text-red-400" x-show="analysisError" x-text="analysisError" x-cloak></p>
+            <p class="mt-2 text-sm text-slate-500 dark:text-slate-400"
+               x-show="!analysisBrief && analysisStatus !== 'succeeded'"
+               x-cloak>
+              Analysis produces an orientation brief for this PR. Reviews stay locked until it succeeds for the current head.
+            </p>
+            <div class="lr-analysis-brief"
+                 x-show="analysisBrief"
+                 x-cloak
+                 x-ref="analysisBriefEl"
+                 x-effect="analysisBrief; $nextTick().then(() => syncAnalysisBrief())"></div>
+          </div>
         </div>
+
+        {# Mermaid expand modal #}
+        <div x-show="mermaidExpandOpen" x-cloak class="lr-modal-backdrop" role="dialog" aria-modal="true"
+             @keydown.escape.window="mermaidExpandOpen && closeMermaidExpand()">
+          <div class="absolute inset-0 bg-slate-900/50" @click="closeMermaidExpand()"></div>
+          <div class="lr-modal-panel lr-modal-panel--mermaid" @click.stop>
+            <div class="lr-modal-header">
+              <h2 class="text-lg font-semibold">Diagram</h2>
+              <button type="button" class="lr-modal-close" @click="closeMermaidExpand()" aria-label="Close">Close</button>
+            </div>
+            <div class="mt-3 lr-modal-scroll lr-mermaid-expand-body"
+                 x-html="mermaidExpandHtml"></div>
+          </div>
+        </div>
+
 
         {# Runs #}
         <div x-show="tab === 'runs'" x-cloak class="mt-4" id="tab-runs">
@@ -416,10 +518,12 @@
                 <li class="flex flex-wrap items-center gap-2 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/50">
                   <span class="inline-flex items-center gap-1">
                     <span class="lr-status-ball h-2.5 w-2.5"
-                          :class="statusBallClass(item.status, {consolidating: item.kind === 'consolidation'})"
+                          :class="item.kind === 'event'
+                            ? analysisBallClass(item.status)
+                            : statusBallClass(item.status, {consolidating: item.kind === 'consolidation'})"
                           role="img"
-                          :aria-label="item.status"
-                          :title="item.status"></span>
+                          :aria-label="item.status || item.label"
+                          :title="item.status || item.label"></span>
                     <template x-if="item.deprecated">
                       <span class="lr-status-ball lr-status-ball--deprecated h-2.5 w-2.5" title="Deprecated" role="img" aria-label="Deprecated"></span>
                     </template>
@@ -427,11 +531,14 @@
                       <span class="lr-status-ball lr-status-ball--consolidated h-2.5 w-2.5" title="Consolidated" role="img" aria-label="Consolidated"></span>
                     </template>
                   </span>
-                  <button type="button" class="font-mono text-blue-600 hover:underline dark:text-blue-400"
-                          @click="item.kind === 'run' ? openSidebarRun(item.id) : openSidebarConsolidation(item.id)"
-                          x-text="'#' + item.id"></button>
-                  <span class="text-slate-500" x-text="item.kind === 'run' ? 'run' : 'consolidation'"></span>
-                  <span class="inline-flex min-w-0 items-center gap-1.5 text-slate-700 dark:text-slate-300">
+                  <template x-if="item.kind === 'run' || item.kind === 'consolidation'">
+                    <button type="button" class="font-mono text-blue-600 hover:underline dark:text-blue-400"
+                            @click="item.kind === 'run' ? openSidebarRun(item.id) : openSidebarConsolidation(item.id)"
+                            x-text="'#' + item.id"></button>
+                  </template>
+                  <span class="text-slate-500" x-text="item.label"></span>
+                  <span class="inline-flex min-w-0 items-center gap-1.5 text-slate-700 dark:text-slate-300"
+                        x-show="item.agent">
                     <img x-show="agentKey(item.agent) === LR.AgentName.CLAUDE" x-cloak
                          src="/static/img/agents/claude.webp" alt="" width="14" height="14"
                          class="h-3.5 w-3.5 shrink-0 object-contain" />
@@ -451,9 +558,15 @@
                         <span class="min-w-0 truncate" x-text="item.model"></span>
                       </span>
                     </template>
+                    <template x-if="item.effort">
+                      <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
+                        <span class="shrink-0 text-slate-400" aria-hidden="true">/</span>
+                        <span class="min-w-0 truncate" x-text="item.effort"></span>
+                      </span>
+                    </template>
                   </span>
                   <span class="ml-auto text-xs text-slate-400"
-                        :title="item.whenExact || ''"
+                        :title="formatAbsolute(item.whenIso) || ''"
                         x-text="timeAgo(item.whenIso) || ''"></span>
                 </li>
               </template>
@@ -468,8 +581,68 @@
     <aside class="lr-pr-sidebar space-y-3" x-show="sidebarOpen" x-cloak id="pr-sidebar-panels">
       <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
         <button type="button" class="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold"
+                @click="sidebarAnalysesOpen = !sidebarAnalysesOpen">
+          <span>Analysis runs</span>
+          <svg class="h-4 w-4 text-slate-400 transition-transform" :class="sidebarAnalysesOpen ? '' : '-rotate-90'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
+        </button>
+        <ul x-show="sidebarAnalysesOpen" class="max-h-80 overflow-y-auto border-t border-slate-100 dark:border-slate-800">
+          <template x-for="a in analyses.slice(0, 10)" :key="a.id">
+            <li class="flex items-center gap-1.5 px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800/60">
+              <span class="lr-status-ball h-2.5 w-2.5 shrink-0"
+                    :class="analysisBallClass(a.status)"
+                    :title="analysisStatusLabel(a.status)"
+                    role="img"
+                    :aria-label="analysisStatusLabel(a.status)"></span>
+              <button type="button"
+                      @click="openSidebarAnalysis(a.id)"
+                      class="shrink-0 font-mono text-blue-600 hover:underline dark:text-blue-400"
+                      x-text="'#' + a.id"></button>
+              <button type="button"
+                      @click="openSidebarAnalysis(a.id)"
+                      class="shrink-0 text-slate-400 hover:text-blue-600 hover:underline dark:text-slate-500 dark:hover:text-blue-400"
+                      :title="a.finished_at || a.started_at || a.created_at || ''"
+                      x-text="timeAgo(a.finished_at || a.started_at || a.created_at)"></button>
+              <span class="inline-flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-slate-600 dark:text-slate-300"
+                    :title="[a.agent, a.model, a.effort].filter(Boolean).join(' · ')">
+                <img x-show="agentKey(a.agent) === LR.AgentName.CLAUDE" x-cloak
+                     src="/static/img/agents/claude.webp" alt="" width="14" height="14"
+                     class="h-3.5 w-3.5 shrink-0 object-contain" />
+                <img x-show="agentKey(a.agent) === LR.AgentName.AGY" x-cloak
+                     src="/static/img/agents/agy.png" alt="" width="14" height="14"
+                     class="h-3.5 w-3.5 shrink-0 object-contain" />
+                <img x-show="agentKey(a.agent) === LR.AgentName.CURSOR" x-cloak
+                     src="/static/img/agents/cursor-light.png" alt="" width="14" height="14"
+                     class="h-3.5 w-3.5 shrink-0 object-contain dark:hidden" />
+                <img x-show="agentKey(a.agent) === LR.AgentName.CURSOR" x-cloak
+                     src="/static/img/agents/cursor-dark.png" alt="" width="14" height="14"
+                     class="h-3.5 w-3.5 shrink-0 object-contain hidden dark:inline" />
+                <span class="shrink-0" x-text="agentTitle(a.agent)"></span>
+                <template x-if="a.model">
+                  <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
+                    <span class="shrink-0 text-slate-400" aria-hidden="true">·</span>
+                    <span class="min-w-0 truncate" x-text="a.model"></span>
+                  </span>
+                </template>
+                <template x-if="a.effort">
+                  <span class="lr-sidebar-effort inline-flex shrink-0 items-center gap-1">
+                    <span class="text-slate-400" aria-hidden="true">·</span>
+                    <span x-text="a.effort"></span>
+                  </span>
+                </template>
+              </span>
+              <span class="ml-auto shrink-0 tabular-nums text-slate-500"
+                    x-show="a.duration_ms != null"
+                    x-text="formatDuration(a.duration_ms)"></span>
+            </li>
+          </template>
+          <li x-show="!analyses.length" class="px-3 py-3 text-xs text-slate-500">No analysis runs</li>
+        </ul>
+      </section>
+
+      <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+        <button type="button" class="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold"
                 @click="sidebarRunsOpen = !sidebarRunsOpen">
-          <span>Runs</span>
+          <span>Agentic Code Reviews</span>
           <svg class="h-4 w-4 text-slate-400 transition-transform" :class="sidebarRunsOpen ? '' : '-rotate-90'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
         </button>
         <ul x-show="sidebarRunsOpen" class="max-h-80 overflow-y-auto border-t border-slate-100 dark:border-slate-800">
@@ -504,7 +677,7 @@
             {% endif %}
           </li>
           {% else %}
-          <li class="px-3 py-3 text-xs text-slate-500">No runs</li>
+          <li class="px-3 py-3 text-xs text-slate-500">No reviews</li>
           {% endfor %}
         </ul>
       </section>
@@ -512,7 +685,7 @@
       <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
         <button type="button" class="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold"
                 @click="sidebarConsolOpen = !sidebarConsolOpen">
-          <span>Consolidations</span>
+          <span>Finding Consolidations</span>
           <svg class="h-4 w-4 text-slate-400 transition-transform" :class="sidebarConsolOpen ? '' : '-rotate-90'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
         </button>
         <ul x-show="sidebarConsolOpen" class="max-h-80 overflow-y-auto border-t border-slate-100 dark:border-slate-800">
@@ -997,6 +1170,7 @@ function reviewForm() {
     consolidatingIds: {{ consolidating_ids | tojson }},
     lockedIds: {{ locked_run_ids | tojson }},
     consolidations: {{ consolidations | tojson }},
+    prEvents: {{ pr_events | tojson }},
     pollActive: false,
     _pollTimer: null,
     regenerating: {},
@@ -1029,7 +1203,260 @@ function reviewForm() {
     _batchKeySeq: 1,
     toast: '',
     tab: 'overview',
+    analysisStatus: {{ (pr.analysis_status or none)|tojson }},
+    analysisId: {{ (pr.analysis_id or none)|tojson }},
+    analysisError: {{ (pr.analysis_error or '')|tojson }},
+    analysisBrief: {{ (pr.analysis_brief or '')|tojson }},
+    analysisAgent: {{ (pr.analysis_agent or '')|tojson }},
+    analysisModel: {{ (pr.analysis_model or '')|tojson }},
+    analysisEffort: {{ (pr.analysis_effort or '')|tojson }},
+    analysisDurationMs: {{ (pr.analysis_duration_ms if pr.analysis_duration_ms is not none else none)|tojson }},
+    analyses: {{ analyses | tojson }},
+    analysisBusy: false,
+    analysisPollTimer: null,
+    mermaidExpandOpen: false,
+    mermaidExpandHtml: '',
+    _mermaidSeq: 0,
+    get analysisReady() { return this.analysisStatus === 'succeeded'; },
+    stripAnalysisChrome(md) {
+      // Drop title/meta the UI already shows in the PR header (legacy briefs).
+      let s = String(md || '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+      // Prefer cutting everything before the first ## section heading.
+      const firstSection = s.search(/^##\s+/m);
+      if (firstSection > 0) {
+        const head = s.slice(0, firstSection);
+        // Only trim when the preamble looks like title/meta chrome, not real content.
+        if (
+          /^#\s+/m.test(head) ||
+          /·/.test(head) ||
+          /(?:←|->|→)/.test(head) ||
+          /\b\d+\s+files?\b/i.test(head)
+        ) {
+          return s.slice(firstSection).replace(/^(?:\s*\n)+/, '');
+        }
+      }
+      s = s.replace(/^#\s+[^\n]+(?:\n+|$)/, '');
+      s = s.replace(
+        /^[^\n]*·[^\n]*(?:←|->|→)[^\n]*(?:\n+|$)/,
+        ''
+      );
+      s = s.replace(
+        /^[A-Z][A-Z0-9]+-\d+[^\n]*·[^\n]*\n+/,
+        ''
+      );
+      s = s.replace(/^(?:\s*\n)+/, '');
+      s = s.replace(/^---+\s*\n+/, '');
+      return s;
+    },
+    buildAnalysisBriefHtml(md) {
+      const cleaned = this.stripAnalysisChrome(md);
+      if (!cleaned) return '';
+      let html = '';
+      if (window.marked && typeof window.marked.parse === 'function') {
+        html = window.marked.parse(cleaned, { breaks: true, gfm: true });
+      } else {
+        html = cleaned
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/\n/g, '<br>');
+      }
+      // Also drop a leading <h1> if the model ignored the prompt.
+      html = html.replace(/^\s*<h1\b[^>]*>[\s\S]*?<\/h1>\s*/i, '');
+      // Drop a short meta <p> immediately after (ticket · author · …).
+      html = html.replace(
+        /^\s*<p\b[^>]*>\s*[^<]{0,220}·[^<]{0,220}<\/p>\s*/i,
+        ''
+      );
+      html = html.replace(/<table[\s\S]*?<\/table>/gi, (m) =>
+        `<div class="lr-analysis-brief-table-wrap">${m}</div>`
+      );
+      // Turn mermaid fences into expandable diagram shells.
+      html = html.replace(
+        /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/gi,
+        (_m, src) => {
+          const decoded = String(src)
+            .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+            .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+          const esc = decoded
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          return (
+            `<figure class="lr-mermaid">` +
+              `<div class="lr-mermaid-toolbar">` +
+                `<span class="lr-mermaid-label">Diagram</span>` +
+                `<button type="button" class="lr-mermaid-expand" data-lr-mermaid-expand>Expand</button>` +
+              `</div>` +
+              `<pre class="lr-mermaid-src" hidden>${esc}</pre>` +
+              `<div class="lr-mermaid-host" aria-busy="true">Rendering…</div>` +
+            `</figure>`
+          );
+        }
+      );
+      return html;
+    },
+    async syncAnalysisBrief() {
+      const el = this.$refs.analysisBriefEl;
+      if (!el) return;
+      const raw = this.analysisBrief || '';
+      if (!raw) {
+        el.innerHTML = '';
+        return;
+      }
+      el.innerHTML = this.buildAnalysisBriefHtml(raw);
+      el.querySelectorAll('[data-lr-mermaid-expand]').forEach((btn) => {
+        btn.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          const fig = btn.closest('.lr-mermaid');
+          this.openMermaidExpand(fig);
+        });
+      });
+      await this.$nextTick();
+      await this.renderMermaidIn(el);
+    },
+    async renderMermaidIn(root) {
+      if (!window.mermaid || !root) return;
+      const hosts = root.querySelectorAll('.lr-mermaid-host');
+      if (!hosts.length) return;
+      try {
+        window.mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: 'strict',
+          theme: (window.LR && window.LR.mermaidTheme)
+            ? window.LR.mermaidTheme()
+            : (document.documentElement.classList.contains('dark') ? 'dark' : 'default'),
+        });
+      } catch (_) {}
+      for (const host of hosts) {
+        const fig = host.closest('.lr-mermaid');
+        const srcEl = fig && fig.querySelector('.lr-mermaid-src');
+        const src = srcEl ? srcEl.textContent : '';
+        if (!src.trim()) {
+          host.textContent = 'Empty diagram';
+          host.removeAttribute('aria-busy');
+          continue;
+        }
+        const id = 'lr-mmd-' + (++this._mermaidSeq);
+        try {
+          const out = await window.mermaid.render(id, src);
+          host.innerHTML = out.svg;
+          host.removeAttribute('aria-busy');
+          if (out.bindFunctions) out.bindFunctions(host);
+        } catch (err) {
+          host.innerHTML = '';
+          host.removeAttribute('aria-busy');
+          const pre = document.createElement('pre');
+          pre.className = 'lr-mermaid-error';
+          pre.textContent = 'Mermaid error: ' + (err && err.message ? err.message : String(err));
+          host.appendChild(pre);
+        }
+      }
+    },
+    openMermaidExpand(fig) {
+      if (!fig) return;
+      const host = fig.querySelector('.lr-mermaid-host');
+      const svg = host && host.querySelector('svg');
+      if (!svg) return;
+      this.mermaidExpandHtml = svg.outerHTML;
+      this.mermaidExpandOpen = true;
+    },
+    closeMermaidExpand() {
+      this.mermaidExpandOpen = false;
+      this.mermaidExpandHtml = '';
+    },
+    analysisBallClass(status) {
+      if (status === 'succeeded') return 'lr-status-ball--succeeded';
+      if (status === 'failed') return 'lr-status-ball--failed';
+      if (status === 'cancelled') return 'lr-status-ball--cancelled';
+      // Past "triggered" timeline rows stay sky-colored but must not pulse.
+      if (status === 'triggered') return 'lr-status-ball--analyzing';
+      if (status === 'running' || status === 'queued') return 'lr-status-ball--analyzing lr-status-ball--pulse';
+      return '';
+    },
+    analysisLabel() {
+      const s = this.analysisStatus;
+      if (s === 'succeeded') return 'ready';
+      if (s === 'failed') return 'failed';
+      if (s === 'cancelled') return 'cancelled';
+      if (s === 'running') return 'running';
+      if (s === 'queued') return 'queued';
+      return 'not started';
+    },
+    analysisTitle() {
+      const s = this.analysisStatus;
+      if (s === 'succeeded') return 'Analysis succeeded for current head';
+      if (s === 'failed') return this.analysisError || 'Analysis failed';
+      if (s === 'cancelled') return 'Analysis cancelled';
+      if (s === 'running') return 'Analyzing…';
+      if (s === 'queued') return 'Analysis queued';
+      return 'Analysis not started';
+    },
+    async startAnalysis() {
+      this.analysisBusy = true;
+      try {
+        const res = await fetch('/api/prs/{{ pr.id }}/analysis', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          await lrAlert((data.detail && data.detail.message) || data.detail || 'Failed to start analysis', { title: 'Analysis' });
+          return;
+        }
+        this.applyAnalysis(data);
+        this.pollAnalysis();
+      } finally {
+        this.analysisBusy = false;
+      }
+    },
+    async retryAnalysis() {
+      this.analysisBusy = true;
+      try {
+        const res = await fetch('/api/prs/{{ pr.id }}/analysis/retry', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          await lrAlert((data.detail && data.detail.message) || data.detail || 'Failed to retry analysis', { title: 'Analysis' });
+          return;
+        }
+        this.applyAnalysis(data);
+        this.pollAnalysis();
+      } finally {
+        this.analysisBusy = false;
+      }
+    },
+    applyAnalysis(data) {
+      this.analysisStatus = data.status || null;
+      this.analysisId = data.id || null;
+      this.analysisError = data.error_message || '';
+      this.analysisBrief = data.brief_markdown || '';
+      this.analysisAgent = data.agent || '';
+      this.analysisModel = data.model || '';
+      this.analysisEffort = data.effort || '';
+      this.analysisDurationMs = (data.duration_ms != null ? data.duration_ms : null);
+    },
+    async tickAnalysis() {
+      try {
+        const res = await fetch('/api/prs/{{ pr.id }}/analysis');
+        if (!res.ok) return;
+        const data = await res.json();
+        const a = data.analysis;
+        if (!a) return;
+        this.applyAnalysis(a);
+        if (Array.isArray(data.events)) this.prEvents = data.events;
+        if (Array.isArray(data.history)) this.analyses = data.history;
+        if (a.status !== 'queued' && a.status !== 'running') {
+          if (this.analysisPollTimer) {
+            clearInterval(this.analysisPollTimer);
+            this.analysisPollTimer = null;
+          }
+        }
+      } catch (_) {
+        /* ignore transient poll errors */
+      }
+    },
+    pollAnalysis() {
+      if (this.analysisPollTimer) clearInterval(this.analysisPollTimer);
+      this.analysisPollTimer = null;
+      if (!(this.analysisStatus === 'queued' || this.analysisStatus === 'running')) return;
+      this.tickAnalysis();
+      this.analysisPollTimer = setInterval(() => this.tickAnalysis(), 2000);
+    },
     sidebarOpen: true,
+    sidebarAnalysesOpen: true,
     sidebarRunsOpen: true,
     sidebarConsolOpen: true,
     highlightRunId: null,
@@ -1064,6 +1491,7 @@ function reviewForm() {
         this._agentsReady = true;
       }
       this.maybeStartPoll();
+      this.pollAnalysis();
     },
     setSidebarOpen(open) {
       this.sidebarOpen = !!open;
@@ -1117,30 +1545,14 @@ function reviewForm() {
     },
 
     timeAgo(iso) {
-      if (!iso) return '';
-      const then = new Date(iso);
-      if (Number.isNaN(then.getTime())) {
-        // sqlite "YYYY-MM-DD HH:MM:SS" (UTC-ish) fallback
-        const normalized = String(iso).includes('T') ? iso : String(iso).replace(' ', 'T') + 'Z';
-        const alt = new Date(normalized);
-        if (Number.isNaN(alt.getTime())) return '';
-        return this._formatTimeAgo(alt);
-      }
-      return this._formatTimeAgo(then);
+      return (window.LR && window.LR.formatRelative) ? window.LR.formatRelative(iso) : '';
     },
-    _formatTimeAgo(then) {
-      const seconds = Math.max(0, Math.round((Date.now() - then.getTime()) / 1000));
-      if (seconds < 60) return '< 1 min ago';
-      const minutes = Math.round(seconds / 60);
-      if (minutes < 60) return minutes === 1 ? '1 min ago' : minutes + ' min ago';
-      const hours = Math.round(minutes / 60);
-      if (hours < 24) return hours === 1 ? '1 hr ago' : hours + ' hrs ago';
-      const days = Math.round(hours / 24);
-      if (days < 7) return days === 1 ? '1 day ago' : days + ' days ago';
-      const weeks = Math.round(days / 7);
-      if (weeks < 5) return weeks === 1 ? '1 week ago' : weeks + ' weeks ago';
-      const months = Math.round(days / 30);
-      return months <= 1 ? '1 month ago' : months + ' months ago';
+    formatAbsolute(iso) {
+      return (window.LR && window.LR.formatAbsolute) ? window.LR.formatAbsolute(iso) : '';
+    },
+    exactWhen(iso) {
+      // Kept for callers; prefer formatAbsolute (display timezone).
+      return this.formatAbsolute(iso);
     },
     consolidationFindingsSummary(c) {
       const items = (c && c.findings) || [];
@@ -1262,6 +1674,41 @@ function reviewForm() {
         if (!iso) return '';
         return String(iso).replace('T', ' ').slice(0, 19);
       };
+      for (const e of (this.prEvents || [])) {
+        const whenIso = e.created_at || '';
+        let status = '';
+        let label = e.message || e.kind || 'event';
+        if (e.kind === 'pr_created') {
+          status = 'succeeded';
+          label = e.message || 'Added to LazyReview';
+        } else if (e.kind === 'analysis_triggered') {
+          // Historical event — static ball, never pulse (pulse is for in-flight only).
+          status = 'triggered';
+          label = e.message || 'PR analysis triggered';
+        } else if (e.kind === 'analysis_finished') {
+          const meta = e.meta || {};
+          const msg = e.message || '';
+          if (meta.status) status = meta.status;
+          else if (/failed/i.test(msg)) status = 'failed';
+          else if (/cancelled/i.test(msg)) status = 'cancelled';
+          else status = 'succeeded';
+          label = msg || 'PR analysis finished';
+        }
+        items.push({
+          key: 'event-' + e.id,
+          kind: 'event',
+          eventKind: e.kind,
+          id: e.id,
+          status,
+          label,
+          agent: e.agent || '',
+          model: e.model || '',
+          effort: e.effort || '',
+          whenIso,
+          whenExact: exactWhen(whenIso),
+          sort: whenIso,
+        });
+      }
       for (const r of (this.runsForHistory || [])) {
         const whenIso = r.finished_at || r.started_at || r.created_at || '';
         items.push({
@@ -1269,10 +1716,12 @@ function reviewForm() {
           kind: 'run',
           id: r.id,
           status: r.status,
+          label: 'run',
           deprecated: !!r.deprecated,
           consolidated: !!r.consolidated,
           agent: r.agent || '',
           model: r.model || '',
+          effort: r.effort || '',
           whenIso,
           whenExact: exactWhen(whenIso),
           sort: whenIso,
@@ -1285,8 +1734,10 @@ function reviewForm() {
           kind: 'consolidation',
           id: c.id,
           status: c.status,
+          label: 'consolidation',
           agent: c.agent || '',
           model: c.model || '',
+          effort: c.effort || '',
           whenIso,
           whenExact: exactWhen(whenIso),
           sort: whenIso,
@@ -1294,6 +1745,22 @@ function reviewForm() {
       }
       items.sort((a, b) => String(b.sort).localeCompare(String(a.sort)));
       return items;
+    },
+    openSidebarAnalysis(id) {
+      this.tab = 'overview';
+      this.$nextTick(() => {
+        const el = document.getElementById('pr-analysis');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    },
+    analysisStatusLabel(status) {
+      const s = status || '';
+      if (s === 'succeeded') return 'ready';
+      if (s === 'failed') return 'failed';
+      if (s === 'cancelled') return 'cancelled';
+      if (s === 'running') return 'running';
+      if (s === 'queued') return 'queued';
+      return s || 'unknown';
     },
     openSidebarRun(id) {
       this.tab = 'runs';
@@ -1314,6 +1781,10 @@ function reviewForm() {
       });
     },
     openBatchModal() {
+      if (!this.analysisReady) {
+        lrAlert('Run PR analysis successfully before starting reviews.', { title: 'Analysis required' });
+        return;
+      }
       this.batchMessage = '';
       this.batchCloseCombo();
       this._loadBatchDefaultsAndOpen();

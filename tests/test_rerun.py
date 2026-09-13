@@ -19,6 +19,28 @@ from lazyreview.db import (
 from lazyreview.db.schema import connect, init_db
 
 
+
+def _seed_succeeded_analysis(conn, pr):
+    """Satisfy the PR-analysis gate for API tests."""
+    from lazyreview.db import create_pr_analysis, update_pr_analysis
+
+    row = create_pr_analysis(
+        conn,
+        pr_id=int(pr["id"]),
+        head_sha=pr["head_sha"],
+        agent="claude",
+        model="haiku",
+        effort="low",
+    )
+    update_pr_analysis(
+        conn,
+        int(row["id"]),
+        status="succeeded",
+        brief_markdown="# ok",
+        finished_at="2026-01-01T00:00:00+00:00",
+    )
+    return row
+
 def _settings(tmp_path: Path) -> Settings:
     data = tmp_path / "data"
     data.mkdir(exist_ok=True)
@@ -55,6 +77,7 @@ def test_rerun_replaces_results_and_requeues(tmp_path: Path):
         head_ref="feat",
         head_sha="newsha",
     )
+    _seed_succeeded_analysis(conn, pr)
     run = create_run(
         conn,
         pr_id=int(pr["id"]),
@@ -135,6 +158,7 @@ def test_rerun_blocked_while_in_active_consolidation(tmp_path: Path):
         head_ref="feat",
         head_sha="abc",
     )
+    _seed_succeeded_analysis(conn, pr)
     run = create_run(
         conn,
         pr_id=int(pr["id"]),

@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS prs (
   changed_files INTEGER,
   review_requested INTEGER NOT NULL DEFAULT 0,
   head_updated_at TEXT,
+  workspace_path TEXT,
+  workspace_status TEXT NOT NULL DEFAULT 'none',
+  workspace_delete_after TEXT,
+  mirror_key TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(owner, repo, number)
@@ -142,6 +146,47 @@ CREATE TABLE IF NOT EXISTS consolidations (
   FOREIGN KEY (pr_id) REFERENCES prs(id)
 );
 
+
+CREATE TABLE IF NOT EXISTS pr_analyses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pr_id INTEGER NOT NULL REFERENCES prs(id) ON DELETE CASCADE,
+  head_sha TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'queued',
+  agent TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  effort TEXT,
+  workdir_path TEXT,
+  brief_markdown TEXT,
+  brief_path TEXT,
+  error_message TEXT,
+  started_at TEXT,
+  finished_at TEXT,
+  duration_ms INTEGER,
+  cli_command TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(pr_id, head_sha),
+  FOREIGN KEY (pr_id) REFERENCES prs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pr_analyses_pr ON pr_analyses(pr_id);
+CREATE INDEX IF NOT EXISTS idx_pr_analyses_status ON pr_analyses(status);
+
+CREATE TABLE IF NOT EXISTS pr_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pr_id INTEGER NOT NULL REFERENCES prs(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  message TEXT NOT NULL DEFAULT '',
+  agent TEXT,
+  model TEXT,
+  effort TEXT,
+  analysis_id INTEGER,
+  meta_json TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (pr_id) REFERENCES prs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pr_events_pr ON pr_events(pr_id, id DESC);
+
 CREATE TABLE IF NOT EXISTS agent_model_cache (
   agent TEXT PRIMARY KEY,
   models_json TEXT NOT NULL,
@@ -170,14 +215,19 @@ DEFAULT_SETTINGS = {
     "run_retention_value": "1",
     "run_retention_unit": "weeks",
     "pr_sync_interval_minutes": "15",
+    "display_timezone": "America/Mexico_City",
     "consolidator_agent": AgentName.CLAUDE.value,
     "consolidator_model": ClaudeModelAlias.HAIKU.value,
     "consolidator_effort": EffortLevel.LOW.value,
     # consolidator_prompt seeded in init_db from prompts/consolidate.md
+    "pr_analysis_agent": AgentName.CLAUDE.value,
+    "pr_analysis_model": ClaudeModelAlias.OPUS.value,
+    "pr_analysis_effort": EffortLevel.HIGH.value,
+    # pr_analysis_prompt seeded in init_db from prompts/pr_analysis.md
     # batch_review_defaults seeded in init_db (JSON list of {agent,model,effort})
 }
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 17
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -268,6 +318,61 @@ def _migrate(conn: sqlite3.Connection) -> None:
             "ALTER TABLE review_runs ADD COLUMN deprecated INTEGER NOT NULL DEFAULT 0"
         )
 
+
+    pr_cols = {r["name"] for r in conn.execute("PRAGMA table_info(prs)").fetchall()}
+    for name, sql in [
+        ("workspace_path", "ALTER TABLE prs ADD COLUMN workspace_path TEXT"),
+        ("workspace_status", "ALTER TABLE prs ADD COLUMN workspace_status TEXT NOT NULL DEFAULT 'none'"),
+        ("workspace_delete_after", "ALTER TABLE prs ADD COLUMN workspace_delete_after TEXT"),
+        ("mirror_key", "ALTER TABLE prs ADD COLUMN mirror_key TEXT"),
+    ]:
+        if name not in pr_cols:
+            conn.execute(sql)
+
+    # Ensure pr_analyses exists on upgraded DBs (SCHEMA CREATE IF NOT EXISTS also covers fresh).
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS pr_analyses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          pr_id INTEGER NOT NULL REFERENCES prs(id) ON DELETE CASCADE,
+          head_sha TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'queued',
+          agent TEXT NOT NULL DEFAULT '',
+          model TEXT NOT NULL DEFAULT '',
+          effort TEXT,
+          workdir_path TEXT,
+          brief_markdown TEXT,
+          brief_path TEXT,
+          error_message TEXT,
+          started_at TEXT,
+          finished_at TEXT,
+          duration_ms INTEGER,
+          cli_command TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(pr_id, head_sha),
+          FOREIGN KEY (pr_id) REFERENCES prs(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pr_analyses_pr ON pr_analyses(pr_id);
+        CREATE INDEX IF NOT EXISTS idx_pr_analyses_status ON pr_analyses(status);
+
+CREATE TABLE IF NOT EXISTS pr_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pr_id INTEGER NOT NULL REFERENCES prs(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  message TEXT NOT NULL DEFAULT '',
+  agent TEXT,
+  model TEXT,
+  effort TEXT,
+  analysis_id INTEGER,
+  meta_json TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (pr_id) REFERENCES prs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pr_events_pr ON pr_events(pr_id, id DESC);
+        """
+    )
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _migrate(conn)
@@ -281,6 +386,9 @@ def init_db(conn: sqlite3.Connection) -> None:
     prompt_seed = _default_consolidator_prompt()
     if prompt_seed:
         defaults["consolidator_prompt"] = prompt_seed
+    analysis_prompt_seed = _default_pr_analysis_prompt()
+    if analysis_prompt_seed:
+        defaults["pr_analysis_prompt"] = analysis_prompt_seed
     defaults["batch_review_defaults"] = json.dumps(DEFAULT_BATCH_REVIEW_DEFAULTS)
     for key, value in defaults.items():
         conn.execute(
@@ -289,6 +397,119 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
     # v8: reshape consolidated comment template (tables at end, no top disclosure).
     # v10: review-pass detection from the authenticated user's prior PR threads.
+    # v12: PR analysis defaults → Claude / Opus / high; refresh analysis prompt; pr_events.
+    # v13: analysis prompt drops repeated title/branch/diff header; backfill pr_events.
+    if prev is not None and prev < 12:
+        for key, old, new in (
+            ("pr_analysis_model", "haiku", ClaudeModelAlias.OPUS.value),
+            ("pr_analysis_effort", "low", EffortLevel.HIGH.value),
+        ):
+            row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+            if row is not None and (row["value"] or "") == old:
+                conn.execute("UPDATE settings SET value = ? WHERE key = ?", (new, key))
+        if analysis_prompt_seed:
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'pr_analysis_prompt'",
+                (analysis_prompt_seed,),
+            )
+
+    if prev is not None and prev < 13:
+        if analysis_prompt_seed:
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'pr_analysis_prompt'",
+                (analysis_prompt_seed,),
+            )
+        # Backfill timeline events so existing PRs/analyses appear in History.
+        conn.execute(
+            """
+            INSERT INTO pr_events (pr_id, kind, message, created_at)
+            SELECT p.id, 'pr_created', 'Added to LazyReview', p.created_at
+            FROM prs p
+            WHERE NOT EXISTS (
+              SELECT 1 FROM pr_events e WHERE e.pr_id = p.id AND e.kind = 'pr_created'
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO pr_events (
+              pr_id, kind, message, agent, model, effort, analysis_id, created_at
+            )
+            SELECT a.pr_id, 'analysis_triggered',
+                   'PR analysis triggered',
+                   a.agent, a.model, a.effort, a.id, a.created_at
+            FROM pr_analyses a
+            WHERE NOT EXISTS (
+              SELECT 1 FROM pr_events e
+              WHERE e.analysis_id = a.id AND e.kind = 'analysis_triggered'
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO pr_events (
+              pr_id, kind, message, agent, model, effort, analysis_id, meta_json, created_at
+            )
+            SELECT a.pr_id, 'analysis_finished',
+                   CASE a.status
+                     WHEN 'succeeded' THEN 'PR analysis finished'
+                     WHEN 'failed' THEN 'PR analysis failed'
+                     WHEN 'cancelled' THEN 'PR analysis cancelled'
+                     ELSE 'PR analysis finished'
+                   END,
+                   a.agent, a.model, a.effort, a.id,
+                   json_object('status', a.status),
+                   COALESCE(a.finished_at, a.created_at)
+            FROM pr_analyses a
+            WHERE a.status IN ('succeeded', 'failed', 'cancelled')
+              AND NOT EXISTS (
+                SELECT 1 FROM pr_events e
+                WHERE e.analysis_id = a.id AND e.kind = 'analysis_finished'
+              )
+            """
+        )
+
+    if prev is not None and prev < 14:
+        # Attach status meta to backfilled analysis_finished events that lack it.
+        conn.execute(
+            """
+            UPDATE pr_events
+            SET meta_json = json_object(
+              'status',
+              CASE
+                WHEN message LIKE '%failed%' THEN 'failed'
+                WHEN message LIKE '%cancelled%' THEN 'cancelled'
+                ELSE 'succeeded'
+              END
+            )
+            WHERE kind = 'analysis_finished'
+              AND (meta_json IS NULL OR meta_json = '' OR meta_json = '{}')
+            """
+        )
+
+    if prev is not None and prev < 15:
+        # Refresh analysis prompt: no repeated title/meta header; mermaid fences.
+        if analysis_prompt_seed:
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'pr_analysis_prompt'",
+                (analysis_prompt_seed,),
+            )
+
+    if prev is not None and prev < 16:
+        # Portal display timezone (timestamps remain UTC in storage).
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+            ("display_timezone", "America/Mexico_City"),
+        )
+
+    if prev is not None and prev < 17:
+        # Shorter deslopified analysis prompt; before/after TL;DR + paired diagrams/ERDs.
+        if analysis_prompt_seed:
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'pr_analysis_prompt'",
+                (analysis_prompt_seed,),
+            )
+
     if prev is not None and prev < 10 and prompt_seed:
         conn.execute(
             "UPDATE settings SET value = ? WHERE key = 'consolidator_prompt'",
@@ -299,6 +520,14 @@ def init_db(conn: sqlite3.Connection) -> None:
 
 def _default_consolidator_prompt() -> str:
     path = Path(__file__).resolve().parent.parent / "prompts" / "consolidate.md"
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _default_pr_analysis_prompt() -> str:
+    path = Path(__file__).resolve().parent.parent / "prompts" / "pr_analysis.md"
     try:
         return path.read_text(encoding="utf-8")
     except OSError:

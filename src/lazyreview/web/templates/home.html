@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 {% block title %} — PRs{% endblock %}
+{% block main_width %}w-[90%] max-w-none{% endblock %}
+{% block footer_width %}w-[90%] max-w-none{% endblock %}
 {% block content %}
 <div class="space-y-6" x-data="homePage()" x-init="init()">
   <div>
@@ -12,47 +14,7 @@
             :title="lastSyncExact || 'Never synced'"
             x-text="lastSyncRelative"></span>
     </p>
-    <p class="mt-3">
-      <button type="button"
-              @click="showAddPr = !showAddPr"
-              class="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
-              x-text="showAddPr ? 'Hide Add PR' : 'Add PR'"></button>
-    </p>
   </div>
-
-  <form id="resolve-form" x-show="showAddPr" x-cloak
-        class="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 sm:flex-row sm:items-end">
-    <div class="flex-1">
-      <p class="text-sm text-slate-600 dark:text-slate-400">
-        Paste a GitHub PR URL, or refresh PRs where you are a requested reviewer.
-      </p>
-      <label class="mt-3 block text-sm font-medium text-slate-700 dark:text-slate-300" for="pr-url">PR URL</label>
-      <input id="pr-url" name="url" type="url" required placeholder="https://github.com/org/repo/pull/123"
-             class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
-    </div>
-    <button type="submit"
-            class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
-      Resolve
-    </button>
-  </form>
-  <script>
-    document.getElementById('resolve-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const url = document.getElementById('pr-url').value;
-      const res = await fetch('/api/prs/resolve', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({url})
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        await lrAlert(err.detail || 'Failed to resolve PR', { title: 'Resolve failed' });
-        return;
-      }
-      const d = await res.json();
-      window.location = '/prs/' + d.id;
-    });
-  </script>
 
   <div class="flex flex-wrap items-center gap-4 text-sm text-slate-700 dark:text-slate-300">
     <button type="button" @click="syncPending()" :disabled="syncing"
@@ -74,19 +36,58 @@
     <span class="text-xs text-slate-500 dark:text-slate-400"
           x-text="visibleCount + ' shown · ' + openPrs.length + ' open'"></span>
     <span x-show="syncMsg" x-cloak class="text-xs text-slate-500 dark:text-slate-400" x-text="syncMsg"></span>
+    <button type="button" @click="openAddPr()"
+            class="ml-auto inline-flex items-center rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+      Add PR
+    </button>
+  </div>
+
+  <!-- Add PR modal -->
+  <div x-show="showAddPr" x-cloak class="lr-modal-backdrop" role="dialog" aria-modal="true"
+       aria-labelledby="add-pr-title"
+       @keydown.escape.window="closeAddPr()">
+    <div class="absolute inset-0 bg-slate-900/50" @click="closeAddPr()"></div>
+    <div class="lr-modal-panel" @click.stop>
+      <div class="lr-modal-header">
+        <h2 id="add-pr-title" class="text-lg font-semibold text-slate-900 dark:text-slate-100">Add PR</h2>
+        <button type="button" class="lr-modal-close" @click="closeAddPr()" aria-label="Close">Close</button>
+      </div>
+      <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">
+        Paste a GitHub PR URL to add it to lazyreview.
+      </p>
+      <form class="mt-4 space-y-4" @submit.prevent="resolvePr()">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="pr-url">PR URL</label>
+          <input id="pr-url" type="url" required x-model="addPrUrl" x-ref="addPrInput"
+                 placeholder="https://github.com/org/repo/pull/123"
+                 class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
+        </div>
+        <div class="lr-modal-footer flex justify-end gap-2">
+          <button type="button" @click="closeAddPr()"
+                  class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+            Cancel
+          </button>
+          <button type="submit" :disabled="resolvingPr"
+                  class="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+            <span x-text="resolvingPr ? 'Resolving…' : 'Resolve'"></span>
+          </button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
     <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
       <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
         <tr>
-          <th class="px-4 py-3">PR</th>
-          <th class="px-4 py-3">Title</th>
-          <th class="px-4 py-3">Author</th>
-          <th class="px-4 py-3">PR status</th>
-          <th class="px-4 py-3">Review status</th>
-          <th class="px-4 py-3" title="Agent review runs for this PR">Runs</th>
-          <th class="px-4 py-3" title="Days since the current head started awaiting review">Age</th>
+          <th class="px-4 py-3 whitespace-nowrap">PR</th>
+          <th class="px-4 py-3 whitespace-nowrap">Title</th>
+          <th class="px-4 py-3 whitespace-nowrap">Author</th>
+          <th class="px-4 py-3 whitespace-nowrap">PR status</th>
+          <th class="px-4 py-3 whitespace-nowrap">Review status</th>
+          <th class="px-4 py-3 whitespace-nowrap" title="PR analysis status">Analysis</th>
+          <th class="px-4 py-3 whitespace-nowrap" title="Agent review runs for this PR">Runs</th>
+          <th class="px-4 py-3 whitespace-nowrap" title="Days since the current head started awaiting review">Age</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
@@ -98,18 +99,25 @@
                  x-text="pr.repo + '#' + pr.number"></a>
             </td>
             <td class="px-4 py-3 text-slate-700 dark:text-slate-300" x-text="pr.title"></td>
-            <td class="px-4 py-3 text-slate-600 dark:text-slate-300" x-text="pr.author || '—'"></td>
-            <td class="px-4 py-3">
+            <td class="px-4 py-3 whitespace-nowrap text-slate-600 dark:text-slate-300" x-text="pr.author || '—'"></td>
+            <td class="px-4 py-3 whitespace-nowrap">
               <span class="rounded-full px-2 py-0.5 text-xs"
                     :class="prStatusClass(pr)"
                     x-text="prStatusLabel(pr)"></span>
             </td>
-            <td class="px-4 py-3">
+            <td class="px-4 py-3 whitespace-nowrap">
               <span class="rounded-full px-2 py-0.5 text-xs"
                     :class="internalStatusClass(pr)"
                     x-text="pr.internal_status_label || 'needs review'"></span>
             </td>
-            <td class="px-4 py-3 whitespace-nowrap text-slate-700 dark:text-slate-300">
+                        <td class="px-4 py-3 whitespace-nowrap">
+              <span class="inline-flex items-center gap-1.5"
+                    :title="analysisTitle(pr)">
+                <span class="lr-status-ball h-2.5 w-2.5"
+                      :class="analysisBallClass(pr.analysis_status)"></span>
+              </span>
+            </td>
+<td class="px-4 py-3 whitespace-nowrap text-slate-700 dark:text-slate-300">
               <span class="inline-flex items-center gap-1.5"
                     :title="pr.runs_stale ? 'New head commit has not been reviewed — previous runs are obsolete' : ''">
                 <span x-text="pr.run_count || 0"></span>
@@ -138,8 +146,11 @@
 <script>
 function formatRelative(iso) {
   if (!iso) return 'never';
-  const then = new Date(iso);
-  if (Number.isNaN(then.getTime())) return 'unknown';
+  if (window.LR && window.LR.formatRelative) {
+    return window.LR.formatRelative(iso) || 'unknown';
+  }
+  const then = window.LR && window.LR.parseUtc ? window.LR.parseUtc(iso) : new Date(iso);
+  if (!then || Number.isNaN(then.getTime())) return 'unknown';
   const seconds = Math.round((Date.now() - then.getTime()) / 1000);
   if (seconds < 45) return 'just now';
   const minutes = Math.round(seconds / 60);
@@ -152,8 +163,11 @@ function formatRelative(iso) {
 
 function formatExact(iso) {
   if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
+  if (window.LR && window.LR.formatAbsolute) {
+    return window.LR.formatAbsolute(iso) || iso;
+  }
+  const d = window.LR && window.LR.parseUtc ? window.LR.parseUtc(iso) : new Date(iso);
+  if (!d || Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString();
 }
 
@@ -163,6 +177,8 @@ function homePage() {
     hideDrafts: true,
     hideApproved: true,
     showAddPr: false,
+    addPrUrl: '',
+    resolvingPr: false,
     syncing: false,
     syncMsg: '',
     lastSyncIso: {{ (last_sync or '')|tojson }},
@@ -221,12 +237,66 @@ function homePage() {
       if (s === 'feedback_provided') return 'bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200';
       return 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200';
     },
+    analysisBallClass(status) {
+      if (status === 'succeeded') return 'lr-status-ball--succeeded';
+      if (status === 'failed') return 'lr-status-ball--failed';
+      if (status === 'cancelled') return 'lr-status-ball--cancelled';
+      if (status === 'running' || status === 'queued') {
+        return 'lr-status-ball--analyzing lr-status-ball--pulse';
+      }
+      return '';
+    },
+    analysisTitle(pr) {
+      const s = pr && pr.analysis_status;
+      if (s === 'succeeded') return 'Analysis succeeded for current head';
+      if (s === 'failed') return pr.analysis_error || 'Analysis failed';
+      if (s === 'cancelled') return 'Analysis cancelled';
+      if (s === 'running') return 'Analyzing…';
+      if (s === 'queued') return 'Analysis queued';
+      return 'Analysis not started';
+    },
     tickRelative() {
       this.lastSyncRelative = formatRelative(this.lastSyncIso);
       this.lastSyncExact = formatExact(this.lastSyncIso);
       setInterval(() => {
         this.lastSyncRelative = formatRelative(this.lastSyncIso);
       }, 30000);
+    },
+    openAddPr() {
+      this.showAddPr = true;
+      this.addPrUrl = '';
+      this.$nextTick(() => {
+        const el = this.$refs.addPrInput;
+        if (el) el.focus();
+      });
+    },
+    closeAddPr() {
+      if (this.resolvingPr) return;
+      this.showAddPr = false;
+      this.addPrUrl = '';
+    },
+    async resolvePr() {
+      const url = String(this.addPrUrl || '').trim();
+      if (!url) return;
+      this.resolvingPr = true;
+      try {
+        const res = await fetch('/api/prs/resolve', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({url})
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          await lrAlert(err.detail || 'Failed to resolve PR', { title: 'Resolve failed' });
+          return;
+        }
+        const d = await res.json();
+        window.location = '/prs/' + d.id;
+      } catch (e) {
+        await lrAlert(String(e.message || e), { title: 'Resolve failed' });
+      } finally {
+        this.resolvingPr = false;
+      }
     },
     async syncPending() {
       this.syncing = true;

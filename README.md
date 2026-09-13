@@ -10,6 +10,14 @@ Agentic code-review management: run Cursor / Claude / Agy reviews against GitHub
 - Ubuntu with systemd user services (for install/autostart)
 - Node/npm (for Tailwind CSS build during install)
 
+
+
+## PR analysis & shared workspaces
+
+lazyreview runs a **PR Analysis** job (orientation brief) before reviews or consolidations can start. At most **`max_concurrent_analyses`** (default `2`) analyses run at once; the rest stay queued.
+
+Checkouts live under `{data_dir}/workspaces/` (bare mirrors + per-PR worktrees) and are reused by analysis and reviews. When a PR is closed or merged, its worktree is queued for deletion.
+
 ## Configuration
 
 All daemon settings live in a TOML file:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -26,6 +27,12 @@ from lazyreview.config import get_settings
 from lazyreview.db.schema import ThreadLocalConnection, connect, init_db
 from lazyreview.services.consolidation_jobs import ConsolidationRunner
 from lazyreview.services.jobs import JobRunner
+from lazyreview.services.analysis_jobs import AnalysisRunner
+from lazyreview.services import lifecycle
+from lazyreview.services.settings import get_display_timezone
+from lazyreview.services.timezones import DEFAULT_DISPLAY_TIMEZONE
+from lazyreview.services.pr_workspace import WorkspacePruner
+from lazyreview.api import analyses as analyses_api
 from lazyreview.services.pr_sync import PrSyncer
 from lazyreview.services.retention import RetentionSweeper
 from lazyreview.web.formatters import format_cost_usd, format_duration_ms
@@ -43,6 +50,15 @@ logger = logging.getLogger(__name__)
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 TEMPLATES = Jinja2Templates(directory=str(WEB_DIR / "templates"))
+
+_display_timezone_var: ContextVar[str] = ContextVar(
+    "display_timezone", default=DEFAULT_DISPLAY_TIMEZONE
+)
+
+def _template_display_timezone() -> str:
+    return _display_timezone_var.get()
+
+TEMPLATES.env.globals["display_timezone"] = _template_display_timezone
 TEMPLATES.env.filters["duration"] = format_duration_ms
 TEMPLATES.env.filters["cost"] = format_cost_usd
 TEMPLATES.env.globals["AgentName"] = AgentName
@@ -69,6 +85,8 @@ def create_app() -> FastAPI:
         conn = ThreadLocalConnection(settings.db_path)
         runner = JobRunner(settings, conn)  # type: ignore[arg-type]
         consolidation_runner = ConsolidationRunner(settings, conn)  # type: ignore[arg-type]
+        analysis_runner = AnalysisRunner(settings, conn)  # type: ignore[arg-type]
+        workspace_pruner = WorkspacePruner(settings, conn)  # type: ignore[arg-type]
         runner.on_run_finished = consolidation_runner.notify_run_finished
         sweeper = RetentionSweeper(
             settings,
@@ -80,10 +98,20 @@ def create_app() -> FastAPI:
         app.state.db = conn
         app.state.jobs = runner
         app.state.consolidations = consolidation_runner
+        app.state.analyses = analysis_runner
+        app.state.workspace_pruner = workspace_pruner
         app.state.sweeper = sweeper
         app.state.pr_syncer = pr_syncer
         runner.start()
         consolidation_runner.start()
+        lifecycle.bind(
+            settings=settings,
+            jobs=runner,
+            consolidations=consolidation_runner,
+            analyses=analysis_runner,
+        )
+        analysis_runner.start()
+        workspace_pruner.start()
         sweeper.start()
         pr_syncer.start()
         logger.info(
@@ -96,11 +124,30 @@ def create_app() -> FastAPI:
         yield
         pr_syncer.stop()
         sweeper.stop()
+        workspace_pruner.stop()
+        lifecycle.unbind()
+        analysis_runner.stop()
         consolidation_runner.stop()
         runner.stop()
         conn.close()
 
     app = FastAPI(title="lazyreview", version=__version__, lifespan=lifespan)
+
+    @app.middleware("http")
+    async def display_timezone_middleware(request: Request, call_next):
+        tz = DEFAULT_DISPLAY_TIMEZONE
+        try:
+            db = getattr(request.app.state, "db", None)
+            if db is not None:
+                tz = get_display_timezone(db)
+        except Exception:
+            logger.exception("failed to resolve display_timezone")
+        token = _display_timezone_var.set(tz)
+        try:
+            return await call_next(request)
+        finally:
+            _display_timezone_var.reset(token)
+
 
     static_dir = WEB_DIR / "static"
     static_dir.mkdir(parents=True, exist_ok=True)
@@ -115,6 +162,7 @@ def create_app() -> FastAPI:
     app.include_router(consolidations.router, prefix="/api")
     app.include_router(analytics.router, prefix="/api")
     app.include_router(settings_api.router, prefix="/api")
+    app.include_router(analyses_api.router, prefix="/api")
 
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
@@ -181,6 +229,10 @@ def create_app() -> FastAPI:
             enriched.append(row)
         feedback = list_feedback_actions(request.app.state.db, pr_id)
         consolidations_list = list_consolidations_for_pr(request.app.state.db, pr_id)
+        from lazyreview.db import list_pr_analyses, list_pr_events
+
+        pr_events = list_pr_events(request.app.state.db, pr_id)
+        analyses_list = list_pr_analyses(request.app.state.db, pr_id)
         head = (pr.get("head_sha") or "").strip()
         runs_stale = bool(enriched) and bool(head) and not any(
             (r.get("head_sha") or "").strip() == head for r in enriched
@@ -195,6 +247,8 @@ def create_app() -> FastAPI:
                 "consolidating_ids": sorted(consolidating_ids),
                 "locked_run_ids": sorted(locked_ids),
                 "consolidations": consolidations_list,
+                "analyses": analyses_list,
+                "pr_events": pr_events,
                 "feedback": feedback,
                 "total_cost_usd": total_cost if have_cost else None,
                 "version": __version__,

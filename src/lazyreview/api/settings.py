@@ -19,10 +19,15 @@ class SettingsBody(BaseModel):
     run_retention_value: int | None = Field(default=None, ge=1)
     run_retention_unit: str | None = None
     pr_sync_interval_minutes: int | None = Field(default=None, ge=1)
+    display_timezone: str | None = None
     consolidator_agent: str | None = None
     consolidator_model: str | None = None
     consolidator_effort: str | None = None
     consolidator_prompt: str | None = None
+    pr_analysis_agent: str | None = None
+    pr_analysis_model: str | None = None
+    pr_analysis_effort: str | None = None
+    pr_analysis_prompt: str | None = None
     batch_review_defaults: list[BatchReviewDefault] | None = None
 
 
@@ -42,10 +47,15 @@ def write_settings(body: SettingsBody, request: Request):
             run_retention_value=body.run_retention_value,
             run_retention_unit=body.run_retention_unit,
             pr_sync_interval_minutes=body.pr_sync_interval_minutes,
+            display_timezone=body.display_timezone,
             consolidator_agent=body.consolidator_agent,
             consolidator_model=body.consolidator_model,
             consolidator_effort=body.consolidator_effort,
             consolidator_prompt=body.consolidator_prompt,
+            pr_analysis_agent=body.pr_analysis_agent,
+            pr_analysis_model=body.pr_analysis_model,
+            pr_analysis_effort=body.pr_analysis_effort,
+            pr_analysis_prompt=body.pr_analysis_prompt,
             batch_review_defaults=batch,
         )
     except ValueError as e:

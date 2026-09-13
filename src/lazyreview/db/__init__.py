@@ -149,11 +149,30 @@ def upsert_pr(
         (owner, repo, number),
     ).fetchone()
     assert row is not None
+    is_new = existing is None
+    if is_new:
+        create_pr_event(
+            conn,
+            pr_id=int(row["id"]),
+            kind="pr_created",
+            message="Added to LazyReview",
+            created_at=row["created_at"],
+            commit=False,
+        )
     # New head → prior review runs are stale for consolidation.
-    if head_sha and old_head and head_sha != old_head:
+    head_moved = bool(head_sha and old_head and head_sha != old_head)
+    if head_moved:
         deprecate_runs_for_pr(conn, int(row["id"]))
     conn.commit()
-    return dict(row)
+    pr = dict(row)
+    if head_moved:
+        from lazyreview.services.lifecycle import on_pr_head_changed
+
+        on_pr_head_changed(conn, int(pr["id"]))
+    from lazyreview.services.lifecycle import on_pr_upserted
+
+    on_pr_upserted(conn, pr)
+    return pr
 
 
 def list_stale_review_request_prs(
@@ -325,6 +344,14 @@ def list_prs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         pr = _attach_internal_status(conn, dict(r))
         pr["run_count"] = int(pr.get("run_count") or 0)
         pr["runs_stale"] = bool(int(pr.get("runs_stale") or 0))
+        analysis = get_current_pr_analysis(conn, int(pr["id"]))
+        pr["analysis_status"] = analysis["status"] if analysis else None
+        pr["analysis_id"] = int(analysis["id"]) if analysis else None
+        pr["analysis_error"] = (analysis.get("error_message") if analysis else None)
+        pr["analysis_agent"] = (analysis.get("agent") if analysis else None)
+        pr["analysis_model"] = (analysis.get("model") if analysis else None)
+        pr["analysis_effort"] = (analysis.get("effort") if analysis else None)
+        pr["analysis_duration_ms"] = (analysis.get("duration_ms") if analysis else None)
         out.append(pr)
     return out
 
@@ -335,7 +362,17 @@ def get_pr(conn: sqlite3.Connection, pr_id: int) -> dict[str, Any] | None:
     )
     if row is None:
         return None
-    return _attach_internal_status(conn, row)
+    pr = _attach_internal_status(conn, row)
+    analysis = get_current_pr_analysis(conn, int(pr["id"]))
+    pr["analysis_status"] = analysis["status"] if analysis else None
+    pr["analysis_id"] = int(analysis["id"]) if analysis else None
+    pr["analysis_error"] = (analysis.get("error_message") if analysis else None)
+    pr["analysis_brief"] = (analysis.get("brief_markdown") if analysis else None)
+    pr["analysis_agent"] = (analysis.get("agent") if analysis else None)
+    pr["analysis_model"] = (analysis.get("model") if analysis else None)
+    pr["analysis_effort"] = (analysis.get("effort") if analysis else None)
+    pr["analysis_duration_ms"] = (analysis.get("duration_ms") if analysis else None)
+    return pr
 
 
 def create_run(
@@ -351,10 +388,10 @@ def create_run(
 ) -> dict[str, Any]:
     cur = conn.execute(
         """
-        INSERT INTO review_runs (pr_id, agent, model, effort, skill, head_sha, status, workdir_path)
-        VALUES (?, ?, ?, ?, ?, ?, 'queued', ?)
+        INSERT INTO review_runs (pr_id, agent, model, effort, skill, head_sha, status, workdir_path, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?)
         """,
-        (pr_id, agent, model, effort, skill, head_sha, workdir_path),
+        (pr_id, agent, model, effort, skill, head_sha, workdir_path, utcnow()),
     )
     conn.commit()
     run_id = cur.lastrowid
@@ -499,8 +536,8 @@ def create_consolidation(
     cur = conn.execute(
         """
         INSERT INTO consolidations (
-          pr_id, head_sha, source_run_ids, agent, model, effort, status, workdir_path
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          pr_id, head_sha, source_run_ids, agent, model, effort, status, workdir_path, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             pr_id,
@@ -511,6 +548,7 @@ def create_consolidation(
             effort,
             status,
             workdir_path,
+            utcnow(),
         ),
     )
     conn.commit()
@@ -586,8 +624,8 @@ def record_external_pr_review(
         """
         INSERT INTO consolidations (
           pr_id, head_sha, source_run_ids, agent, model, effort, status, body,
-          feedback_provided, gh_action, gh_review_id, gh_comment_url, workdir_path
-        ) VALUES (?, ?, '[]', 'external', '', NULL, 'succeeded', ?, 1, ?, ?, ?, '')
+          feedback_provided, gh_action, gh_review_id, gh_comment_url, workdir_path, created_at
+        ) VALUES (?, ?, '[]', 'external', '', NULL, 'succeeded', ?, 1, ?, ?, ?, '', ?)
         """,
         (
             pr_id,
@@ -596,6 +634,7 @@ def record_external_pr_review(
             gh_action,
             gh_review_id or None,
             gh_comment_url,
+            utcnow(),
         ),
     )
     conn.commit()
@@ -1202,3 +1241,251 @@ def delete_run(conn: sqlite3.Connection, run_id: int) -> None:
     conn.execute("DELETE FROM findings WHERE run_id = ?", (run_id,))
     conn.execute("DELETE FROM review_runs WHERE id = ?", (run_id,))
     conn.commit()
+
+
+# --- PR analyses -------------------------------------------------------------
+
+def create_pr_analysis(
+    conn: sqlite3.Connection,
+    *,
+    pr_id: int,
+    head_sha: str,
+    agent: str,
+    model: str,
+    effort: str | None,
+    workdir_path: str = "",
+) -> dict[str, Any]:
+    """Insert or re-queue analysis for (pr_id, head_sha). Idempotent when already queued/running/succeeded."""
+    existing = get_pr_analysis_for_head(conn, pr_id, head_sha)
+    if existing and existing["status"] in ("queued", "running", "succeeded"):
+        return existing
+    if existing:
+        conn.execute(
+            """
+            UPDATE pr_analyses
+            SET status = 'queued',
+                agent = ?,
+                model = ?,
+                effort = ?,
+                workdir_path = COALESCE(NULLIF(?, ''), workdir_path),
+                brief_markdown = NULL,
+                brief_path = NULL,
+                error_message = NULL,
+                started_at = NULL,
+                finished_at = NULL,
+                duration_ms = NULL,
+                cli_command = NULL
+            WHERE id = ?
+            """,
+            (agent, model, effort, workdir_path, int(existing["id"])),
+        )
+        conn.commit()
+        row = get_pr_analysis(conn, int(existing["id"]))
+        assert row is not None
+        return row
+    cur = conn.execute(
+        """
+        INSERT INTO pr_analyses (pr_id, head_sha, status, agent, model, effort, workdir_path, created_at)
+        VALUES (?, ?, 'queued', ?, ?, ?, ?, ?)
+        """,
+        (pr_id, head_sha, agent, model, effort, workdir_path, utcnow()),
+    )
+    conn.commit()
+    row = get_pr_analysis(conn, int(cur.lastrowid))
+    assert row is not None
+    return row
+
+
+def get_pr_analysis(conn: sqlite3.Connection, analysis_id: int) -> dict[str, Any] | None:
+    return row_to_dict(
+        conn.execute("SELECT * FROM pr_analyses WHERE id = ?", (analysis_id,)).fetchone()
+    )
+
+
+def get_pr_analysis_for_head(
+    conn: sqlite3.Connection, pr_id: int, head_sha: str
+) -> dict[str, Any] | None:
+    return row_to_dict(
+        conn.execute(
+            "SELECT * FROM pr_analyses WHERE pr_id = ? AND head_sha = ?",
+            (pr_id, head_sha),
+        ).fetchone()
+    )
+
+
+def get_current_pr_analysis(conn: sqlite3.Connection, pr_id: int) -> dict[str, Any] | None:
+    row = conn.execute("SELECT head_sha FROM prs WHERE id = ?", (pr_id,)).fetchone()
+    if row is None:
+        return None
+    head = (row["head_sha"] or "").strip()
+    if not head:
+        return None
+    return get_pr_analysis_for_head(conn, pr_id, head)
+
+
+def list_pr_analyses(conn: sqlite3.Connection, pr_id: int) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT * FROM pr_analyses WHERE pr_id = ? ORDER BY id DESC",
+        (pr_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_pr_analysis(
+    conn: sqlite3.Connection, analysis_id: int, **fields: Any
+) -> dict[str, Any] | None:
+    if not fields:
+        return get_pr_analysis(conn, analysis_id)
+    cols = []
+    vals: list[Any] = []
+    for key, value in fields.items():
+        cols.append(f"{key} = ?")
+        vals.append(value)
+    vals.append(analysis_id)
+    conn.execute(
+        f"UPDATE pr_analyses SET {', '.join(cols)} WHERE id = ?",
+        vals,
+    )
+    conn.commit()
+    return get_pr_analysis(conn, analysis_id)
+
+
+def cancel_pr_analyses_for_pr(conn: sqlite3.Connection, pr_id: int) -> list[int]:
+    """Mark queued/running analyses for a PR as cancelled. Returns cancelled ids."""
+    rows = conn.execute(
+        """
+        SELECT * FROM pr_analyses
+        WHERE pr_id = ? AND status IN ('queued', 'running')
+        """,
+        (pr_id,),
+    ).fetchall()
+    ids = [int(r["id"]) for r in rows]
+    if not ids:
+        return []
+    finished_at = utcnow()
+    conn.execute(
+        f"""
+        UPDATE pr_analyses
+        SET status = 'cancelled',
+            finished_at = ?,
+            error_message = 'Cancelled due to head change or user request'
+        WHERE id IN ({','.join('?' * len(ids))})
+        """,
+        [finished_at, *ids],
+    )
+    for r in rows:
+        record_analysis_finished_event(
+            conn,
+            {
+                **dict(r),
+                "status": "cancelled",
+                "finished_at": finished_at,
+            },
+            commit=False,
+        )
+    conn.commit()
+    return ids
+
+
+def analysis_succeeded_for_current_head(conn: sqlite3.Connection, pr_id: int) -> bool:
+    row = get_current_pr_analysis(conn, pr_id)
+    return bool(row and row.get("status") == "succeeded")
+
+
+# --- PR events (timeline) ----------------------------------------------------
+
+def create_pr_event(
+    conn: sqlite3.Connection,
+    *,
+    pr_id: int,
+    kind: str,
+    message: str = "",
+    agent: str | None = None,
+    model: str | None = None,
+    effort: str | None = None,
+    analysis_id: int | None = None,
+    meta: dict[str, Any] | None = None,
+    created_at: str | None = None,
+    commit: bool = True,
+) -> dict[str, Any]:
+    meta_json = json.dumps(meta) if meta is not None else None
+    when = created_at or utcnow()
+    cur = conn.execute(
+        """
+        INSERT INTO pr_events (
+          pr_id, kind, message, agent, model, effort, analysis_id, meta_json, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            pr_id,
+            kind,
+            message or "",
+            agent,
+            model,
+            effort,
+            analysis_id,
+            meta_json,
+            when,
+        ),
+    )
+    if commit:
+        conn.commit()
+    row = conn.execute(
+        "SELECT * FROM pr_events WHERE id = ?", (cur.lastrowid,)
+    ).fetchone()
+    assert row is not None
+    return _pr_event_dict(row)
+
+
+def record_analysis_finished_event(
+    conn: sqlite3.Connection,
+    analysis: dict[str, Any],
+    *,
+    commit: bool = True,
+) -> dict[str, Any] | None:
+    """Record a timeline event when an analysis reaches a terminal status."""
+    status = (analysis.get("status") or "").strip()
+    if status not in ("succeeded", "failed", "cancelled"):
+        return None
+    messages = {
+        "succeeded": "PR analysis finished",
+        "failed": "PR analysis failed",
+        "cancelled": "PR analysis cancelled",
+    }
+    return create_pr_event(
+        conn,
+        pr_id=int(analysis["pr_id"]),
+        kind="analysis_finished",
+        message=messages[status],
+        agent=analysis.get("agent") or None,
+        model=analysis.get("model") or None,
+        effort=analysis.get("effort") or None,
+        analysis_id=int(analysis["id"]),
+        meta={"status": status},
+        created_at=analysis.get("finished_at") or None,
+        commit=commit,
+    )
+
+
+def list_pr_events(conn: sqlite3.Connection, pr_id: int) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT * FROM pr_events WHERE pr_id = ? ORDER BY created_at DESC, id DESC",
+        (pr_id,),
+    ).fetchall()
+    return [_pr_event_dict(r) for r in rows]
+
+
+def _pr_event_dict(row: sqlite3.Row) -> dict[str, Any]:
+    d = dict(row)
+    raw = d.pop("meta_json", None)
+    meta: dict[str, Any] = {}
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                meta = parsed
+        except (TypeError, json.JSONDecodeError):
+            meta = {}
+    d["meta"] = meta
+    return d

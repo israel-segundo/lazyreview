@@ -16,20 +16,30 @@ from lazyreview.db import get_all_settings, get_setting, set_setting
 from lazyreview.db.schema import (
     DEFAULT_BATCH_REVIEW_DEFAULTS,
     _default_consolidator_prompt,
+    _default_pr_analysis_prompt,
 )
 from lazyreview.services.pr_sync import (
     DEFAULT_SYNC_INTERVAL_MINUTES,
     get_pr_sync_interval_minutes,
 )
+from lazyreview.services.timezones import (
+    DEFAULT_DISPLAY_TIMEZONE,
+    DISPLAY_TIMEZONE_CHOICES,
+    normalize_display_timezone,
+)
 
 ALLOWED_UNITS = {"hours", "days", "weeks"}
 ALLOWED_CONSOLIDATOR_AGENTS = ALL_AGENT_NAMES
+ALLOWED_PR_ANALYSIS_AGENTS = ALL_AGENT_NAMES
 ALLOWED_BATCH_AGENTS = ALL_AGENT_NAMES
 MAX_BATCH_DEFAULTS = 20
 
 _DEFAULT_CONSOLIDATOR_AGENT = AgentName.CLAUDE.value
 _DEFAULT_CONSOLIDATOR_MODEL = ClaudeModelAlias.HAIKU.value
 _DEFAULT_CONSOLIDATOR_EFFORT = EffortLevel.LOW.value
+_DEFAULT_PR_ANALYSIS_AGENT = AgentName.CLAUDE.value
+_DEFAULT_PR_ANALYSIS_MODEL = ClaudeModelAlias.OPUS.value
+_DEFAULT_PR_ANALYSIS_EFFORT = EffortLevel.HIGH.value
 
 
 def normalize_batch_review_defaults(raw: Any) -> list[dict[str, str]]:
@@ -84,7 +94,9 @@ def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
     unit = raw.get("run_retention_unit", "weeks") or "weeks"
     sync_minutes = get_pr_sync_interval_minutes(conn)
     prompt = raw.get("consolidator_prompt") or _default_consolidator_prompt() or ""
+    analysis_prompt = raw.get("pr_analysis_prompt") or _default_pr_analysis_prompt() or ""
     batch_defaults = parse_batch_review_defaults(raw.get("batch_review_defaults"))
+    display_timezone = normalize_display_timezone(raw.get("display_timezone"))
     return {
         "run_retention_value": value,
         "run_retention_unit": unit,
@@ -97,11 +109,20 @@ def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
             f"sync pending review PRs every {sync_minutes} minutes "
             f"(default {DEFAULT_SYNC_INTERVAL_MINUTES})"
         ),
+        "display_timezone": display_timezone,
+        "display_timezone_choices": [
+            {"id": tz, "label": label} for tz, label in DISPLAY_TIMEZONE_CHOICES
+        ],
         "consolidator_agent": raw.get("consolidator_agent") or _DEFAULT_CONSOLIDATOR_AGENT,
         "consolidator_model": raw.get("consolidator_model") or _DEFAULT_CONSOLIDATOR_MODEL,
         "consolidator_effort": raw.get("consolidator_effort") or _DEFAULT_CONSOLIDATOR_EFFORT,
         "consolidator_prompt": prompt,
         "consolidator_prompt_default": _default_consolidator_prompt() or "",
+        "pr_analysis_agent": raw.get("pr_analysis_agent") or _DEFAULT_PR_ANALYSIS_AGENT,
+        "pr_analysis_model": raw.get("pr_analysis_model") or _DEFAULT_PR_ANALYSIS_MODEL,
+        "pr_analysis_effort": raw.get("pr_analysis_effort") or _DEFAULT_PR_ANALYSIS_EFFORT,
+        "pr_analysis_prompt": analysis_prompt,
+        "pr_analysis_prompt_default": _default_pr_analysis_prompt() or "",
         "batch_review_defaults": batch_defaults,
     }
 
@@ -112,10 +133,15 @@ def update_app_settings(
     run_retention_value: int | None = None,
     run_retention_unit: str | None = None,
     pr_sync_interval_minutes: int | None = None,
+    display_timezone: str | None = None,
     consolidator_agent: str | None = None,
     consolidator_model: str | None = None,
     consolidator_effort: str | None = None,
     consolidator_prompt: str | None = None,
+    pr_analysis_agent: str | None = None,
+    pr_analysis_model: str | None = None,
+    pr_analysis_effort: str | None = None,
+    pr_analysis_prompt: str | None = None,
     batch_review_defaults: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if run_retention_value is not None:
@@ -131,6 +157,8 @@ def update_app_settings(
         if pr_sync_interval_minutes < 1:
             raise ValueError("PR sync interval must be >= 1 minute")
         set_setting(conn, "pr_sync_interval_minutes", str(pr_sync_interval_minutes))
+    if display_timezone is not None:
+        set_setting(conn, "display_timezone", normalize_display_timezone(display_timezone))
     if consolidator_agent is not None:
         agent = consolidator_agent.strip().lower()
         if agent not in ALLOWED_CONSOLIDATOR_AGENTS:
@@ -147,6 +175,22 @@ def update_app_settings(
         set_setting(conn, "consolidator_effort", consolidator_effort.strip())
     if consolidator_prompt is not None:
         set_setting(conn, "consolidator_prompt", consolidator_prompt)
+    if pr_analysis_agent is not None:
+        agent = pr_analysis_agent.strip().lower()
+        if agent not in ALLOWED_PR_ANALYSIS_AGENTS:
+            raise ValueError(
+                f"PR analysis agent must be one of {sorted(ALLOWED_PR_ANALYSIS_AGENTS)}"
+            )
+        set_setting(conn, "pr_analysis_agent", agent)
+    if pr_analysis_model is not None:
+        model = pr_analysis_model.strip()
+        if not model:
+            raise ValueError("PR analysis model is required")
+        set_setting(conn, "pr_analysis_model", model)
+    if pr_analysis_effort is not None:
+        set_setting(conn, "pr_analysis_effort", pr_analysis_effort.strip())
+    if pr_analysis_prompt is not None:
+        set_setting(conn, "pr_analysis_prompt", pr_analysis_prompt)
     if batch_review_defaults is not None:
         normalized = normalize_batch_review_defaults(batch_review_defaults)
         set_setting(conn, "batch_review_defaults", json.dumps(normalized))
@@ -170,3 +214,18 @@ def get_consolidator_config(conn: sqlite3.Connection) -> dict[str, str]:
         "effort": view["consolidator_effort"] or "",
         "prompt": view["consolidator_prompt"],
     }
+
+
+def get_pr_analysis_config(conn: sqlite3.Connection) -> dict[str, str]:
+    view = get_settings_view(conn)
+    return {
+        "agent": view["pr_analysis_agent"],
+        "model": view["pr_analysis_model"],
+        "effort": view["pr_analysis_effort"] or "",
+        "prompt": view["pr_analysis_prompt"],
+    }
+
+
+def get_display_timezone(conn: sqlite3.Connection) -> str:
+    raw = get_setting(conn, "display_timezone") or DEFAULT_DISPLAY_TIMEZONE
+    return normalize_display_timezone(raw)

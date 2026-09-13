@@ -373,6 +373,26 @@ class ConsolidationRunner:
         assert updated is not None
         return updated
 
+
+    def cancel_for_pr(self, pr_id: int) -> list[int]:
+        rows = self.conn.execute(
+            """
+            SELECT id FROM consolidations
+            WHERE pr_id = ? AND status IN ('dormant', 'queued', 'running')
+            ORDER BY id ASC
+            """,
+            (pr_id,),
+        ).fetchall()
+        cancelled: list[int] = []
+        for r in rows:
+            cid = int(r["id"])
+            try:
+                self.cancel(cid)
+                cancelled.append(cid)
+            except (KeyError, ValueError):
+                continue
+        return cancelled
+
     def _is_cancel_requested(
         self, consolidation_id: int, conn: sqlite3.Connection | None = None
     ) -> bool:

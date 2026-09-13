@@ -24,6 +24,28 @@ from lazyreview.services.consolidation_jobs import (
 )
 
 
+
+def _seed_succeeded_analysis(conn, pr):
+    """Satisfy the PR-analysis gate for API tests."""
+    from lazyreview.db import create_pr_analysis, update_pr_analysis
+
+    row = create_pr_analysis(
+        conn,
+        pr_id=int(pr["id"]),
+        head_sha=pr["head_sha"],
+        agent="claude",
+        model="haiku",
+        effort="low",
+    )
+    update_pr_analysis(
+        conn,
+        int(row["id"]),
+        status="succeeded",
+        brief_markdown="# ok",
+        finished_at="2026-01-01T00:00:00+00:00",
+    )
+    return row
+
 def _settings(tmp_path: Path) -> Settings:
     data = tmp_path / "data"
     data.mkdir(exist_ok=True)
@@ -60,6 +82,7 @@ def _pr_and_run(conn, tmp_path: Path, *, status="succeeded", head="abc"):
         head_ref="feat",
         head_sha=head,
     )
+    _seed_succeeded_analysis(conn, pr)
     cur = conn.execute(
         """
         INSERT INTO review_runs (pr_id, agent, model, status, head_sha, workdir_path)
@@ -76,7 +99,7 @@ def _pr_and_run(conn, tmp_path: Path, *, status="succeeded", head="abc"):
 def test_schema_v6_consolidations_and_settings(tmp_path: Path):
     conn = _conn(tmp_path)
     ver = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert ver == SCHEMA_VERSION == 10
+    assert ver == SCHEMA_VERSION == 11
     cols = {
         r["name"]
         for r in conn.execute("PRAGMA table_info(consolidations)").fetchall()
@@ -152,6 +175,7 @@ def test_create_rejects_ineligible_runs(tmp_path: Path):
         head_ref="feat",
         head_sha="xyz",
     )
+    _seed_succeeded_analysis(conn, pr)
     cur = conn.execute(
         """
         INSERT INTO review_runs (pr_id, agent, model, status, head_sha, workdir_path)
@@ -293,6 +317,7 @@ def test_post_sets_feedback_provided_and_refuses_double(tmp_path: Path):
         head_ref="feat",
         head_sha="ddd",
     )
+    _seed_succeeded_analysis(conn, pr)
     cur = conn.execute(
         """
         INSERT INTO review_runs (pr_id, agent, model, status, head_sha, workdir_path, consolidated)
@@ -362,6 +387,7 @@ def test_regenerate_requeues_with_current_settings(tmp_path: Path):
         head_ref="feat",
         head_sha="eee",
     )
+    _seed_succeeded_analysis(conn, pr)
     cur = conn.execute(
         """
         INSERT INTO review_runs (pr_id, agent, model, status, head_sha, workdir_path, consolidated)
@@ -449,6 +475,7 @@ def test_regenerate_refuses_after_feedback(tmp_path: Path):
         head_ref="feat",
         head_sha="fff",
     )
+    _seed_succeeded_analysis(conn, pr)
     cur = conn.execute(
         """
         INSERT INTO review_runs (pr_id, agent, model, status, head_sha, workdir_path, consolidated)

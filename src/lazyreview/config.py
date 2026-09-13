@@ -53,6 +53,8 @@ job_timeout_seconds = 3600
 retention_sweep_seconds = 3600
 # How many agent reviews may run at once across all PRs (each is a full CLI process).
 max_concurrent_jobs = 10
+# How many PR analyses may run at once (rest stay queued).
+max_concurrent_analyses = 2
 
 [service]
 unit_name = "lazyreview.service"
@@ -114,6 +116,7 @@ class Settings:
     max_concurrent_jobs: int
     service_name: str
     unit_name: str
+    max_concurrent_analyses: int = 2
 
     @classmethod
     def load(cls, *, create_if_missing: bool = True) -> Settings:
@@ -142,6 +145,7 @@ class Settings:
         job_timeout = int(worker.get("job_timeout_seconds") or 3600)
         sweep = int(worker.get("retention_sweep_seconds") or 3600)
         concurrency = int(worker.get("max_concurrent_jobs") or 1)
+        analysis_concurrency = int(worker.get("max_concurrent_analyses") or 2)
         unit_name = str(service.get("unit_name") or "lazyreview.service")
 
         # Env overrides (optional, for one-off / install scripts)
@@ -165,6 +169,7 @@ class Settings:
             max_concurrent_jobs=max(1, concurrency),
             service_name="lazyreview",
             unit_name=unit_name,
+            max_concurrent_analyses=max(1, analysis_concurrency),
         )
 
     def ensure_dirs(self) -> None:
@@ -188,6 +193,7 @@ class Settings:
             "job_timeout_seconds": self.job_timeout_seconds,
             "retention_sweep_seconds": self.retention_sweep_seconds,
             "max_concurrent_jobs": self.max_concurrent_jobs,
+            "max_concurrent_analyses": self.max_concurrent_analyses,
             "unit_name": self.unit_name,
         }
 

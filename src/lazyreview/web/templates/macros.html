@@ -87,3 +87,22 @@
   {% endif %}
 </span>
 {%- endmacro %}
+
+
+{# PR analysis status ball (distinct sky color while in flight). #}
+{% macro analysis_status_ball(status, size='h-2.5 w-2.5') -%}
+{%- if status == 'succeeded' -%}
+  {{ status_ball('succeeded', 'Analysis succeeded', size) }}
+{%- elif status == 'failed' -%}
+  {{ status_ball('failed', 'Analysis failed', size) }}
+{%- elif status == 'cancelled' -%}
+  {{ status_ball('cancelled', 'Analysis cancelled', size) }}
+{%- elif status in ['queued', 'running'] -%}
+  {%- set label = 'Analyzing…' if status == 'running' else 'Analysis queued' -%}
+  <span class="lr-status-ball lr-status-ball--analyzing {{ size }} lr-status-ball--pulse"
+        title="{{ label }}" role="img" aria-label="{{ label }}"></span>
+{%- else -%}
+  <span class="lr-status-ball {{ size }}" title="Analysis not started" role="img" aria-label="Analysis not started"
+        style="background:#cbd5e1"></span>
+{%- endif -%}
+{%- endmacro %}

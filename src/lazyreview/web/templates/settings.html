@@ -1,302 +1,671 @@
 {% extends "base.html" %}
 {% block title %} — Settings{% endblock %}
+{% block main_width %}max-w-none{% endblock %}
+{% block footer_width %}max-w-none{% endblock %}
 {% block content %}
-<div class="space-y-6" x-data="settingsPage()">
-  <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-    <h1 class="text-2xl font-semibold tracking-tight">Settings</h1>
-    <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
-      Global lazyreview preferences.
-      Daemon bind address, data paths, and timeouts live in
-      <code class="rounded bg-slate-100 px-1 text-xs dark:bg-slate-800">~/.config/lazyreview/config.toml</code>
-      (<code class="rounded bg-slate-100 px-1 text-xs dark:bg-slate-800">lazyreview config</code>).
-    </p>
-  </div>
-
-  <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-    <h2 class="text-lg font-semibold">Pending PR sync</h2>
-    <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">
-      Periodically fetch open PRs where you are a requested reviewer
-      (<code class="rounded bg-slate-100 px-1 text-xs dark:bg-slate-800">gh search prs --review-requested=@me --state open</code>).
-      Closed or merged PRs are excluded. You can also refresh on demand from the home page.
-    </p>
-    <div class="mt-4 flex flex-wrap items-end gap-3">
-      <div>
-        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300">Every (minutes)</label>
-        <input type="number" min="1" x-model.number="syncMinutes"
-               class="mt-1 w-28 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
-      </div>
-      <button type="button" @click="saveSync()"
-              class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Save</button>
+<div class="lr-settings" x-data="settingsPage()">
+  {# Left category nav #}
+  <aside class="lr-settings-nav" aria-label="Settings categories">
+    <div class="lr-settings-nav-brand">
+      <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Settings</div>
     </div>
-    <p class="mt-3 text-sm text-slate-500 dark:text-slate-400" x-text="syncHint"></p>
-    <p class="mt-1 text-xs text-slate-400" x-show="lastSync">Last sync: <span x-text="lastSync"></span></p>
-  </div>
 
-  <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-    <h2 class="text-lg font-semibold">Run retention</h2>
-    <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">
-      Finished runs older than this window are deleted automatically
-      (database row + <code class="rounded bg-slate-100 px-1 text-xs dark:bg-slate-800">~/.local/share/lazyreview/runs/{id}/</code>).
-      The daemon sweeps about once an hour. In-flight runs are never purged.
-      Purged runs are also removed from analytics rollups.
-    </p>
-    <div class="mt-4 flex flex-wrap items-end gap-3">
-      <div>
-        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300">Keep for</label>
-        <input type="number" min="1" x-model.number="value"
-               class="mt-1 w-24 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
-      </div>
-      <div>
-        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300">Unit</label>
-        <select x-model="unit" class="mt-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
-          <option value="hours">hours</option>
-          <option value="days">days</option>
-          <option value="weeks">weeks</option>
-        </select>
-      </div>
-      <button type="button" @click="saveRetention()"
-              class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Save</button>
-    </div>
-    <p class="mt-3 text-sm text-slate-500 dark:text-slate-400" x-text="hint"></p>
-    <div class="mt-4">
-      <button type="button" @click="purge()"
-              class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
-        Purge old runs now
+    <nav class="lr-settings-nav-list">
+      <button type="button"
+              class="lr-settings-nav-item"
+              :class="section === 'general' && 'lr-settings-nav-item--active'"
+              @click="section = 'general'">
+        <svg class="h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.174.1.347.218.652.218.21 0 .42-.05.615-.145l1.158-.67a1.125 1.125 0 0 1 1.45.12l1.837 1.838c.37.37.42.955.12 1.45l-.67 1.158c-.095.195-.145.405-.145.615 0 .305.118.478.218.652.184.332.496.582.87.645l1.281.213c.542.09.94.56.94 1.11v2.593c0 .55-.398 1.02-.94 1.11l-1.281.213a1.125 1.125 0 0 0-.87.645c-.1.174-.218.347-.218.652 0 .21.05.42.145.615l.67 1.158c.3.495.25 1.08-.12 1.45l-1.838 1.837a1.125 1.125 0 0 1-1.45.12l-1.158-.67a1.126 1.126 0 0 0-.615-.145c-.305 0-.478.118-.652.218a1.125 1.125 0 0 0-.645.87l-.213 1.281c-.09.542-.56.94-1.11.94h-2.593c-.55 0-1.02-.398-1.11-.94l-.213-1.281a1.125 1.125 0 0 0-.87-.645 1.124 1.124 0 0 0-.652-.218 1.126 1.126 0 0 0-.615.145l-1.158.67a1.125 1.125 0 0 1-1.45-.12L3.31 18.044a1.125 1.125 0 0 1-.12-1.45l.67-1.158c.095-.195.145-.405.145-.615 0-.305-.118-.478-.218-.652a1.125 1.125 0 0 0-.87-.645l-1.281-.213A1.125 1.125 0 0 1 1.5 12.75v-2.593c0-.55.398-1.02.94-1.11l1.281-.213c.374-.063.686-.313.87-.645.1-.174.218-.347.218-.652 0-.21-.05-.42-.145-.615l-.67-1.158a1.125 1.125 0 0 1 .12-1.45L5.844 3.43a1.125 1.125 0 0 1 1.45-.12l1.158.67c.195.095.405.145.615.145.305 0 .478-.118.652-.218.332-.184.582-.496.645-.87l.213-1.281Z" />
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+        </svg>
+        <span>General</span>
       </button>
-      <span class="ml-2 text-sm text-slate-500 dark:text-slate-400" x-text="purgeMsg"></span>
+
+      <button type="button"
+              class="lr-settings-nav-item"
+              :class="section === 'agents' && 'lr-settings-nav-item--active'"
+              @click="section = 'agents'">
+        <svg class="h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5" />
+        </svg>
+        <span>Agents &amp; Prompts</span>
+      </button>
+    </nav>
+
+    <div class="lr-settings-nav-foot">
+      <p class="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+        Daemon bind address, paths, and timeouts live in
+        <code class="rounded bg-slate-200/80 px-1 dark:bg-slate-800">config.toml</code>.
+      </p>
     </div>
-  </div>
+  </aside>
 
-  <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-    <h2 class="text-lg font-semibold">Batch reviews configuration</h2>
-    <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">
-      Default agent / model / effort rows used when you click
-      <span class="font-medium text-slate-800 dark:text-slate-200">Start Code Review</span>
-      on a PR. Edit the list here; the popup will pre-fill from these defaults.
-    </p>
+  {# Main panel #}
+  <section class="lr-settings-main">
+    {# —— General —— #}
+    <div x-show="section === 'general'" x-cloak class="lr-settings-panel">
+      <header class="lr-settings-header">
+        <h1 class="lr-settings-title">General</h1>
+        <p class="lr-settings-sub">Sync cadence and how long finished runs are kept.</p>
+      </header>
 
-    <div class="relative mt-4" @click="cfgCloseCombo()">
-      <div class="lr-batch-table-wrap" @click.stop>
-        <table class="lr-batch-table">
-          <thead>
-            <tr>
-              <th class="lr-batch-num">#</th>
-              <th>Agent</th>
-              <th>Model</th>
-              <th>Effort</th>
-              <th class="lr-batch-actions"><span class="sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            <template x-for="(row, idx) in cfgRows" :key="row.key">
-              <tr>
-                <td class="lr-batch-num" x-text="idx + 1"></td>
-                <td>
-                  <input type="text" autocomplete="off" role="combobox"
-                         :id="'cfg-agent-' + row.key"
-                         :aria-expanded="cfgCombo === row.key + ':agent'"
-                         :aria-label="'Default agent ' + (idx + 1)"
-                         x-model="row.agentQuery"
-                         @focus="cfgOpenCombo(idx, 'agent', $event)"
-                         @click.stop="cfgOpenCombo(idx, 'agent', $event)"
-                         @input="cfgOpenCombo(idx, 'agent', $event)"
-                         @keydown.arrow-down.prevent="cfgComboMove(idx, 'agent', 1)"
-                         @keydown.arrow-up.prevent="cfgComboMove(idx, 'agent', -1)"
-                         @keydown.enter.prevent="cfgComboConfirm(idx, 'agent')"
-                         @keydown.escape.stop="cfgCloseCombo()"
+      <div class="lr-settings-grid">
+        <div class="lr-settings-card">
+          <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Pending PR sync</h2>
+          <p class="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
+            Periodically fetch open PRs where you are a requested reviewer.
+            Closed or merged PRs are excluded.
+          </p>
+          <div class="mt-4 flex flex-wrap items-end gap-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-700 dark:text-slate-300">Every (minutes)</label>
+              <input type="number" min="1" x-model.number="syncMinutes"
+                     class="mt-1 w-28 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
+            </div>
+            <button type="button" @click="saveSync()"
+                    class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+              Save
+            </button>
+          </div>
+          <p class="mt-3 text-sm text-slate-500 dark:text-slate-400" x-text="syncHint"></p>
+          <p class="mt-1 text-xs text-slate-400" x-show="lastSync">Last sync: <span x-text="lastSync"></span></p>
+        </div>
+
+        <div class="lr-settings-card">
+          <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Run retention</h2>
+          <p class="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
+            Finished runs older than this window are deleted automatically. In-flight runs are never purged.
+          </p>
+          <div class="mt-4 flex flex-wrap items-end gap-3">
+            <div>
+              <label class="block text-sm font-medium text-slate-700 dark:text-slate-300">Keep for</label>
+              <input type="number" min="1" x-model.number="value"
+                     class="mt-1 w-24 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 dark:text-slate-300">Unit</label>
+              <select x-model="unit" class="mt-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+                <option value="hours">hours</option>
+                <option value="days">days</option>
+                <option value="weeks">weeks</option>
+              </select>
+            </div>
+            <button type="button" @click="saveRetention()"
+                    class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+              Save
+            </button>
+          </div>
+          <p class="mt-3 text-sm text-slate-500 dark:text-slate-400" x-text="hint"></p>
+          <div class="mt-4">
+            <button type="button" @click="purge()"
+                    class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+              Purge old runs now
+            </button>
+            <span class="ml-2 text-sm text-slate-500 dark:text-slate-400" x-text="purgeMsg"></span>
+          </div>
+        </div>
+
+        <div class="lr-settings-card">
+          <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Display timezone</h2>
+          <p class="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
+            All timestamps are stored in UTC. Choose how they appear in the portal
+            (relative times and absolute tooltips).
+          </p>
+          <div class="mt-4 flex flex-wrap items-end gap-3">
+            <div class="min-w-[16rem]">
+              <label class="block text-sm font-medium text-slate-700 dark:text-slate-300">Timezone</label>
+              <select x-model="displayTimezone"
+                      class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+                <template x-for="opt in displayTimezoneChoices" :key="opt.id">
+                  <option :value="opt.id" x-text="opt.label" :selected="opt.id === displayTimezone"></option>
+                </template>
+              </select>
+            </div>
+            <button type="button" @click="saveTimezone()"
+                    class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+              Save
+            </button>
+          </div>
+          <p class="mt-3 text-sm text-slate-500 dark:text-slate-400" x-text="timezoneHint"></p>
+        </div>
+
+      </div>
+    </div>
+
+    {# —— Agents & Prompts —— #}
+    <div x-show="section === 'agents'" x-cloak class="lr-settings-panel lr-settings-panel--agents">
+      <header class="lr-settings-header">
+        <h1 class="lr-settings-title">Agents &amp; Prompts</h1>
+        <p class="lr-settings-sub">Configure review defaults, consolidator, and PR analysis agents and prompts.</p>
+      </header>
+
+      <div class="lr-settings-tabs" role="tablist" aria-label="Agent settings">
+        <button type="button" role="tab"
+                class="lr-settings-tab"
+                :class="agentsTab === 'reviews' && 'lr-settings-tab--active'"
+                :aria-selected="agentsTab === 'reviews'"
+                @click="agentsTab = 'reviews'">Reviews</button>
+        <button type="button" role="tab"
+                class="lr-settings-tab"
+                :class="agentsTab === 'consolidation' && 'lr-settings-tab--active'"
+                :aria-selected="agentsTab === 'consolidation'"
+                @click="agentsTab = 'consolidation'">Consolidation</button>
+        <button type="button" role="tab"
+                class="lr-settings-tab"
+                :class="agentsTab === 'analysis' && 'lr-settings-tab--active'"
+                :aria-selected="agentsTab === 'analysis'"
+                @click="agentsTab = 'analysis'">PR analysis</button>
+      </div>
+
+      {# Reviews tab #}
+      <div x-show="agentsTab === 'reviews'" x-cloak class="lr-settings-tab-body" role="tabpanel">
+        <div class="lr-settings-card flex min-h-0 flex-1 flex-col">
+          <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Batch review defaults</h2>
+          <p class="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
+            Default agent / model / effort rows used when you start a code review on a PR.
+          </p>
+
+          <div class="relative mt-4 min-h-0 flex-1" @click="cfgCloseCombo()">
+            <div class="lr-batch-table-wrap !mt-0" @click.stop>
+              <table class="lr-batch-table">
+                <thead>
+                  <tr>
+                    <th class="lr-batch-num">#</th>
+                    <th>Agent</th>
+                    <th>Model</th>
+                    <th>Effort</th>
+                    <th class="lr-batch-actions"><span class="sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="(row, idx) in cfgRows" :key="row.key">
+                    <tr>
+                      <td class="lr-batch-num" x-text="idx + 1"></td>
+                      <td>
+                        <div class="flex min-w-[8rem] items-center gap-2 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 dark:border-slate-600 dark:bg-slate-950"
+                             :class="cfgCombo === row.key + ':agent' && 'ring-2 ring-slate-400/40'">
+                          <span class="inline-flex shrink-0 items-center" x-show="row.agent" x-cloak aria-hidden="true">
+                            <img x-show="agentKey(row.agent) === LR.AgentName.CLAUDE" x-cloak
+                                 src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                                 class="h-4 w-4 shrink-0 object-contain" />
+                            <img x-show="agentKey(row.agent) === LR.AgentName.AGY" x-cloak
+                                 src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                                 class="h-4 w-4 shrink-0 object-contain" />
+                            <img x-show="agentKey(row.agent) === LR.AgentName.CURSOR" x-cloak
+                                 src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                                 class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+                            <img x-show="agentKey(row.agent) === LR.AgentName.CURSOR" x-cloak
+                                 src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                                 class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+                          </span>
+                          <input type="text" autocomplete="off" role="combobox"
+                                 :id="'cfg-agent-' + row.key"
+                                 :aria-expanded="cfgCombo === row.key + ':agent'"
+                                 :aria-label="'Default agent ' + (idx + 1)"
+                                 x-model="row.agentQuery"
+                                 @focus="cfgOpenCombo(idx, 'agent', $event)"
+                                 @click.stop="cfgOpenCombo(idx, 'agent', $event)"
+                                 @input="cfgOpenCombo(idx, 'agent', $event)"
+                                 @keydown.arrow-down.prevent="cfgComboMove(idx, 'agent', 1)"
+                                 @keydown.arrow-up.prevent="cfgComboMove(idx, 'agent', -1)"
+                                 @keydown.enter.prevent="cfgComboConfirm(idx, 'agent')"
+                                 @keydown.escape.stop="cfgCloseCombo()"
+                                 placeholder="Filter agents…"
+                                 class="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none focus:ring-0 dark:bg-transparent" />
+                        </div>
+                      </td>
+                      <td>
+                        <input type="text" autocomplete="off" role="combobox"
+                               :id="'cfg-model-' + row.key"
+                               :aria-expanded="cfgCombo === row.key + ':model'"
+                               :aria-label="'Default model ' + (idx + 1)"
+                               x-model="row.modelQuery"
+                               @focus="cfgOpenCombo(idx, 'model', $event)"
+                               @click.stop="cfgOpenCombo(idx, 'model', $event)"
+                               @input="cfgOpenCombo(idx, 'model', $event)"
+                               @keydown.arrow-down.prevent="cfgComboMove(idx, 'model', 1)"
+                               @keydown.arrow-up.prevent="cfgComboMove(idx, 'model', -1)"
+                               @keydown.enter.prevent="cfgComboConfirm(idx, 'model')"
+                               @keydown.escape.stop="cfgCloseCombo()"
+                               placeholder="Filter models…"
+                               class="w-full min-w-[12rem] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950" />
+                      </td>
+                      <td>
+                        <input type="text" autocomplete="off" role="combobox"
+                               :id="'cfg-effort-' + row.key"
+                               :aria-expanded="cfgCombo === row.key + ':effort'"
+                               :aria-label="'Default effort ' + (idx + 1)"
+                               x-model="row.effortQuery"
+                               :disabled="!row.efforts.length"
+                               @focus="cfgOpenCombo(idx, 'effort', $event)"
+                               @click.stop="cfgOpenCombo(idx, 'effort', $event)"
+                               @input="cfgOpenCombo(idx, 'effort', $event)"
+                               @keydown.arrow-down.prevent="cfgComboMove(idx, 'effort', 1)"
+                               @keydown.arrow-up.prevent="cfgComboMove(idx, 'effort', -1)"
+                               @keydown.enter.prevent="cfgComboConfirm(idx, 'effort')"
+                               @keydown.escape.stop="cfgCloseCombo()"
+                               :placeholder="row.efforts.length ? 'Filter…' : 'n/a'"
+                               :title="row.efforts.length ? '' : 'Effort is built into this model id'"
+                               class="w-full min-w-[6rem] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm disabled:opacity-50 dark:border-slate-600 dark:bg-slate-950" />
+                      </td>
+                      <td class="lr-batch-actions">
+                        <button type="button" @click="cfgRemoveRow(idx)"
+                                title="Remove configuration" aria-label="Remove configuration"
+                                class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/40 dark:hover:text-red-300">
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                          </svg>
+                        </button>
+                      </td>
+                    </tr>
+                  </template>
+                  <tr x-show="!cfgRows.length">
+                    <td colspan="5" class="px-4 py-8 text-center text-slate-500">
+                      No defaults yet. Click <span class="font-medium text-slate-700 dark:text-slate-300">Add configuration</span>.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <ul x-show="cfgCombo" x-cloak
+                class="lr-batch-combo-menu"
+                :style="cfgComboStyle"
+                @click.stop
+                role="listbox">
+              <template x-for="(opt, oidx) in cfgComboOptions()" :key="cfgOptionKey(opt)">
+                <li role="option"
+                    @mousedown.prevent="cfgPickOption(opt)"
+                    @mouseenter="cfgComboHighlight = oidx"
+                    :class="cfgOptionClass(oidx, cfgOptionDisabled(opt))">
+                  <span class="inline-flex shrink-0 items-center" x-show="cfgComboWhich() === 'agent'" x-cloak aria-hidden="true">
+                    <img x-show="agentKey(opt.name) === LR.AgentName.CLAUDE" x-cloak
+                         src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain" />
+                    <img x-show="agentKey(opt.name) === LR.AgentName.AGY" x-cloak
+                         src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain" />
+                    <img x-show="agentKey(opt.name) === LR.AgentName.CURSOR" x-cloak
+                         src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+                    <img x-show="agentKey(opt.name) === LR.AgentName.CURSOR" x-cloak
+                         src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+                  </span>
+                  <span x-text="cfgOptionLabel(opt)"></span>
+                </li>
+              </template>
+              <li x-show="!cfgComboOptions().length" class="px-3 py-2 text-sm text-slate-500">No matches</li>
+            </ul>
+          </div>
+
+          <div class="mt-4 flex shrink-0 flex-wrap items-center gap-3">
+            <button type="button" @click="cfgAddRow()" :disabled="cfgRows.length >= 20"
+                    class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+              Add configuration
+            </button>
+            <button type="button" @click="saveBatchDefaults()"
+                    class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+              Save
+            </button>
+            <span class="text-sm text-slate-500 dark:text-slate-400" x-text="cfgMsg"></span>
+          </div>
+        </div>
+      </div>
+
+      {# Consolidation tab #}
+      <div x-show="agentsTab === 'consolidation'" x-cloak class="lr-settings-tab-body lr-settings-tab-body--prompt" role="tabpanel">
+        <div class="lr-prompt-shell">
+          <div class="lr-prompt-meta">
+            <p class="text-sm text-slate-600 dark:text-slate-400">
+              Agent and prompt used when consolidating selected review runs into a single PR comment.
+            </p>
+            <div class="mt-4 grid gap-3 sm:grid-cols-3">
+
+              <div class="relative overflow-visible"
+                   :class="openCombo === 'agent' ? 'z-30' : 'z-10'"
+                   @click.outside="closeCombo('agent')" @keydown.escape.stop="closeCombo('agent')">
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-300" for="c-agent">Agent</label>
+                <div class="mt-1 flex w-full items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-950"
+                     :class="openCombo === 'agent' && 'ring-2 ring-slate-400/40'">
+                  <span class="inline-flex shrink-0 items-center" x-show="consolidatorAgent" x-cloak aria-hidden="true">
+                    <img x-show="agentKey(consolidatorAgent) === LR.AgentName.CLAUDE" x-cloak
+                         src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain" />
+                    <img x-show="agentKey(consolidatorAgent) === LR.AgentName.AGY" x-cloak
+                         src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain" />
+                    <img x-show="agentKey(consolidatorAgent) === LR.AgentName.CURSOR" x-cloak
+                         src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+                    <img x-show="agentKey(consolidatorAgent) === LR.AgentName.CURSOR" x-cloak
+                         src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+                  </span>
+                  <input id="c-agent" type="text" autocomplete="off" role="combobox"
+                         :aria-expanded="openCombo === 'agent'"
+                         x-model="agentQuery"
+                         @focus="openAgentCombo()" @click="openAgentCombo()" @input="onAgentFilter()"
+                         @keydown.arrow-down.prevent="comboMove('agent', 1)"
+                         @keydown.arrow-up.prevent="comboMove('agent', -1)"
+                         @keydown.enter.prevent="comboConfirm('agent')"
                          placeholder="Filter agents…"
-                         class="w-full min-w-[8rem] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950" />
-                </td>
-                <td>
-                  <input type="text" autocomplete="off" role="combobox"
-                         :id="'cfg-model-' + row.key"
-                         :aria-expanded="cfgCombo === row.key + ':model'"
-                         :aria-label="'Default model ' + (idx + 1)"
-                         x-model="row.modelQuery"
-                         @focus="cfgOpenCombo(idx, 'model', $event)"
-                         @click.stop="cfgOpenCombo(idx, 'model', $event)"
-                         @input="cfgOpenCombo(idx, 'model', $event)"
-                         @keydown.arrow-down.prevent="cfgComboMove(idx, 'model', 1)"
-                         @keydown.arrow-up.prevent="cfgComboMove(idx, 'model', -1)"
-                         @keydown.enter.prevent="cfgComboConfirm(idx, 'model')"
-                         @keydown.escape.stop="cfgCloseCombo()"
-                         placeholder="Filter models…"
-                         class="w-full min-w-[12rem] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950" />
-                </td>
-                <td>
-                  <input type="text" autocomplete="off" role="combobox"
-                         :id="'cfg-effort-' + row.key"
-                         :aria-expanded="cfgCombo === row.key + ':effort'"
-                         :aria-label="'Default effort ' + (idx + 1)"
-                         x-model="row.effortQuery"
-                         :disabled="!row.efforts.length"
-                         @focus="cfgOpenCombo(idx, 'effort', $event)"
-                         @click.stop="cfgOpenCombo(idx, 'effort', $event)"
-                         @input="cfgOpenCombo(idx, 'effort', $event)"
-                         @keydown.arrow-down.prevent="cfgComboMove(idx, 'effort', 1)"
-                         @keydown.arrow-up.prevent="cfgComboMove(idx, 'effort', -1)"
-                         @keydown.enter.prevent="cfgComboConfirm(idx, 'effort')"
-                         @keydown.escape.stop="cfgCloseCombo()"
-                         :placeholder="row.efforts.length ? 'Filter…' : 'n/a'"
-                         :title="row.efforts.length ? '' : 'Effort is built into this model id'"
-                         class="w-full min-w-[6rem] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm disabled:opacity-50 dark:border-slate-600 dark:bg-slate-950" />
-                </td>
-                <td class="lr-batch-actions">
-                  <button type="button" @click="cfgRemoveRow(idx)"
-                          title="Remove configuration"
-                          aria-label="Remove configuration"
-                          class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/40 dark:hover:text-red-300">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4" aria-hidden="true">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                    </svg>
-                  </button>
-                </td>
-              </tr>
-            </template>
-            <tr x-show="!cfgRows.length">
-              <td colspan="5" class="px-4 py-8 text-center text-slate-500">
-                No defaults yet. Click <span class="font-medium text-slate-700 dark:text-slate-300">Add configuration</span>.
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                         class="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none focus:ring-0 dark:bg-transparent" />
+                </div>
+                <ul x-show="openCombo === 'agent'" x-cloak
+                    class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
+                  <template x-for="(a, idx) in filteredAgents()" :key="a.name">
+                    <li :class="comboOptionClass('agent', idx, !a.available)"
+                        @mousedown.prevent="pickAgent(a)"
+                        @mouseenter="comboHighlight = idx">
+                      <span class="inline-flex shrink-0 items-center" aria-hidden="true">
+                        <img x-show="agentKey(a.name) === LR.AgentName.CLAUDE" x-cloak
+                             src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain" />
+                        <img x-show="agentKey(a.name) === LR.AgentName.AGY" x-cloak
+                             src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain" />
+                        <img x-show="agentKey(a.name) === LR.AgentName.CURSOR" x-cloak
+                             src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+                        <img x-show="agentKey(a.name) === LR.AgentName.CURSOR" x-cloak
+                             src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+                      </span>
+                      <span x-text="a.display_name + (a.available ? '' : ' (missing)')"></span>
+                    </li>
+                  </template>
+                </ul>
+              </div>
+              <div class="relative overflow-visible"
+                   :class="openCombo === 'model' ? 'z-30' : 'z-10'"
+                   @click.outside="closeCombo('model')" @keydown.escape.stop="closeCombo('model')">
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-300" for="c-model">Model</label>
+                <input id="c-model" type="text" autocomplete="off" role="combobox"
+                       :aria-expanded="openCombo === 'model'"
+                       x-model="modelQuery"
+                       @focus="openModelCombo()" @click="openModelCombo()" @input="onModelFilter()"
+                       @keydown.arrow-down.prevent="comboMove('model', 1)"
+                       @keydown.arrow-up.prevent="comboMove('model', -1)"
+                       @keydown.enter.prevent="comboConfirm('model')"
+                       placeholder="Filter models…"
+                       class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950" />
+                <ul x-show="openCombo === 'model'" x-cloak
+                    class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
+                  <template x-for="(m, idx) in filteredModels()" :key="m.id">
+                    <li :class="comboOptionClass('model', idx, false)"
+                        @mousedown.prevent="pickModel(m)"
+                        @mouseenter="comboHighlight = idx"
+                        x-text="m.label"></li>
+                  </template>
+                </ul>
+              </div>
+              <div class="relative overflow-visible"
+                   :class="openCombo === 'effort' ? 'z-30' : 'z-10'"
+                   @click.outside="closeCombo('effort')" @keydown.escape.stop="closeCombo('effort')">
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-300" for="c-effort">Effort</label>
+                <input id="c-effort" type="text" autocomplete="off" role="combobox"
+                       :aria-expanded="openCombo === 'effort'"
+                       x-model="effortQuery"
+                       :disabled="!efforts.length"
+                       @focus="openEffortCombo()" @click="openEffortCombo()" @input="onEffortFilter()"
+                       @keydown.arrow-down.prevent="comboMove('effort', 1)"
+                       @keydown.arrow-up.prevent="comboMove('effort', -1)"
+                       @keydown.enter.prevent="comboConfirm('effort')"
+                       :placeholder="efforts.length ? 'Filter effort…' : 'n/a for this model'"
+                       class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50 dark:border-slate-600 dark:bg-slate-950" />
+                <ul x-show="openCombo === 'effort' && efforts.length" x-cloak
+                    class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
+                  <template x-for="(e, idx) in filteredEfforts()" :key="e">
+                    <li :class="comboOptionClass('effort', idx, false)"
+                        @mousedown.prevent="pickEffort(e)"
+                        @mouseenter="comboHighlight = idx"
+                        x-text="e"></li>
+                  </template>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="lr-prompt-editor">
+            <div class="lr-prompt-toolbar">
+              <span class="text-sm font-medium text-slate-800 dark:text-slate-200">Prompt</span>
+              <div class="lr-prompt-mode">
+                <button type="button"
+                        class="lr-prompt-mode-btn"
+                        :class="consolidatorPromptMode === 'preview' && 'lr-prompt-mode-btn--active'"
+                        @click="consolidatorPromptMode = 'preview'">Preview</button>
+                <button type="button"
+                        class="lr-prompt-mode-btn"
+                        :class="consolidatorPromptMode === 'source' && 'lr-prompt-mode-btn--active'"
+                        @click="consolidatorPromptMode = 'source'">Markdown</button>
+              </div>
+            </div>
+            <div class="lr-prompt-body"
+                 x-show="consolidatorPromptMode === 'preview'" x-cloak
+                 x-html="renderMarkdown(consolidatorPrompt)"></div>
+            <textarea x-show="consolidatorPromptMode === 'source'" x-cloak
+                      x-model="consolidatorPrompt"
+                      spellcheck="false"
+                      class="lr-prompt-source"
+                      aria-label="Consolidation prompt markdown"></textarea>
+            <p class="lr-prompt-hint">
+              Placeholders:
+              <code>{source_runs_label}</code>,
+              <code>{body_path}</code>,
+              <code>{findings_json_path}</code>
+            </p>
+          </div>
+
+          <div class="lr-prompt-footer">
+            <button type="button" @click="saveConsolidation()"
+                    class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+              Save
+            </button>
+            <button type="button" @click="resetPrompt()"
+                    class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+              Reset prompt to default
+            </button>
+            <span class="text-sm text-slate-500 dark:text-slate-400" x-text="consolidatorMsg"></span>
+          </div>
+        </div>
       </div>
 
-      <ul x-show="cfgCombo" x-cloak
-          class="lr-batch-combo-menu"
-          :style="cfgComboStyle"
-          @click.stop
-          role="listbox">
-        <template x-for="(opt, oidx) in cfgComboOptions()" :key="cfgOptionKey(opt)">
-          <li role="option"
-              @mousedown.prevent="cfgPickOption(opt)"
-              @mouseenter="cfgComboHighlight = oidx"
-              :class="cfgOptionClass(oidx, cfgOptionDisabled(opt))"
-              x-text="cfgOptionLabel(opt)"></li>
-        </template>
-        <li x-show="!cfgComboOptions().length" class="px-3 py-2 text-sm text-slate-500">No matches</li>
-      </ul>
-    </div>
 
-    <div class="mt-4 flex flex-wrap items-center gap-3">
-      <button type="button" @click="cfgAddRow()" :disabled="cfgRows.length >= 20"
-              class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
-        Add configuration
-      </button>
-      <button type="button" @click="saveBatchDefaults()"
-              class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
-        Save
-      </button>
-      <span class="text-sm text-slate-500 dark:text-slate-400" x-text="cfgMsg"></span>
-    </div>
-  </div>
+      {# PR Analysis tab #}
+      <div x-show="agentsTab === 'analysis'" x-cloak class="lr-settings-tab-body lr-settings-tab-body--prompt" role="tabpanel">
+        <div class="lr-prompt-shell">
+          <div class="lr-prompt-meta">
+            <p class="text-sm text-slate-600 dark:text-slate-400">
+              Agent and prompt used for PR orientation briefs (not code review).
+            </p>
+            <div class="mt-4 grid gap-3 sm:grid-cols-3">
+              <div class="relative overflow-visible"
+                   :class="analysisOpenCombo === 'agent' ? 'z-30' : 'z-10'"
+                   @click.outside="analysisCloseCombo('agent')" @keydown.escape.stop="analysisCloseCombo('agent')">
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-300" for="pa-agent">Agent</label>
+                <div class="mt-1 flex w-full items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-950"
+                     :class="analysisOpenCombo === 'agent' && 'ring-2 ring-slate-400/40'">
+                  <span class="inline-flex shrink-0 items-center" x-show="analysisAgent" x-cloak aria-hidden="true">
+                    <img x-show="agentKey(analysisAgent) === LR.AgentName.CLAUDE" x-cloak
+                         src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain" />
+                    <img x-show="agentKey(analysisAgent) === LR.AgentName.AGY" x-cloak
+                         src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain" />
+                    <img x-show="agentKey(analysisAgent) === LR.AgentName.CURSOR" x-cloak
+                         src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+                    <img x-show="agentKey(analysisAgent) === LR.AgentName.CURSOR" x-cloak
+                         src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+                  </span>
+                  <input id="pa-agent" type="text" autocomplete="off" role="combobox"
+                         :aria-expanded="analysisOpenCombo === 'agent'"
+                         x-model="analysisAgentQuery"
+                         @focus="analysisOpenAgentCombo()" @click="analysisOpenAgentCombo()" @input="analysisOnAgentFilter()"
+                         @keydown.arrow-down.prevent="analysisComboMove('agent', 1)"
+                         @keydown.arrow-up.prevent="analysisComboMove('agent', -1)"
+                         @keydown.enter.prevent="analysisComboConfirm('agent')"
+                         placeholder="Filter agents…"
+                         class="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none focus:ring-0 dark:bg-transparent" />
+                </div>
+                <ul x-show="analysisOpenCombo === 'agent'" x-cloak
+                    class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
+                  <template x-for="(a, idx) in analysisFilteredAgents()" :key="a.name">
+                    <li :class="analysisComboOptionClass('agent', idx, !a.available)"
+                        @mousedown.prevent="analysisPickAgent(a)"
+                        @mouseenter="analysisComboHighlight = idx">
+                      <span class="inline-flex shrink-0 items-center" aria-hidden="true">
+                        <img x-show="agentKey(a.name) === LR.AgentName.CLAUDE" x-cloak
+                             src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain" />
+                        <img x-show="agentKey(a.name) === LR.AgentName.AGY" x-cloak
+                             src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain" />
+                        <img x-show="agentKey(a.name) === LR.AgentName.CURSOR" x-cloak
+                             src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+                        <img x-show="agentKey(a.name) === LR.AgentName.CURSOR" x-cloak
+                             src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+                      </span>
+                      <span x-text="a.display_name + (a.available ? '' : ' (missing)')"></span>
+                    </li>
+                  </template>
+                </ul>
+              </div>
+              <div class="relative overflow-visible"
+                   :class="analysisOpenCombo === 'model' ? 'z-30' : 'z-10'"
+                   @click.outside="analysisCloseCombo('model')" @keydown.escape.stop="analysisCloseCombo('model')">
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-300" for="pa-model">Model</label>
+                <input id="pa-model" type="text" autocomplete="off" role="combobox"
+                       :aria-expanded="analysisOpenCombo === 'model'"
+                       x-model="analysisModelQuery"
+                       @focus="analysisOpenModelCombo()" @click="analysisOpenModelCombo()" @input="analysisOnModelFilter()"
+                       @keydown.arrow-down.prevent="analysisComboMove('model', 1)"
+                       @keydown.arrow-up.prevent="analysisComboMove('model', -1)"
+                       @keydown.enter.prevent="analysisComboConfirm('model')"
+                       placeholder="Filter models…"
+                       class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950" />
+                <ul x-show="analysisOpenCombo === 'model'" x-cloak
+                    class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
+                  <template x-for="(m, idx) in analysisFilteredModels()" :key="m.id">
+                    <li :class="analysisComboOptionClass('model', idx, false)"
+                        @mousedown.prevent="analysisPickModel(m)"
+                        @mouseenter="analysisComboHighlight = idx"
+                        x-text="m.label"></li>
+                  </template>
+                </ul>
+              </div>
+              <div class="relative overflow-visible"
+                   :class="analysisOpenCombo === 'effort' ? 'z-30' : 'z-10'"
+                   @click.outside="analysisCloseCombo('effort')" @keydown.escape.stop="analysisCloseCombo('effort')">
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-300" for="pa-effort">Effort</label>
+                <input id="pa-effort" type="text" autocomplete="off" role="combobox"
+                       :aria-expanded="analysisOpenCombo === 'effort'"
+                       x-model="analysisEffortQuery"
+                       :disabled="!analysisEfforts.length"
+                       @focus="analysisOpenEffortCombo()" @click="analysisOpenEffortCombo()" @input="analysisOnEffortFilter()"
+                       @keydown.arrow-down.prevent="analysisComboMove('effort', 1)"
+                       @keydown.arrow-up.prevent="analysisComboMove('effort', -1)"
+                       @keydown.enter.prevent="analysisComboConfirm('effort')"
+                       :placeholder="analysisEfforts.length ? 'Filter effort…' : 'n/a for this model'"
+                       class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50 dark:border-slate-600 dark:bg-slate-950" />
+                <ul x-show="analysisOpenCombo === 'effort' && analysisEfforts.length" x-cloak
+                    class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
+                  <template x-for="(e, idx) in analysisFilteredEfforts()" :key="e">
+                    <li :class="analysisComboOptionClass('effort', idx, false)"
+                        @mousedown.prevent="analysisPickEffort(e)"
+                        @mouseenter="analysisComboHighlight = idx"
+                        x-text="e"></li>
+                  </template>
+                </ul>
+              </div>
+            </div>
+          </div>
 
-  <div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-    <h2 class="text-lg font-semibold">Consolidation</h2>
-    <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">
-      Agent, model, effort, and prompt used when consolidating selected review runs into a single PR comment.
-      The prompt is seeded once; edits here are kept across upgrades.
-    </p>
-    <div class="mt-4 max-w-md space-y-4 overflow-visible">
-      <div class="relative overflow-visible"
-           :class="openCombo === 'agent' ? 'z-30' : 'z-10'"
-           @click.outside="closeCombo('agent')" @keydown.escape.stop="closeCombo('agent')">
-        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="c-agent">Agent</label>
-        <input id="c-agent" type="text" autocomplete="off" role="combobox"
-               :aria-expanded="openCombo === 'agent'"
-               x-model="agentQuery"
-               @focus="openAgentCombo()" @click="openAgentCombo()" @input="onAgentFilter()"
-               @keydown.arrow-down.prevent="comboMove('agent', 1)"
-               @keydown.arrow-up.prevent="comboMove('agent', -1)"
-               @keydown.enter.prevent="comboConfirm('agent')"
-               placeholder="Filter agents…"
-               class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950" />
-        <ul x-show="openCombo === 'agent'" x-cloak
-            class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
-          <template x-for="(a, idx) in filteredAgents()" :key="a.name">
-            <li :class="comboOptionClass('agent', idx, !a.available)"
-                @mousedown.prevent="pickAgent(a)"
-                @mouseenter="comboHighlight = idx"
-                x-text="a.display_name + (a.available ? '' : ' (missing)')"></li>
-          </template>
-        </ul>
-      </div>
-      <div class="relative overflow-visible"
-           :class="openCombo === 'model' ? 'z-30' : 'z-10'"
-           @click.outside="closeCombo('model')" @keydown.escape.stop="closeCombo('model')">
-        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="c-model">Model</label>
-        <input id="c-model" type="text" autocomplete="off" role="combobox"
-               :aria-expanded="openCombo === 'model'"
-               x-model="modelQuery"
-               @focus="openModelCombo()" @click="openModelCombo()" @input="onModelFilter()"
-               @keydown.arrow-down.prevent="comboMove('model', 1)"
-               @keydown.arrow-up.prevent="comboMove('model', -1)"
-               @keydown.enter.prevent="comboConfirm('model')"
-               placeholder="Filter models…"
-               class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950" />
-        <ul x-show="openCombo === 'model'" x-cloak
-            class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
-          <template x-for="(m, idx) in filteredModels()" :key="m.id">
-            <li :class="comboOptionClass('model', idx, false)"
-                @mousedown.prevent="pickModel(m)"
-                @mouseenter="comboHighlight = idx"
-                x-text="m.label"></li>
-          </template>
-        </ul>
-      </div>
-      <div class="relative overflow-visible"
-           :class="openCombo === 'effort' ? 'z-30' : 'z-10'"
-           @click.outside="closeCombo('effort')" @keydown.escape.stop="closeCombo('effort')">
-        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="c-effort">Effort</label>
-        <input id="c-effort" type="text" autocomplete="off" role="combobox"
-               :aria-expanded="openCombo === 'effort'"
-               x-model="effortQuery"
-               :disabled="!efforts.length"
-               @focus="openEffortCombo()" @click="openEffortCombo()" @input="onEffortFilter()"
-               @keydown.arrow-down.prevent="comboMove('effort', 1)"
-               @keydown.arrow-up.prevent="comboMove('effort', -1)"
-               @keydown.enter.prevent="comboConfirm('effort')"
-               :placeholder="efforts.length ? 'Filter effort…' : 'n/a for this model'"
-               class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50 dark:border-slate-600 dark:bg-slate-950" />
-        <ul x-show="openCombo === 'effort' && efforts.length" x-cloak
-            class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
-          <template x-for="(e, idx) in filteredEfforts()" :key="e">
-            <li :class="comboOptionClass('effort', idx, false)"
-                @mousedown.prevent="pickEffort(e)"
-                @mouseenter="comboHighlight = idx"
-                x-text="e"></li>
-          </template>
-        </ul>
+          <div class="lr-prompt-editor">
+            <div class="lr-prompt-toolbar">
+              <span class="text-sm font-medium text-slate-800 dark:text-slate-200">Prompt</span>
+              <div class="lr-prompt-mode">
+                <button type="button"
+                        class="lr-prompt-mode-btn"
+                        :class="analysisPromptMode === 'preview' && 'lr-prompt-mode-btn--active'"
+                        @click="analysisPromptMode = 'preview'">Preview</button>
+                <button type="button"
+                        class="lr-prompt-mode-btn"
+                        :class="analysisPromptMode === 'source' && 'lr-prompt-mode-btn--active'"
+                        @click="analysisPromptMode = 'source'">Markdown</button>
+              </div>
+            </div>
+            <div class="lr-prompt-body"
+                 x-show="analysisPromptMode === 'preview'" x-cloak
+                 x-html="renderMarkdown(analysisPrompt)"></div>
+            <textarea x-show="analysisPromptMode === 'source'" x-cloak
+                      x-model="analysisPrompt"
+                      spellcheck="false"
+                      class="lr-prompt-source"
+                      aria-label="PR analysis prompt markdown"></textarea>
+          </div>
+
+          <div class="lr-prompt-footer">
+            <button type="button" @click="saveAnalysis()"
+                    class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+              Save
+            </button>
+            <button type="button" @click="resetAnalysisPrompt()"
+                    class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+              Reset prompt to default
+            </button>
+            <span class="text-sm text-slate-500 dark:text-slate-400" x-text="analysisMsg"></span>
+          </div>
+        </div>
       </div>
     </div>
-    <div class="mt-4">
-      <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="c-prompt">Prompt</label>
-      <textarea id="c-prompt" x-model="consolidatorPrompt" rows="14"
-                class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"></textarea>
-      <p class="mt-1 text-xs text-slate-500">Use <code class="rounded bg-slate-100 px-1 dark:bg-slate-800">{source_runs_label}</code>,
-        <code class="rounded bg-slate-100 px-1 dark:bg-slate-800">{body_path}</code>, and
-        <code class="rounded bg-slate-100 px-1 dark:bg-slate-800">{findings_json_path}</code> placeholders.</p>
-    </div>
-    <div class="mt-4 flex flex-wrap items-center gap-3">
-      <button type="button" @click="saveConsolidation()"
-              class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Save</button>
-      <button type="button" @click="resetPrompt()"
-              class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
-        Reset prompt to default
-      </button>
-      <span class="text-sm text-slate-500 dark:text-slate-400" x-text="consolidatorMsg"></span>
-    </div>
-  </div>
+  </section>
 </div>
+
 <script>
 function settingsPage() {
   return {
+
+    section: 'general',
+    agentsTab: 'reviews',
+    consolidatorPromptMode: 'preview',
+    analysisPromptMode: 'preview',
+    renderMarkdown(src) {
+      const raw = String(src || '');
+      if (!raw.trim()) {
+        return '<p class="text-slate-400 dark:text-slate-500 italic">Empty prompt</p>';
+      }
+      let html;
+      try {
+        if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
+          html = marked.parse(raw, { breaks: true });
+        } else {
+          html = raw
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/\n/g, '<br>');
+        }
+      } catch (e) {
+        html = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>');
+      }
+      return (typeof DOMPurify !== 'undefined') ? DOMPurify.sanitize(html) : html;
+    },
+    agentKey(name) {
+      return (window.LR && window.LR.agentKey) ? window.LR.agentKey(name) : String(name || '').toLowerCase();
+    },
     value: {{ settings.run_retention_value|default(1) }},
     unit: {{ (settings.run_retention_unit|default('weeks'))|tojson }},
     hint: {{ ((settings.default_summary|default('Default is 1 week.')) ~ ' Current policy: ' ~ (settings.policy_summary|default('keep runs for 1 weeks, then delete')) ~ '.')|tojson }},
     syncMinutes: {{ settings.pr_sync_interval_minutes|default(15) }},
     syncHint: {{ (settings.pr_sync_summary|default('sync pending review PRs every 15 minutes (default 15)'))|tojson }},
     lastSync: {{ (settings.pr_sync_last_at or '')|tojson }},
+    displayTimezone: {{ (settings.display_timezone|default('America/Mexico_City'))|tojson }},
+    displayTimezoneChoices: {{ (settings.display_timezone_choices|default([]))|tojson }},
+    timezoneHint: '',
     purgeMsg: '',
     consolidatorAgent: {{ (settings.consolidator_agent|default(AgentName.CLAUDE.value))|tojson }},
     consolidatorModel: {{ (settings.consolidator_model|default(ClaudeModelAlias.HAIKU.value))|tojson }},
@@ -304,6 +673,19 @@ function settingsPage() {
     consolidatorPrompt: {{ (settings.consolidator_prompt|default(''))|tojson }},
     defaultConsolidatorPrompt: {{ (settings.consolidator_prompt_default|default(''))|tojson }},
     consolidatorMsg: '',
+    analysisAgent: {{ (settings.pr_analysis_agent|default(AgentName.CLAUDE.value))|tojson }},
+    analysisModel: {{ (settings.pr_analysis_model|default(ClaudeModelAlias.OPUS.value))|tojson }},
+    analysisEffort: {{ (settings.pr_analysis_effort|default(EffortLevel.HIGH.value))|tojson }},
+    analysisPrompt: {{ (settings.pr_analysis_prompt|default(''))|tojson }},
+    defaultAnalysisPrompt: {{ (settings.pr_analysis_prompt_default|default(''))|tojson }},
+    analysisMsg: '',
+    analysisModels: [],
+    analysisEfforts: [],
+    analysisOpenCombo: null,
+    analysisAgentQuery: '',
+    analysisModelQuery: '',
+    analysisEffortQuery: '',
+    analysisComboHighlight: -1,
     batchDefaultsSeed: {{ (settings.batch_review_defaults|default([]))|tojson }},
     cfgRows: [],
     cfgMsg: '',
@@ -331,6 +713,12 @@ function settingsPage() {
       }
       this.onAgentChange(false);
       this.syncComboQueries();
+      if (!this.agents.find(a => a.name === this.analysisAgent)) {
+        const firstA = this.agents.find(a => a.available) || this.agents[0];
+        if (firstA) this.analysisAgent = firstA.name;
+      }
+      this.analysisOnAgentChange(false);
+      this.analysisSyncComboQueries();
       this.cfgRows = this._cfgRowsFromDefaults(
         JSON.parse(JSON.stringify(this.batchDefaultsSeed || []))
       );
@@ -506,7 +894,7 @@ function settingsPage() {
       return this.cfgComboWhich() === 'agent' && opt && !opt.available;
     },
     cfgOptionClass(idx, disabled) {
-      const base = 'cursor-pointer px-3 py-2 text-sm ';
+      const base = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-sm ';
       if (disabled) return base + 'cursor-not-allowed text-slate-400 dark:text-slate-500';
       if (this.cfgComboHighlight === idx) {
         return base + 'bg-blue-50 text-blue-900 dark:bg-blue-950 dark:text-blue-100';
@@ -585,6 +973,19 @@ function settingsPage() {
       if (!res.ok) { await lrAlert(data.detail || 'save failed', { title: 'Save failed' }); return; }
       this.hint = data.default_summary + ' Current policy: ' + data.policy_summary + '.';
     },
+    async saveTimezone() {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ display_timezone: this.displayTimezone })
+      });
+      const data = await res.json();
+      if (!res.ok) { await lrAlert(data.detail || 'save failed', { title: 'Save failed' }); return; }
+      this.displayTimezone = data.display_timezone || this.displayTimezone;
+      if (window.LR) window.LR.displayTimezone = this.displayTimezone;
+      this.timezoneHint = 'Saved. Reloading so all pages pick up the new zone…';
+      setTimeout(() => location.reload(), 600);
+    },
     async saveSync() {
       const res = await fetch('/api/settings', {
         method: 'PUT',
@@ -628,6 +1029,177 @@ function settingsPage() {
       await this.saveConsolidation();
       this.consolidatorMsg = 'Prompt reset and saved.';
       setTimeout(() => { this.consolidatorMsg = ''; }, 2500);
+    },
+
+    async saveAnalysis() {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          pr_analysis_agent: this.analysisAgent,
+          pr_analysis_model: this.analysisModel,
+          pr_analysis_effort: this.analysisEffort || '',
+          pr_analysis_prompt: this.analysisPrompt
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) { await lrAlert(data.detail || 'save failed', { title: 'Save failed' }); return; }
+      this.analysisAgent = data.pr_analysis_agent;
+      this.analysisModel = data.pr_analysis_model;
+      this.analysisEffort = data.pr_analysis_effort || '';
+      this.analysisPrompt = data.pr_analysis_prompt || '';
+      this.analysisMsg = 'Saved.';
+      setTimeout(() => { this.analysisMsg = ''; }, 2500);
+    },
+    async resetAnalysisPrompt() {
+      const ok = await lrConfirm({
+        title: 'Reset prompt?',
+        message: 'Replace the PR analysis prompt with the built-in default?',
+        confirmLabel: 'Reset',
+        danger: true,
+      });
+      if (!ok) return;
+      this.analysisPrompt = this.defaultAnalysisPrompt || this.analysisPrompt;
+      await this.saveAnalysis();
+      this.analysisMsg = 'Prompt reset and saved.';
+      setTimeout(() => { this.analysisMsg = ''; }, 2500);
+    },
+    analysisCloseCombo(which) {
+      if (this.analysisOpenCombo === which) {
+        this.analysisOpenCombo = null;
+        this.analysisComboHighlight = -1;
+        this.analysisSyncComboQueries();
+      }
+    },
+    analysisSyncComboQueries() {
+      if (this.analysisOpenCombo !== 'agent') this.analysisAgentQuery = this.analysisAgentLabel();
+      if (this.analysisOpenCombo !== 'model') this.analysisModelQuery = this.analysisModelLabel();
+      if (this.analysisOpenCombo !== 'effort') this.analysisEffortQuery = this.analysisEffort || '';
+    },
+    analysisAgentLabel() {
+      const a = this.agents.find(x => x.name === this.analysisAgent);
+      if (!a) return this.analysisAgent || '';
+      return a.display_name + (a.available ? '' : ' (missing)');
+    },
+    analysisModelLabel() {
+      const m = this.analysisModels.find(x => x.id === this.analysisModel);
+      return m ? m.label : (this.analysisModel || '');
+    },
+    analysisFilteredAgents() {
+      const q = this.analysisOpenCombo === 'agent' ? this.analysisAgentQuery : '';
+      return this.agents.filter(a =>
+        this._match(a.display_name, q) || this._match(a.name, q)
+      );
+    },
+    analysisFilteredModels() {
+      const q = this.analysisOpenCombo === 'model' ? this.analysisModelQuery : '';
+      return this.analysisModels.filter(m =>
+        this._match(m.label, q) || this._match(m.id, q)
+      );
+    },
+    analysisFilteredEfforts() {
+      const q = this.analysisOpenCombo === 'effort' ? this.analysisEffortQuery : '';
+      return this.analysisEfforts.filter(e => this._match(e, q));
+    },
+    analysisComboOptions(which) {
+      if (which === 'agent') return this.analysisFilteredAgents();
+      if (which === 'model') return this.analysisFilteredModels();
+      return this.analysisFilteredEfforts();
+    },
+    analysisComboOptionClass(which, idx, disabled) {
+      const base = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-sm ';
+      if (disabled) return base + 'cursor-not-allowed text-slate-400 dark:text-slate-500';
+      if (this.analysisOpenCombo === which && this.analysisComboHighlight === idx) {
+        return base + 'bg-blue-50 text-blue-900 dark:bg-blue-950 dark:text-blue-100';
+      }
+      return base + 'text-slate-800 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800';
+    },
+    analysisOpenAgentCombo() { this.analysisOpenCombo = 'agent'; this.analysisAgentQuery = ''; this.analysisComboHighlight = 0; },
+    analysisOpenModelCombo() { this.analysisOpenCombo = 'model'; this.analysisModelQuery = ''; this.analysisComboHighlight = 0; },
+    analysisOpenEffortCombo() { if (!this.analysisEfforts.length) return; this.analysisOpenCombo = 'effort'; this.analysisEffortQuery = ''; this.analysisComboHighlight = 0; },
+    analysisOnAgentFilter() { this.analysisOpenCombo = 'agent'; this.analysisComboHighlight = 0; },
+    analysisOnModelFilter() { this.analysisOpenCombo = 'model'; this.analysisComboHighlight = 0; },
+    analysisOnEffortFilter() { this.analysisOpenCombo = 'effort'; this.analysisComboHighlight = 0; },
+    analysisComboMove(which, delta) {
+      if (this.analysisOpenCombo !== which) {
+        if (which === 'agent') this.analysisOpenAgentCombo();
+        else if (which === 'model') this.analysisOpenModelCombo();
+        else this.analysisOpenEffortCombo();
+      }
+      const opts = this.analysisComboOptions(which);
+      if (!opts.length) { this.analysisComboHighlight = -1; return; }
+      let i = this.analysisComboHighlight;
+      if (i < 0) i = 0;
+      else i = (i + delta + opts.length) % opts.length;
+      this.analysisComboHighlight = i;
+    },
+    analysisComboConfirm(which) {
+      const opts = this.analysisComboOptions(which);
+      const item = opts[this.analysisComboHighlight] || opts[0];
+      if (!item) return;
+      if (which === 'agent') this.analysisPickAgent(item);
+      else if (which === 'model') this.analysisPickModel(item);
+      else this.analysisPickEffort(item);
+    },
+    analysisPickAgent(a) {
+      if (!a || !a.available) return;
+      this.analysisAgent = a.name;
+      this.analysisOpenCombo = null;
+      this.analysisComboHighlight = -1;
+      this.analysisOnAgentChange(true);
+      this.analysisSyncComboQueries();
+    },
+    analysisPickModel(m) {
+      if (!m) return;
+      this.analysisModel = m.id;
+      this.analysisOpenCombo = null;
+      this.analysisComboHighlight = -1;
+      this.analysisOnModelChange();
+      this.analysisSyncComboQueries();
+    },
+    analysisPickEffort(e) {
+      if (e == null) return;
+      this.analysisEffort = e;
+      this.analysisOpenCombo = null;
+      this.analysisComboHighlight = -1;
+      this.analysisSyncComboQueries();
+    },
+    analysisOnAgentChange(resetModel) {
+      const a = this.agents.find(x => x.name === this.analysisAgent);
+      const models = ((a && a.models) || []).slice();
+      models.sort((x, y) =>
+        String(x.label || x.id).localeCompare(String(y.label || y.id), undefined, { sensitivity: 'base' })
+      );
+      this.analysisModels = models;
+      if (resetModel || !this.analysisModels.find(m => m.id === this.analysisModel)) {
+        this.analysisModel = this.analysisModels[0] ? this.analysisModels[0].id : '';
+      }
+      this.analysisSyncEffortsFromModel(resetModel);
+      this.analysisSyncComboQueries();
+    },
+    analysisOnModelChange() {
+      this.analysisSyncEffortsFromModel(true);
+      this.analysisSyncComboQueries();
+    },
+    analysisSyncEffortsFromModel(reset) {
+      const a = this.agents.find(x => x.name === this.analysisAgent);
+      const m = this.analysisModels.find(x => x.id === this.analysisModel);
+      let efforts = [];
+      if (m && Array.isArray(m.efforts) && m.efforts.length) {
+        efforts = m.efforts.slice();
+      } else if (a && Array.isArray(a.efforts) && a.efforts.length) {
+        efforts = a.efforts.slice();
+      }
+      this.analysisEfforts = efforts;
+      if (!efforts.length) {
+        this.analysisEffort = '';
+        return;
+      }
+      if (reset || !efforts.includes(this.analysisEffort)) {
+        this.analysisEffort = efforts.includes('low')
+          ? 'low'
+          : (efforts.includes('medium') ? 'medium' : efforts[0]);
+      }
     },
     async purge() {
       const ok = await lrConfirm({
@@ -690,7 +1262,7 @@ function settingsPage() {
       return this.filteredEfforts();
     },
     comboOptionClass(which, idx, disabled) {
-      const base = 'cursor-pointer px-3 py-2 text-sm ';
+      const base = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-sm ';
       if (disabled) return base + 'cursor-not-allowed text-slate-400 dark:text-slate-500';
       if (this.openCombo === which && this.comboHighlight === idx) {
         return base + 'bg-blue-50 text-blue-900 dark:bg-blue-950 dark:text-blue-100';

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from lazyreview.services.analysis_gate import require_succeeded_analysis
+
+
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -67,6 +70,8 @@ def create_pr_consolidation(pr_id: int, body: CreateConsolidationBody, request: 
     pr = get_pr(conn, pr_id)
     if not pr:
         raise HTTPException(status_code=404, detail="PR not found")
+
+    require_succeeded_analysis(conn, pr_id)
 
     run_ids = _validate_run_ids(conn, pr_id, body.run_ids)
     cfg = get_consolidator_config(conn)

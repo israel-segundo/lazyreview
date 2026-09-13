@@ -25,11 +25,75 @@
       if (Object.values(window.LR.AgentName).includes(key)) return key;
       return key;
     };
+    // All stored timestamps are UTC. Display them in this IANA zone.
+    window.LR.displayTimezone = {{ display_timezone()|default('America/Mexico_City')|tojson }};
+    window.LR.parseUtc = function (raw) {
+      if (raw == null || raw === '') return null;
+      let s = String(raw).trim();
+      if (!s) return null;
+      if (/^\d{4}-\d{2}-\d{2} /.test(s)) s = s.replace(' ', 'T');
+      // Naive ISO / sqlite forms are UTC — never local.
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?$/.test(s)) s += 'Z';
+      const d = new Date(s);
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+    window.LR.formatAbsolute = function (raw) {
+      const d = window.LR.parseUtc(raw);
+      if (!d) return '';
+      const tz = window.LR.displayTimezone || 'UTC';
+      try {
+        return new Intl.DateTimeFormat(undefined, {
+          timeZone: tz,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false,
+        }).format(d);
+      } catch (e) {
+        return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+      }
+    };
+    window.LR.formatRelative = function (raw) {
+      const d = window.LR.parseUtc(raw);
+      if (!d) return '';
+      const seconds = Math.max(0, Math.round((Date.now() - d.getTime()) / 1000));
+      if (seconds < 60) return '< 1 min ago';
+      const minutes = Math.round(seconds / 60);
+      if (minutes < 60) return minutes === 1 ? '1 min ago' : minutes + ' min ago';
+      const hours = Math.round(minutes / 60);
+      if (hours < 24) return hours === 1 ? '1 hr ago' : hours + ' hrs ago';
+      const days = Math.round(hours / 24);
+      if (days < 7) return days === 1 ? '1 day ago' : days + ' days ago';
+      const weeks = Math.round(days / 7);
+      if (weeks < 5) return weeks === 1 ? '1 week ago' : weeks + ' weeks ago';
+      const months = Math.round(days / 30);
+      return months <= 1 ? '1 month ago' : months + ' months ago';
+    };
   </script>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
   <script src="https://unpkg.com/marked@15.0.7/marked.min.js"></script>
   <script src="https://unpkg.com/dompurify@3.2.5/dist/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11.6.0/dist/mermaid.min.js"></script>
   <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
+  <script>
+    (function () {
+      if (!window.mermaid) return;
+      var dark = document.documentElement.classList.contains('dark');
+      window.mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: dark ? 'dark' : 'default',
+        fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+      });
+      window.LR = window.LR || {};
+      window.LR.mermaidTheme = function () {
+        return document.documentElement.classList.contains('dark') ? 'dark' : 'default';
+      };
+    })();
+  </script>
 </head>
 <body class="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
   <header class="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
