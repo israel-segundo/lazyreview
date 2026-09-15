@@ -206,6 +206,23 @@
               </div>
             </div>
             <p class="mt-2 text-xs text-red-600 dark:text-red-400" x-show="analysisError" x-text="analysisError" x-cloak></p>
+            <div x-show="analysisStale && analysisBrief" x-cloak
+                 class="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+              <svg class="mt-0.5 h-4 w-4 shrink-0 text-amber-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+              </svg>
+              <div>
+                <p class="font-medium">Analysis is for an older commit</p>
+                <p class="text-xs opacity-90">
+                  This brief was produced for
+                  <span class="font-mono" x-text="(analysisBriefHeadSha || '').slice(0, 12)"></span>,
+                  but the PR head is now
+                  <span class="font-mono">{{ (pr.head_sha or '')[:12] }}</span>.
+                  Reviews stay locked until analysis succeeds for the current head — use
+                  <span class="font-medium">Run analysis</span> when you want a fresh brief.
+                </p>
+              </div>
+            </div>
             <p class="mt-2 text-sm text-slate-500 dark:text-slate-400"
                x-show="!analysisBrief && analysisStatus !== 'succeeded'"
                x-cloak>
@@ -1138,6 +1155,8 @@ function reviewForm() {
     analysisId: {{ (pr.analysis_id or none)|tojson }},
     analysisError: {{ (pr.analysis_error or '')|tojson }},
     analysisBrief: {{ (pr.analysis_brief or '')|tojson }},
+    analysisStale: {{ (pr.analysis_stale or false)|tojson }},
+    analysisBriefHeadSha: {{ (pr.analysis_brief_head_sha or '')|tojson }},
     analysisAgent: {{ (pr.analysis_agent or '')|tojson }},
     analysisModel: {{ (pr.analysis_model or '')|tojson }},
     analysisEffort: {{ (pr.analysis_effort or '')|tojson }},
@@ -1353,23 +1372,53 @@ function reviewForm() {
       this.analysisStatus = data.status || null;
       this.analysisId = data.id || null;
       this.analysisError = data.error_message || '';
-      this.analysisBrief = data.brief_markdown || '';
-      this.analysisAgent = data.agent || '';
-      this.analysisModel = data.model || '';
-      this.analysisEffort = data.effort || '';
-      this.analysisDurationMs = (data.duration_ms != null ? data.duration_ms : null);
+      // Keep showing a previous brief while a new head analysis is queued/running.
+      if (data.brief_markdown) {
+        this.analysisBrief = data.brief_markdown;
+        this.analysisStale = false;
+        this.analysisBriefHeadSha = data.head_sha || '';
+        this.analysisAgent = data.agent || '';
+        this.analysisModel = data.model || '';
+        this.analysisEffort = data.effort || '';
+        this.analysisDurationMs = (data.duration_ms != null ? data.duration_ms : null);
+      } else if (!this.analysisBrief) {
+        this.analysisAgent = data.agent || '';
+        this.analysisModel = data.model || '';
+        this.analysisEffort = data.effort || '';
+        this.analysisDurationMs = (data.duration_ms != null ? data.duration_ms : null);
+      }
+    },
+    applyAnalysisDisplay(display) {
+      if (!display) return;
+      this.analysisStatus = display.analysis_status || null;
+      this.analysisId = display.analysis_id || null;
+      this.analysisError = display.analysis_error || '';
+      this.analysisBrief = display.analysis_brief || '';
+      this.analysisStale = !!display.analysis_stale;
+      this.analysisBriefHeadSha = display.analysis_brief_head_sha || '';
+      this.analysisAgent = display.analysis_agent || '';
+      this.analysisModel = display.analysis_model || '';
+      this.analysisEffort = display.analysis_effort || '';
+      this.analysisDurationMs = (
+        display.analysis_duration_ms != null ? display.analysis_duration_ms : null
+      );
     },
     async tickAnalysis() {
       try {
         const res = await fetch('/api/prs/{{ pr.id }}/analysis');
         if (!res.ok) return;
         const data = await res.json();
-        const a = data.analysis;
-        if (!a) return;
-        this.applyAnalysis(a);
+        if (data.display) {
+          this.applyAnalysisDisplay(data.display);
+        } else if (data.analysis) {
+          this.applyAnalysis(data.analysis);
+        }
         if (Array.isArray(data.events)) this.prEvents = data.events;
         if (Array.isArray(data.history)) this.analyses = data.history;
-        if (a.status !== 'queued' && a.status !== 'running') {
+        const status = (data.display && data.display.analysis_status)
+          || (data.analysis && data.analysis.status)
+          || this.analysisStatus;
+        if (status !== 'queued' && status !== 'running') {
           if (this.analysisPollTimer) {
             clearInterval(this.analysisPollTimer);
             this.analysisPollTimer = null;

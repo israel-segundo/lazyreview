@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 
 from lazyreview import __version__
 from lazyreview.api import (
+    activity as activity_api,
     agents,
     analytics,
     consolidations,
@@ -163,6 +164,7 @@ def create_app() -> FastAPI:
     app.include_router(analytics.router, prefix="/api")
     app.include_router(settings_api.router, prefix="/api")
     app.include_router(analyses_api.router, prefix="/api")
+    app.include_router(activity_api.router, prefix="/api")
 
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
@@ -343,6 +345,53 @@ def create_app() -> FastAPI:
                 "consolidation": consolidation,
                 "pr": pr,
                 "source_runs": source_runs,
+                "version": __version__,
+            },
+        )
+
+    @app.get("/activity", response_class=HTMLResponse)
+    async def activity_page(request: Request):
+        from lazyreview.db import count_global_activity_running, list_global_activity
+
+        running_only = str(request.query_params.get("running") or "") in ("1", "true", "yes")
+        try:
+            page = max(1, int(request.query_params.get("page") or 1))
+        except ValueError:
+            page = 1
+        try:
+            page_size = int(request.query_params.get("page_size") or 25)
+        except ValueError:
+            page_size = 25
+        if page_size not in (25, 50, 100):
+            page_size = 25
+        result = list_global_activity(
+            request.app.state.db,
+            limit=page_size,
+            offset=(page - 1) * page_size,
+            running_only=running_only,
+        )
+        total = int(result["total"])
+        pages = max(1, (total + page_size - 1) // page_size) if total else 1
+        if page > pages:
+            page = pages
+            result = list_global_activity(
+                request.app.state.db,
+                limit=page_size,
+                offset=(page - 1) * page_size,
+                running_only=running_only,
+            )
+        return TEMPLATES.TemplateResponse(
+            request,
+            "activity.html",
+            {
+                "items": result["items"],
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "pages": pages,
+                "page_sizes": [25, 50, 100],
+                "running_count": count_global_activity_running(request.app.state.db),
+                "running_only": running_only,
                 "version": __version__,
             },
         )

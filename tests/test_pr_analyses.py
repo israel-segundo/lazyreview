@@ -103,6 +103,16 @@ def test_analysis_persisted_and_gate(tmp_path: Path):
     with pytest.raises(HTTPException) as ei2:
         require_succeeded_analysis(conn, int(pr["id"]))
     assert ei2.value.status_code == 409
+
+    # Overview still surfaces the previous brief as stale for the new head.
+    from lazyreview.db import get_pr
+
+    shown = get_pr(conn, int(pr["id"]))
+    assert shown is not None
+    assert shown["analysis_status"] is None
+    assert shown["analysis_stale"] is True
+    assert shown["analysis_brief_head_sha"] == "abc"
+    assert (shown["analysis_brief"] or "").startswith("# Brief")
     conn.close()
 
 

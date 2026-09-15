@@ -60,7 +60,7 @@
         <span class="lr-mermaid-label">End-to-end flow</span>
       </div>
       <pre class="mermaid px-3 py-4 text-sm">flowchart TD
-  sync[PR sync] --> analysis[PR analysis brief]
+  sync[PR first added] --> analysis[PR analysis brief]
   analysis --> order[Human starts reviews]
   order --> r1[Claude review]
   order --> r2[Cursor review]

@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from lazyreview.db import (
+    analysis_display_for_pr,
     get_current_pr_analysis,
     get_pr,
     get_pr_analysis,
@@ -23,10 +24,12 @@ def get_pr_analysis_endpoint(pr_id: int, request: Request):
     if not pr:
         raise HTTPException(status_code=404, detail="PR not found")
     analysis = get_current_pr_analysis(conn, pr_id)
+    display = analysis_display_for_pr(conn, pr)
     return {
         "pr_id": pr_id,
         "head_sha": pr.get("head_sha"),
         "analysis": analysis,
+        "display": display,
         "history": list_pr_analyses(conn, pr_id),
         "events": list_pr_events(conn, pr_id),
     }

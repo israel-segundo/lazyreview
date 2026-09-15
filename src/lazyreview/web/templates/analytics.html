@@ -59,6 +59,98 @@
     </div>
   </section>
 
+  <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900"
+           x-show="!loading || hasData">
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">PRs by repo</h2>
+        <p class="mt-0.5 text-xs text-slate-500">
+          Distinct PRs resolved (comment, approve, or request changes) in this period. Click a repo to filter the chart below.
+        </p>
+      </div>
+      <span class="text-xs text-slate-500"
+            x-text="prsByRepoTotal + ' PR' + (prsByRepoTotal === 1 ? '' : 's')"></span>
+    </div>
+    <div class="mt-3 flex flex-wrap gap-2" x-show="prsByRepo.length">
+      <button type="button"
+              class="rounded-lg border px-2.5 py-1 text-xs font-medium tabular-nums"
+              :class="repoFilter === 'all'
+                ? 'border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900'
+                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'"
+              @click="setRepoFilter('all')">
+        All
+      </button>
+      <template x-for="row in prsByRepo" :key="row.repo">
+        <button type="button"
+                class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium tabular-nums"
+                :class="repoFilter === row.repo
+                  ? 'border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900'
+                  : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'"
+                @click="setRepoFilter(row.repo)">
+          <span x-text="row.repo"></span>
+          <span class="opacity-70" x-text="row.pr_count"></span>
+        </button>
+      </template>
+    </div>
+    <p x-show="!prsByRepo.length" x-cloak class="mt-3 text-sm text-slate-500">No PRs resolved in this period.</p>
+  </section>
+
+  <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900"
+           x-show="!loading || hasData">
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Activity by repo</h2>
+        <p class="mt-0.5 text-xs text-slate-500"
+           x-text="(repoActivity.granularity === 'week' ? 'Weekly' : 'Daily') + ' PRs resolved (comment / approve / request changes)' + (repoFilter === 'all' ? ' · all repos' : (' · ' + repoFilter))"></p>
+      </div>
+      <label class="text-xs text-slate-500">
+        Repo
+        <select class="ml-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100"
+                x-model="repoFilter" @change="renderRepoActivity()">
+          <option value="all">All</option>
+          <template x-for="repo in (repoActivity.repos || [])" :key="repo">
+            <option :value="repo" x-text="repo"></option>
+          </template>
+        </select>
+      </label>
+    </div>
+    <div class="relative mt-3 h-56">
+      <canvas id="chart-repo-activity"></canvas>
+      <p x-show="!repoActivityTotal" x-cloak
+         class="absolute inset-0 flex items-center justify-center text-sm text-slate-500">No PRs resolved for this filter.</p>
+    </div>
+  </section>
+
+  <div class="grid gap-4 lg:grid-cols-2" x-show="!loading || hasData">
+    <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <div>
+        <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Weekday review pattern</h2>
+        <p class="mt-0.5 text-xs text-slate-500">
+          PRs resolved by weekday (UTC) — comment, approve, or request changes.
+        </p>
+      </div>
+      <div class="relative mx-auto mt-3 h-72 max-w-md">
+        <canvas id="chart-weekday"></canvas>
+        <p x-show="!(weekdayPattern.total)" x-cloak
+           class="absolute inset-0 flex items-center justify-center text-sm text-slate-500">No PRs resolved in this period.</p>
+      </div>
+    </section>
+
+    <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <div>
+        <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Repo review pattern</h2>
+        <p class="mt-0.5 text-xs text-slate-500">
+          PRs resolved by repository (comment, approve, or request changes).
+        </p>
+      </div>
+      <div class="relative mx-auto mt-3 h-72 max-w-md">
+        <canvas id="chart-repo-pattern"></canvas>
+        <p x-show="!(repoPattern.total)" x-cloak
+           class="absolute inset-0 flex items-center justify-center text-sm text-slate-500">No PRs resolved in this period.</p>
+      </div>
+    </section>
+  </div>
+
   <div class="grid gap-4 lg:grid-cols-2" x-show="!loading || hasData">
     <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Agent / model / effort mix</h2>
@@ -202,6 +294,11 @@ function analyticsPage() {
       { id: 'all', label: 'All' },
     ],
     activity: { period: 'month', granularity: 'day', buckets: [] },
+    prsByRepo: [],
+    repoActivity: { period: 'month', granularity: 'day', repos: [], series: { all: [] } },
+    weekdayPattern: { period: 'month', labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], counts: [0,0,0,0,0,0,0], total: 0 },
+    repoPattern: { period: 'month', labels: [], counts: [], total: 0 },
+    repoFilter: 'all',
     loading: false,
     hasData: false,
     error: '',
@@ -211,6 +308,14 @@ function analyticsPage() {
     _loadSeq: 0,
     get activityTotal() {
       const buckets = (this.activity && this.activity.buckets) || [];
+      return buckets.reduce((s, b) => s + Number(b.total || 0), 0);
+    },
+    get prsByRepoTotal() {
+      return (this.prsByRepo || []).reduce((s, r) => s + Number(r.pr_count || 0), 0);
+    },
+    get repoActivityTotal() {
+      const key = this.repoFilter === 'all' ? 'all' : this.repoFilter;
+      const buckets = ((this.repoActivity && this.repoActivity.series) || {})[key] || [];
       return buckets.reduce((s, b) => s + Number(b.total || 0), 0);
     },
     async init() {
@@ -330,6 +435,23 @@ function analyticsPage() {
         this.summary = data.summary || { succeeded: 0, failed: 0, combos: 0, total_cost_usd: null, costed_runs: 0 };
         this.table = data.table || [];
         this.activity = data.activity || { period: this.period, granularity: 'day', buckets: [] };
+        this.prsByRepo = data.prs_by_repo || [];
+        this.repoActivity = data.repo_activity || { period: this.period, granularity: 'day', repos: [], series: { all: [] } };
+        this.weekdayPattern = data.weekday_pattern || {
+          period: this.period,
+          labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
+          counts: [0,0,0,0,0,0,0],
+          total: 0,
+        };
+        this.repoPattern = data.repo_pattern || {
+          period: this.period,
+          labels: [],
+          counts: [],
+          total: 0,
+        };
+        if (this.repoFilter !== 'all' && !(this.repoActivity.repos || []).includes(this.repoFilter)) {
+          this.repoFilter = 'all';
+        }
         this.hasData = true;
         await this.$nextTick();
         if (seq !== this._loadSeq) return;
@@ -344,11 +466,200 @@ function analyticsPage() {
     render(data) {
       this.destroyCharts();
       this._safeRender('activity', () => this.renderActivity());
+      this._safeRender('repo-activity', () => this.renderRepoActivity());
+      this._safeRender('weekday', () => this.renderWeekday());
+      this._safeRender('repo-pattern', () => this.renderRepoPattern());
       this._safeRender('usage', () => this.renderUsage(data.usage || { agents: [], models: [] }));
       this._safeRender('spend', () => this.renderSpend(data.spend || { agents: [], models: [] }));
       this._safeRender('distributions', () => this.renderDistributions(data.combos || [], data.bubbles || []));
       this._safeRender('bubble', () => this.renderBubble(data.bubbles || []));
       this._safeRender('bubble-cost', () => this.renderCostBubble(data.bubbles || []));
+    },
+    setRepoFilter(repo) {
+      this.repoFilter = repo || 'all';
+      this.renderRepoActivity();
+    },
+    renderRepoActivity() {
+      const el = document.getElementById('chart-repo-activity');
+      if (!el || typeof Chart === 'undefined') return;
+      if (this.charts.repoActivity) {
+        try {
+          if (typeof this.charts.repoActivity.stop === 'function') this.charts.repoActivity.stop();
+          this.charts.repoActivity.destroy();
+        } catch (e) {}
+        delete this.charts.repoActivity;
+      }
+      const key = this.repoFilter === 'all' ? 'all' : this.repoFilter;
+      const buckets = ((this.repoActivity && this.repoActivity.series) || {})[key] || [];
+      if (!buckets.length) return;
+      const labels = buckets.map(b => b.label);
+      const totals = buckets.map(b => Number(b.total || 0));
+      this.charts.repoActivity = new Chart(el, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: key === 'all' ? 'All repos' : key,
+              data: totals,
+              borderColor: '#0f766e',
+              backgroundColor: 'rgba(15, 118, 110, 0.12)',
+              fill: true,
+              tension: 0.25,
+              pointRadius: 2,
+              pointHoverRadius: 4,
+              borderWidth: 2,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: this.tickColor(), boxWidth: 10, font: { size: 11 } },
+            },
+            tooltip: {
+              callbacks: {
+                title(items) {
+                  const i = items && items[0] && items[0].dataIndex;
+                  const b = buckets[i];
+                  if (!b) return '';
+                  if (b.end_date) return b.date + ' → ' + b.end_date;
+                  return b.date || '';
+                },
+                label(ctx) {
+                  const b = buckets[ctx.dataIndex] || {};
+                  return ' resolved: ' + Number(b.total || 0)
+                    + ' (approve ' + Number(b.approve || 0)
+                    + ', changes ' + Number(b.request_changes || 0)
+                    + ', comment ' + Number(b.comment || 0) + ')';
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              ticks: { color: this.tickColor(), maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
+              grid: { color: this.gridColor() },
+            },
+            y: {
+              beginAtZero: true,
+              ticks: { color: this.tickColor(), precision: 0 },
+              grid: { color: this.gridColor() },
+            },
+          },
+        },
+      });
+    },
+    renderWeekday() {
+      const el = document.getElementById('chart-weekday');
+      if (!el || typeof Chart === 'undefined') return;
+      if (this.charts.weekday) {
+        try {
+          if (typeof this.charts.weekday.stop === 'function') this.charts.weekday.stop();
+          this.charts.weekday.destroy();
+        } catch (e) {}
+        delete this.charts.weekday;
+      }
+      const labels = (this.weekdayPattern && this.weekdayPattern.labels) || ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+      const counts = (this.weekdayPattern && this.weekdayPattern.counts) || [0,0,0,0,0,0,0];
+      if (!(this.weekdayPattern && this.weekdayPattern.total)) return;
+      this.charts.weekday = new Chart(el, {
+        type: 'radar',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'PRs resolved',
+              data: counts,
+              borderColor: '#0369a1',
+              backgroundColor: 'rgba(3, 105, 161, 0.18)',
+              pointBackgroundColor: '#0369a1',
+              pointBorderColor: '#fff',
+              borderWidth: 2,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: this.tickColor(), boxWidth: 10, font: { size: 11 } },
+            },
+          },
+          scales: {
+            r: {
+              beginAtZero: true,
+              ticks: {
+                color: this.tickColor(),
+                backdropColor: 'transparent',
+                precision: 0,
+              },
+              grid: { color: this.gridColor() },
+              angleLines: { color: this.gridColor() },
+              pointLabels: { color: this.tickColor(), font: { size: 12 } },
+            },
+          },
+        },
+      });
+    },
+    renderRepoPattern() {
+      const el = document.getElementById('chart-repo-pattern');
+      if (!el || typeof Chart === 'undefined') return;
+      if (this.charts.repoPattern) {
+        try {
+          if (typeof this.charts.repoPattern.stop === 'function') this.charts.repoPattern.stop();
+          this.charts.repoPattern.destroy();
+        } catch (e) {}
+        delete this.charts.repoPattern;
+      }
+      const labels = (this.repoPattern && this.repoPattern.labels) || [];
+      const counts = (this.repoPattern && this.repoPattern.counts) || [];
+      if (!(this.repoPattern && this.repoPattern.total) || !labels.length) return;
+      this.charts.repoPattern = new Chart(el, {
+        type: 'radar',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'PRs resolved',
+              data: counts,
+              borderColor: '#0f766e',
+              backgroundColor: 'rgba(15, 118, 110, 0.18)',
+              pointBackgroundColor: '#0f766e',
+              pointBorderColor: '#fff',
+              borderWidth: 2,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: this.tickColor(), boxWidth: 10, font: { size: 11 } },
+            },
+          },
+          scales: {
+            r: {
+              beginAtZero: true,
+              ticks: {
+                color: this.tickColor(),
+                backdropColor: 'transparent',
+                precision: 0,
+              },
+              grid: { color: this.gridColor() },
+              angleLines: { color: this.gridColor() },
+              pointLabels: { color: this.tickColor(), font: { size: 11 } },
+            },
+          },
+        },
+      });
     },
     renderActivity() {
       const el = document.getElementById('chart-activity');

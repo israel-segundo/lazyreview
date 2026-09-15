@@ -33,15 +33,24 @@ chosen from `meta.json.recommended_action` and the internal report:
 | `comment` | `Approved with comments.` |
 | `request_changes` | `Requesting changes.` |
 
-**Approve + wrap up other reviewers:** when `recommended_action` is `approve` **and**
-`body.md` has a non-empty **Already addressed by other reviewers** section (S1/S2 items
-humans already raised that still need finishing), do **not** use a bare `Approved.`
-Open with a short sentence naming the reviewer, for example:
+**Approve + wrap up prior findings:** when `recommended_action` is `approve` **and**
+`body.md` has a non-empty **Already addressed** section (S1/S2 items humans already
+raised that still need finishing), do **not** use a bare `Approved.` Open with a short
+sentence about wrapping those up.
 
-> Approved, but wrap up @alice findings before merging.
+**First person for the current reviewer (required):** the human posting this comment is
+the authenticated reviewer. When prior findings were raised by **that same person**
+(body says “me” / “myself” / “my earlier review”, or the @login is the poster), write
+in the first person — never `@their_own_login`. Prefer:
 
-If several reviewers appear, name the primary one(s) in one short sentence. If that
-section is missing or empty, use `Approved.`
+> Approved, but wrap up my earlier findings before merging.
+
+For other people, keep `@login`:
+
+> Approved, but wrap up @alice’s findings before merging.
+
+If several people appear, name them in one short sentence (use “my …” for yourself and
+`@login` only for others). If that section is missing or empty, use `Approved.`
 
 ## Transform rules
 
@@ -65,5 +74,6 @@ section is missing or empty, use `Approved.`
 2. Disposition lead sentence (see above)
 3. Short stance (1–3 sentences), optionally grounded in analysis before/after
 4. Severity-ranked findings (same format as the internal report)
-5. Optional "Already addressed by other reviewers" if present in `body.md` (keep short)
+5. Optional "Already addressed" if present in `body.md` (keep short; preserve first-person
+   attribution for the current reviewer — never rewrite “me/myself” into `@poster`)
 6. Optional one-line closing disclosure — **no** coverage / dedup tables

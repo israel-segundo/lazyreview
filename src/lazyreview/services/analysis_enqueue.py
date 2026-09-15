@@ -1,4 +1,4 @@
-"""Helpers to enqueue PR analyses from sync, API, or head-move paths."""
+"""Helpers to enqueue PR analyses from sync (create), API, or manual retry."""
 
 from __future__ import annotations
 

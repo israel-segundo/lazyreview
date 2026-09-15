@@ -150,7 +150,8 @@ def test_prompt_seed_contains_posted_comment_rules():
     assert "recommended_action" in text
     assert "gh api" in text
     assert "lazyreview" not in text.lower()
-    assert "Already addressed by other reviewers" in text
+    assert "Already addressed" in text
+    assert "me / myself" in text or "first person" in text.lower()
     assert "How this was produced" in text
     assert "S1" in text and "S2" in text
     assert "review pass" in text.lower() or "1st pass" in text

@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+{% block title %} — Activity{% endblock %}
+{% block main_width %}w-[90%] max-w-none{% endblock %}
+{% block footer_width %}w-[90%] max-w-none{% endblock %}
+{% block content %}
+<div class="space-y-6" x-data="activityPage()" x-init="init()">
+  <div class="flex flex-wrap items-end justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">Activity</h1>
+      <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
+        PR analyses, review runs, and consolidations across all PRs — newest first.
+      </p>
+    </div>
+    <div class="flex flex-wrap items-center gap-3 text-sm">
+      <label class="inline-flex items-center gap-2 text-slate-700 dark:text-slate-300">
+        <input type="checkbox" class="rounded border-slate-300"
+               x-model="runningOnly" @change="onFilterChange()" />
+        Running only
+      </label>
+      <label class="inline-flex items-center gap-2 text-slate-700 dark:text-slate-300">
+        <span class="text-xs uppercase tracking-wide text-slate-500">Page size</span>
+        <select x-model.number="pageSize" @change="onPageSizeChange()"
+                class="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+          <template x-for="n in pageSizes" :key="n">
+            <option :value="n" x-text="n"></option>
+          </template>
+        </select>
+      </label>
+      <span class="text-xs text-slate-500 dark:text-slate-400"
+            x-show="runningCount > 0" x-cloak
+            x-text="runningCount + ' in flight'"></span>
+      <span class="text-xs text-slate-400" x-show="polling" x-cloak>Live</span>
+    </div>
+  </div>
+
+  <p x-show="error" x-cloak class="text-sm text-red-600 dark:text-red-400" x-text="error"></p>
+
+  <section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <ul class="divide-y divide-slate-100 text-sm dark:divide-slate-800">
+      <template x-for="item in items" :key="item.kind + '-' + item.id">
+        <li class="flex flex-wrap items-center gap-2 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+          <span class="inline-flex items-center gap-1">
+            <span class="lr-status-ball h-2.5 w-2.5"
+                  :class="statusBallClass(item)"
+                  role="img"
+                  :aria-label="item.status || item.kind"
+                  :title="item.status || item.kind"></span>
+            <template x-if="item.deprecated">
+              <span class="lr-status-ball lr-status-ball--deprecated h-2.5 w-2.5"
+                    title="Deprecated" role="img" aria-label="Deprecated"></span>
+            </template>
+            <template x-if="item.consolidated">
+              <span class="lr-status-ball lr-status-ball--consolidated h-2.5 w-2.5"
+                    title="Consolidated" role="img" aria-label="Consolidated"></span>
+            </template>
+          </span>
+
+          <a class="font-medium text-blue-600 hover:underline dark:text-blue-400"
+             :href="'/prs/' + item.pr_id"
+             :title="item.title || ''"
+             x-text="item.pr_label"></a>
+
+          <a class="font-mono text-blue-600 hover:underline dark:text-blue-400"
+             :href="itemHref(item)"
+             x-text="kindLabel(item)"></a>
+
+          <span class="text-slate-500" x-text="item.status"></span>
+
+          <span class="inline-flex min-w-0 items-center gap-1.5 text-slate-700 dark:text-slate-300"
+                x-show="item.agent">
+            <img x-show="agentKey(item.agent) === LR.AgentName.CLAUDE" x-cloak
+                 src="/static/img/agents/claude.webp" alt="" width="14" height="14"
+                 class="h-3.5 w-3.5 shrink-0 object-contain" />
+            <img x-show="agentKey(item.agent) === LR.AgentName.AGY" x-cloak
+                 src="/static/img/agents/agy.png" alt="" width="14" height="14"
+                 class="h-3.5 w-3.5 shrink-0 object-contain" />
+            <img x-show="agentKey(item.agent) === LR.AgentName.CURSOR" x-cloak
+                 src="/static/img/agents/cursor-light.png" alt="" width="14" height="14"
+                 class="h-3.5 w-3.5 shrink-0 object-contain dark:hidden" />
+            <img x-show="agentKey(item.agent) === LR.AgentName.CURSOR" x-cloak
+                 src="/static/img/agents/cursor-dark.png" alt="" width="14" height="14"
+                 class="h-3.5 w-3.5 shrink-0 object-contain hidden dark:inline" />
+            <span class="shrink-0" x-text="agentTitle(item.agent)"></span>
+            <template x-if="item.model">
+              <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
+                <span class="shrink-0 text-slate-400" aria-hidden="true">/</span>
+                <span class="min-w-0 truncate" x-text="item.model"></span>
+              </span>
+            </template>
+            <template x-if="item.effort">
+              <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
+                <span class="shrink-0 text-slate-400" aria-hidden="true">/</span>
+                <span class="min-w-0 truncate" x-text="item.effort"></span>
+              </span>
+            </template>
+          </span>
+
+          <span class="ml-auto text-xs text-slate-400"
+                :title="formatAbsolute(item.when_at) || ''"
+                x-text="formatRelative(item.when_at) || ''"></span>
+        </li>
+      </template>
+      <li x-show="!loading && !items.length" class="px-4 py-10 text-center text-slate-500">
+        <span x-text="runningOnly ? 'Nothing running right now.' : 'No activity yet.'"></span>
+      </li>
+      <li x-show="loading && !items.length" class="px-4 py-10 text-center text-slate-500">Loading…</li>
+    </ul>
+    <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 text-sm dark:border-slate-800"
+         x-show="total > 0" x-cloak>
+      <span class="text-xs text-slate-500"
+            x-text="rangeLabel()"></span>
+      <div class="flex items-center gap-2">
+        <button type="button"
+                class="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs hover:bg-slate-50 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
+                :disabled="page <= 1 || loading"
+                @click="goPage(page - 1)">Previous</button>
+        <span class="tabular-nums text-xs text-slate-600 dark:text-slate-300"
+              x-text="'Page ' + page + ' of ' + pages"></span>
+        <button type="button"
+                class="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs hover:bg-slate-50 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
+                :disabled="page >= pages || loading"
+                @click="goPage(page + 1)">Next</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+function activityPage() {
+  return {
+    items: {{ items | tojson }},
+    total: {{ total | tojson }},
+    page: {{ page | tojson }},
+    pages: {{ pages | tojson }},
+    pageSize: {{ page_size | tojson }},
+    pageSizes: {{ page_sizes | tojson }},
+    runningCount: {{ running_count | tojson }},
+    runningOnly: {{ running_only | tojson }},
+    loading: false,
+    error: '',
+    polling: false,
+    _timer: null,
+    init() {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('running') === '1') this.runningOnly = true;
+        const ps = Number(params.get('page_size') || this.pageSize);
+        if (this.pageSizes.includes(ps)) this.pageSize = ps;
+        const pg = Number(params.get('page') || this.page);
+        if (Number.isFinite(pg) && pg >= 1) this.page = pg;
+      } catch (_) {}
+      this.syncPolling();
+    },
+    rangeLabel() {
+      if (!this.total) return '0 items';
+      const start = (this.page - 1) * this.pageSize + 1;
+      const end = Math.min(this.total, this.page * this.pageSize);
+      return start + '–' + end + ' of ' + this.total;
+    },
+    agentKey(name) {
+      return (window.LR && window.LR.agentKey)
+        ? window.LR.agentKey(name)
+        : String(name || '').toLowerCase();
+    },
+    agentTitle(name) {
+      const s = String(name || '');
+      if (!s) return '';
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    },
+    formatRelative(iso) {
+      return (window.LR && window.LR.formatRelative) ? window.LR.formatRelative(iso) : '';
+    },
+    formatAbsolute(iso) {
+      return (window.LR && window.LR.formatAbsolute) ? window.LR.formatAbsolute(iso) : '';
+    },
+    kindLabel(item) {
+      if (item.kind === 'analysis') return 'analysis #' + item.id;
+      if (item.kind === 'run') return 'run #' + item.id;
+      if (item.kind === 'consolidation') return 'consolidation #' + item.id;
+      return item.kind + ' #' + item.id;
+    },
+    itemHref(item) {
+      if (item.kind === 'analysis') return '/prs/' + item.pr_id + '?tab=overview';
+      if (item.kind === 'run') return '/runs/' + item.id;
+      if (item.kind === 'consolidation') {
+        if (item.status === 'succeeded') return '/consolidations/' + item.id;
+        return '/prs/' + item.pr_id + '?tab=consolidations';
+      }
+      return '/prs/' + item.pr_id;
+    },
+    statusBallClass(item) {
+      const status = item.status;
+      if (status === 'succeeded') return 'lr-status-ball--succeeded';
+      if (status === 'failed') return 'lr-status-ball--failed';
+      if (status === 'cancelled') return 'lr-status-ball--cancelled';
+      if (status === 'dormant') return 'lr-status-ball--dormant';
+      if (status === 'running' || status === 'queued') {
+        if (item.kind === 'analysis') return 'lr-status-ball--analyzing lr-status-ball--pulse';
+        if (item.kind === 'consolidation') return 'lr-status-ball--consolidating lr-status-ball--pulse';
+        return 'lr-status-ball--running lr-status-ball--pulse';
+      }
+      return '';
+    },
+    syncPolling() {
+      const anyRunning = this.runningCount > 0
+        || this.items.some((i) => i.status === 'queued' || i.status === 'running');
+      if (anyRunning) this.startPolling();
+      else this.stopPolling();
+    },
+    startPolling() {
+      if (this._timer) return;
+      this.polling = true;
+      this._timer = setInterval(() => this.reload({ quiet: true }), 2000);
+    },
+    stopPolling() {
+      this.polling = false;
+      if (this._timer) {
+        clearInterval(this._timer);
+        this._timer = null;
+      }
+    },
+    onFilterChange() {
+      this.page = 1;
+      this.reload();
+    },
+    onPageSizeChange() {
+      this.page = 1;
+      this.reload();
+    },
+    goPage(n) {
+      const next = Math.max(1, Math.min(this.pages, Number(n) || 1));
+      if (next === this.page) return;
+      this.page = next;
+      this.reload();
+    },
+    async reload(opts = {}) {
+      const quiet = !!(opts && opts.quiet);
+      if (!quiet) {
+        this.loading = true;
+        this.error = '';
+      }
+      try {
+        const qs = new URLSearchParams({
+          page: String(this.page),
+          page_size: String(this.pageSize),
+          running_only: this.runningOnly ? 'true' : 'false',
+        });
+        const res = await fetch('/api/activity?' + qs.toString());
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Failed to load activity');
+        this.items = data.items || [];
+        this.total = data.total || 0;
+        this.page = data.page || 1;
+        this.pages = data.pages || 1;
+        this.pageSize = data.page_size || this.pageSize;
+        this.runningCount = data.running_count || 0;
+        try {
+          const url = new URL(window.location.href);
+          if (this.runningOnly) url.searchParams.set('running', '1');
+          else url.searchParams.delete('running');
+          url.searchParams.set('page', String(this.page));
+          url.searchParams.set('page_size', String(this.pageSize));
+          history.replaceState(null, '', url.pathname + url.search);
+        } catch (_) {}
+        this.syncPolling();
+      } catch (e) {
+        if (!quiet) this.error = String(e.message || e);
+      } finally {
+        this.loading = false;
+      }
+    }
+  }
+}
+</script>
+<style>[x-cloak]{display:none!important}</style>
+{% endblock %}

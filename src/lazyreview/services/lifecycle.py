@@ -33,7 +33,7 @@ def unbind() -> None:
 
 
 def on_pr_head_changed(conn: Any, pr_id: int) -> None:
-    """Cancel in-flight work and enqueue a fresh analysis for the new head."""
+    """Cancel in-flight work for a new head. Does not auto-start PR analysis."""
     if _jobs is not None and hasattr(_jobs, "cancel_for_pr"):
         try:
             _jobs.cancel_for_pr(pr_id)
@@ -49,17 +49,10 @@ def on_pr_head_changed(conn: Any, pr_id: int) -> None:
             _analyses.cancel_for_pr(pr_id)
         except Exception:
             pass
-    if _settings is not None and _analyses is not None:
-        from lazyreview.services.analysis_enqueue import ensure_analysis_for_pr
-
-        try:
-            ensure_analysis_for_pr(conn, _settings, _analyses, pr_id, force=True)
-        except Exception:
-            pass
 
 
-def on_pr_upserted(conn: Any, pr: dict[str, Any]) -> None:
-    """Eager-enqueue analysis when review is requested; prune workspace when terminal."""
+def on_pr_upserted(conn: Any, pr: dict[str, Any], *, is_new: bool = False) -> None:
+    """Enqueue analysis only when a PR is first added; prune workspace when terminal."""
     from lazyreview.services.pr_workspace import queue_workspace_deletion
 
     state = (pr.get("state") or "").lower()
@@ -70,6 +63,10 @@ def on_pr_upserted(conn: Any, pr: dict[str, Any]) -> None:
             pass
         return
 
+    # Analysis is kicked off once at create time. Later head moves do not re-run it
+    # (manual Run analysis / Retry still available on the PR page).
+    if not is_new:
+        return
     if not int(pr.get("review_requested") or 0):
         return
     if _settings is None:

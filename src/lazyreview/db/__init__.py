@@ -171,7 +171,7 @@ def upsert_pr(
         on_pr_head_changed(conn, int(pr["id"]))
     from lazyreview.services.lifecycle import on_pr_upserted
 
-    on_pr_upserted(conn, pr)
+    on_pr_upserted(conn, pr, is_new=is_new)
     return pr
 
 
@@ -316,12 +316,226 @@ def _attach_internal_status(conn: sqlite3.Connection, pr: dict[str, Any]) -> dic
     return out
 
 
+_IN_FLIGHT = frozenset({"queued", "running"})
+_FINISHED = frozenset({"succeeded", "failed", "cancelled"})
+
+
+def pr_activity_summary(
+    *,
+    analysis_status: str | None,
+    active_runs: int = 0,
+    finished_runs: int = 0,
+    active_consolidations: int = 0,
+    finished_consolidations: int = 0,
+) -> dict[str, Any]:
+    """
+    Aggregate home-page activity ball for a PR.
+
+    - running: any analysis / review run / consolidation is queued or running
+    - done: nothing in flight, but at least one finished activity exists
+    - idle: nothing started yet
+    """
+    analysis = (analysis_status or "").strip().lower() or None
+    analysis_running = analysis in _IN_FLIGHT
+    analysis_done = analysis in _FINISHED
+    active_runs = int(active_runs or 0)
+    finished_runs = int(finished_runs or 0)
+    active_consolidations = int(active_consolidations or 0)
+    finished_consolidations = int(finished_consolidations or 0)
+
+    if analysis_running or active_runs > 0 or active_consolidations > 0:
+        parts: list[str] = []
+        if analysis_running:
+            parts.append("analysis " + (analysis or "running"))
+        if active_runs:
+            parts.append(
+                f"{active_runs} review run{'s' if active_runs != 1 else ''} in progress"
+            )
+        if active_consolidations:
+            parts.append(
+                f"{active_consolidations} consolidation"
+                f"{'s' if active_consolidations != 1 else ''} in progress"
+            )
+        return {
+            "activity_status": "running",
+            "activity_label": " · ".join(parts) or "Activity running",
+        }
+
+    if analysis_done or finished_runs > 0 or finished_consolidations > 0:
+        parts = []
+        if analysis_done:
+            parts.append(f"analysis {analysis}")
+        if finished_runs:
+            parts.append(f"{finished_runs} review run{'s' if finished_runs != 1 else ''}")
+        if finished_consolidations:
+            parts.append(
+                f"{finished_consolidations} consolidation"
+                f"{'s' if finished_consolidations != 1 else ''}"
+            )
+        return {
+            "activity_status": "done",
+            "activity_label": "Activity finished — " + " · ".join(parts),
+        }
+
+    return {
+        "activity_status": "idle",
+        "activity_label": "No activity yet",
+    }
+
+
+_ACTIVITY_IN_FLIGHT_SQL = "('queued', 'running')"
+
+
+def list_global_activity(
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 25,
+    offset: int = 0,
+    running_only: bool = False,
+) -> dict[str, Any]:
+    """
+    Cross-PR timeline of analyses, review runs, and consolidations.
+
+    Sorted newest-first by COALESCE(finished_at, started_at, created_at).
+    Returns {items, total, limit, offset}.
+    """
+    limit = max(1, min(int(limit or 25), 500))
+    offset = max(0, int(offset or 0))
+    a_filter = f"AND a.status IN {_ACTIVITY_IN_FLIGHT_SQL}" if running_only else ""
+    r_filter = f"AND r.status IN {_ACTIVITY_IN_FLIGHT_SQL}" if running_only else ""
+    c_filter = f"AND c.status IN {_ACTIVITY_IN_FLIGHT_SQL}" if running_only else ""
+    union_sql = f"""
+          SELECT
+            'analysis' AS kind,
+            a.id AS id,
+            a.pr_id AS pr_id,
+            p.owner AS owner,
+            p.repo AS repo,
+            p.number AS number,
+            p.title AS title,
+            a.status AS status,
+            a.agent AS agent,
+            a.model AS model,
+            a.effort AS effort,
+            a.head_sha AS head_sha,
+            0 AS deprecated,
+            0 AS consolidated,
+            a.created_at AS created_at,
+            a.started_at AS started_at,
+            a.finished_at AS finished_at,
+            COALESCE(a.finished_at, a.started_at, a.created_at) AS when_at
+          FROM pr_analyses a
+          JOIN prs p ON p.id = a.pr_id
+          WHERE 1=1 {a_filter}
+
+          UNION ALL
+
+          SELECT
+            'run' AS kind,
+            r.id AS id,
+            r.pr_id AS pr_id,
+            p.owner AS owner,
+            p.repo AS repo,
+            p.number AS number,
+            p.title AS title,
+            r.status AS status,
+            r.agent AS agent,
+            r.model AS model,
+            r.effort AS effort,
+            r.head_sha AS head_sha,
+            COALESCE(r.deprecated, 0) AS deprecated,
+            COALESCE(r.consolidated, 0) AS consolidated,
+            r.created_at AS created_at,
+            r.started_at AS started_at,
+            r.finished_at AS finished_at,
+            COALESCE(r.finished_at, r.started_at, r.created_at) AS when_at
+          FROM review_runs r
+          JOIN prs p ON p.id = r.pr_id
+          WHERE 1=1 {r_filter}
+
+          UNION ALL
+
+          SELECT
+            'consolidation' AS kind,
+            c.id AS id,
+            c.pr_id AS pr_id,
+            p.owner AS owner,
+            p.repo AS repo,
+            p.number AS number,
+            p.title AS title,
+            c.status AS status,
+            c.agent AS agent,
+            c.model AS model,
+            c.effort AS effort,
+            c.head_sha AS head_sha,
+            0 AS deprecated,
+            0 AS consolidated,
+            c.created_at AS created_at,
+            c.started_at AS started_at,
+            c.finished_at AS finished_at,
+            COALESCE(c.finished_at, c.started_at, c.created_at) AS when_at
+          FROM consolidations c
+          JOIN prs p ON p.id = c.pr_id
+          WHERE 1=1 {c_filter}
+    """
+    total = int(
+        conn.execute(f"SELECT COUNT(*) AS n FROM ({union_sql})").fetchone()["n"]
+    )
+    rows = conn.execute(
+        f"""
+        SELECT * FROM (
+          {union_sql}
+        )
+        ORDER BY when_at DESC, id DESC
+        LIMIT ? OFFSET ?
+        """,
+        (limit, offset),
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        item = dict(r)
+        item["id"] = int(item["id"])
+        item["pr_id"] = int(item["pr_id"])
+        item["number"] = int(item["number"])
+        item["deprecated"] = bool(int(item.get("deprecated") or 0))
+        item["consolidated"] = bool(int(item.get("consolidated") or 0))
+        item["pr_label"] = f"{item.get('repo') or ''}#{item.get('number')}"
+        out.append(item)
+    return {
+        "items": out,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+def count_global_activity_running(conn: sqlite3.Connection) -> int:
+    """How many analyses / runs / consolidations are queued or running."""
+    row = conn.execute(
+        f"""
+        SELECT
+          (SELECT COUNT(*) FROM pr_analyses WHERE status IN {_ACTIVITY_IN_FLIGHT_SQL})
+          + (SELECT COUNT(*) FROM review_runs WHERE status IN {_ACTIVITY_IN_FLIGHT_SQL})
+          + (SELECT COUNT(*) FROM consolidations WHERE status IN {_ACTIVITY_IN_FLIGHT_SQL})
+          AS n
+        """
+    ).fetchone()
+    return int(row["n"] if row is not None else 0)
+
+
 def list_prs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
         SELECT p.*,
           (SELECT COUNT(*) FROM review_runs r WHERE r.pr_id = p.id) AS run_count,
           (SELECT r.status FROM review_runs r WHERE r.pr_id = p.id ORDER BY r.id DESC LIMIT 1) AS latest_status,
+          (SELECT COUNT(*) FROM review_runs r
+             WHERE r.pr_id = p.id AND r.status IN ('queued', 'running')) AS active_run_count,
+          (SELECT COUNT(*) FROM review_runs r
+             WHERE r.pr_id = p.id AND r.status IN ('succeeded', 'failed', 'cancelled')) AS finished_run_count,
+          (SELECT COUNT(*) FROM consolidations c
+             WHERE c.pr_id = p.id AND c.status IN ('queued', 'running')) AS active_consolidation_count,
+          (SELECT COUNT(*) FROM consolidations c
+             WHERE c.pr_id = p.id AND c.status IN ('succeeded', 'failed', 'cancelled')) AS finished_consolidation_count,
           CASE
             WHEN (SELECT COUNT(*) FROM review_runs r WHERE r.pr_id = p.id) = 0 THEN 0
             WHEN p.head_sha IS NULL OR p.head_sha = '' THEN 0
@@ -352,8 +566,73 @@ def list_prs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         pr["analysis_model"] = (analysis.get("model") if analysis else None)
         pr["analysis_effort"] = (analysis.get("effort") if analysis else None)
         pr["analysis_duration_ms"] = (analysis.get("duration_ms") if analysis else None)
+        pr.update(
+            pr_activity_summary(
+                analysis_status=pr.get("analysis_status"),
+                active_runs=pr.get("active_run_count"),
+                finished_runs=pr.get("finished_run_count"),
+                active_consolidations=pr.get("active_consolidation_count"),
+                finished_consolidations=pr.get("finished_consolidation_count"),
+            )
+        )
         out.append(pr)
     return out
+
+
+def get_latest_succeeded_pr_analysis(
+    conn: sqlite3.Connection, pr_id: int
+) -> dict[str, Any] | None:
+    """Most recent succeeded analysis for a PR (any head), preferring non-empty briefs."""
+    return row_to_dict(
+        conn.execute(
+            """
+            SELECT * FROM pr_analyses
+            WHERE pr_id = ?
+              AND status = 'succeeded'
+              AND brief_markdown IS NOT NULL
+              AND TRIM(brief_markdown) != ''
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (pr_id,),
+        ).fetchone()
+    )
+
+
+def analysis_display_for_pr(conn: sqlite3.Connection, pr: dict[str, Any]) -> dict[str, Any]:
+    """
+    Status for the current head, with brief fallback to the latest succeeded analysis.
+
+    When the head moves and analysis is not re-run, Overview still shows the previous
+    brief and marks it stale. Reviews remain gated on current-head success.
+    """
+    pr_id = int(pr["id"])
+    current_head = (pr.get("head_sha") or "").strip()
+    current = get_current_pr_analysis(conn, pr_id)
+    latest_ok = get_latest_succeeded_pr_analysis(conn, pr_id)
+
+    brief_src: dict[str, Any] | None = None
+    if current and (current.get("brief_markdown") or "").strip():
+        brief_src = current
+    elif latest_ok:
+        brief_src = latest_ok
+
+    brief_head = ((brief_src or {}).get("head_sha") or "").strip()
+    stale = bool(brief_src and current_head and brief_head and brief_head != current_head)
+    meta = brief_src or current
+
+    return {
+        "analysis_status": current["status"] if current else None,
+        "analysis_id": int(current["id"]) if current else None,
+        "analysis_error": (current.get("error_message") if current else None),
+        "analysis_brief": (brief_src.get("brief_markdown") if brief_src else None),
+        "analysis_stale": stale,
+        "analysis_brief_head_sha": brief_head or None,
+        "analysis_agent": (meta.get("agent") if meta else None),
+        "analysis_model": (meta.get("model") if meta else None),
+        "analysis_effort": (meta.get("effort") if meta else None),
+        "analysis_duration_ms": (meta.get("duration_ms") if meta else None),
+    }
 
 
 def get_pr(conn: sqlite3.Connection, pr_id: int) -> dict[str, Any] | None:
@@ -363,15 +642,7 @@ def get_pr(conn: sqlite3.Connection, pr_id: int) -> dict[str, Any] | None:
     if row is None:
         return None
     pr = _attach_internal_status(conn, row)
-    analysis = get_current_pr_analysis(conn, int(pr["id"]))
-    pr["analysis_status"] = analysis["status"] if analysis else None
-    pr["analysis_id"] = int(analysis["id"]) if analysis else None
-    pr["analysis_error"] = (analysis.get("error_message") if analysis else None)
-    pr["analysis_brief"] = (analysis.get("brief_markdown") if analysis else None)
-    pr["analysis_agent"] = (analysis.get("agent") if analysis else None)
-    pr["analysis_model"] = (analysis.get("model") if analysis else None)
-    pr["analysis_effort"] = (analysis.get("effort") if analysis else None)
-    pr["analysis_duration_ms"] = (analysis.get("duration_ms") if analysis else None)
+    pr.update(analysis_display_for_pr(conn, pr))
     return pr
 
 
@@ -878,57 +1149,59 @@ def analytics_activity(conn: sqlite3.Connection, *, period: str = "month") -> di
     Buckets are daily for short windows and weekly when the span exceeds ~2 months.
     Zero-filled so the chart always spans the full period.
     """
+    return _analytics_activity_buckets(conn, period=period, repo=None)
+
+
+def _analytics_activity_rows(
+    conn: sqlite3.Connection,
+) -> list[dict[str, Any]]:
+    return rows_to_list(
+        conn.execute(
+            """
+            SELECT
+              r.status AS status,
+              COALESCE(r.finished_at, r.created_at) AS at,
+              COALESCE(p.repo, '') AS repo,
+              r.pr_id AS pr_id
+            FROM review_runs r
+            JOIN prs p ON p.id = r.pr_id
+            WHERE r.status IN ('succeeded', 'failed')
+            """
+        ).fetchall()
+    )
+
+
+def _analytics_window(
+    period: str, earliest: Any | None
+) -> tuple[str, Any, Any, bool]:
+    """Return (period_key, start_date, today, use_weekly)."""
     from datetime import date, timedelta
 
     key = (period or "month").strip().lower()
     if key not in _ANALYTICS_PERIOD_DAYS:
         key = "month"
-
     today = datetime.now(timezone.utc).date()
     days = _ANALYTICS_PERIOD_DAYS[key]
-
-    rows = rows_to_list(
-        conn.execute(
-            """
-            SELECT
-              status,
-              COALESCE(finished_at, created_at) AS at
-            FROM review_runs
-            WHERE status IN ('succeeded', 'failed')
-            """
-        ).fetchall()
-    )
-
-    by_day: dict[str, dict[str, int]] = {}
-    earliest: date | None = None
-    for row in rows:
-        day_s = _parse_run_day(row.get("at"))
-        if not day_s:
-            continue
-        day = date.fromisoformat(day_s)
-        if earliest is None or day < earliest:
-            earliest = day
-        slot = by_day.get(day_s)
-        if slot is None:
-            slot = {"succeeded": 0, "failed": 0}
-            by_day[day_s] = slot
-        status = (row.get("status") or "").lower()
-        if status == "succeeded":
-            slot["succeeded"] += 1
-        elif status == "failed":
-            slot["failed"] += 1
-
     if days is None:
         start = earliest or today
     else:
         start = today - timedelta(days=days - 1)
-
     span = (today - start).days + 1
-    use_weekly = span > 62
+    return key, start, today, span > 62
+
+
+def _fill_activity_buckets(
+    *,
+    by_day: dict[str, dict[str, int]],
+    start: Any,
+    today: Any,
+    use_weekly: bool,
+    period_key: str,
+) -> list[dict[str, Any]]:
+    from datetime import timedelta
 
     buckets: list[dict[str, Any]] = []
     if use_weekly:
-        # Align to Monday-start weeks covering [start, today].
         cursor = start - timedelta(days=start.weekday())
         while cursor <= today:
             week_end = min(cursor + timedelta(days=6), today)
@@ -959,7 +1232,7 @@ def analytics_activity(conn: sqlite3.Connection, *, period: str = "month") -> di
             slot = by_day.get(day_s) or {"succeeded": 0, "failed": 0}
             succeeded = int(slot["succeeded"])
             failed = int(slot["failed"])
-            if key == "week":
+            if period_key == "week":
                 label = f"{cursor.strftime('%a')} {cursor.day}"
             else:
                 label = f"{cursor.strftime('%b')} {cursor.day}"
@@ -973,11 +1246,344 @@ def analytics_activity(conn: sqlite3.Connection, *, period: str = "month") -> di
                 }
             )
             cursor += timedelta(days=1)
+    return buckets
+
+
+def _analytics_activity_buckets(
+    conn: sqlite3.Connection,
+    *,
+    period: str = "month",
+    repo: str | None = None,
+) -> dict[str, Any]:
+    from datetime import date
+
+    rows = _analytics_activity_rows(conn)
+    repo_key = (repo or "").strip() or None
+    by_day: dict[str, dict[str, int]] = {}
+    earliest: date | None = None
+    for row in rows:
+        if repo_key and (row.get("repo") or "") != repo_key:
+            continue
+        day_s = _parse_run_day(row.get("at"))
+        if not day_s:
+            continue
+        day = date.fromisoformat(day_s)
+        if earliest is None or day < earliest:
+            earliest = day
+        slot = by_day.get(day_s)
+        if slot is None:
+            slot = {"succeeded": 0, "failed": 0}
+            by_day[day_s] = slot
+        status = (row.get("status") or "").lower()
+        if status == "succeeded":
+            slot["succeeded"] += 1
+        elif status == "failed":
+            slot["failed"] += 1
+
+    key, start, today, use_weekly = _analytics_window(period, earliest)
+    buckets = _fill_activity_buckets(
+        by_day=by_day,
+        start=start,
+        today=today,
+        use_weekly=use_weekly,
+        period_key=key,
+    )
+    return {
+        "period": key,
+        "granularity": "week" if use_weekly else "day",
+        "repo": repo_key,
+        "buckets": buckets,
+    }
+
+
+def _analytics_resolution_rows(
+    conn: sqlite3.Connection,
+) -> list[dict[str, Any]]:
+    """
+    Posted GitHub review actions (comment / approve / request_changes).
+
+    Sourced from consolidations with feedback_provided=1 so external reviews
+    synced into lazyreview are included. Timestamp prefers a matching
+    feedback_actions.created_at, else finished_at / created_at.
+    """
+    return rows_to_list(
+        conn.execute(
+            """
+            SELECT
+              c.pr_id AS pr_id,
+              COALESCE(p.repo, '') AS repo,
+              CASE
+                WHEN LOWER(TRIM(COALESCE(c.gh_action, ''))) IN
+                  ('comment', 'approve', 'request_changes')
+                THEN LOWER(TRIM(c.gh_action))
+                ELSE 'comment'
+              END AS gh_action,
+              COALESCE(
+                (
+                  SELECT fa.created_at
+                  FROM feedback_actions fa
+                  WHERE fa.pr_id = c.pr_id
+                    AND fa.action = CASE
+                      WHEN LOWER(TRIM(COALESCE(c.gh_action, ''))) IN
+                        ('comment', 'approve', 'request_changes')
+                      THEN LOWER(TRIM(c.gh_action))
+                      ELSE 'comment'
+                    END
+                    AND (
+                      (c.gh_review_id IS NOT NULL AND fa.gh_review_id = c.gh_review_id)
+                      OR (
+                        c.gh_comment_url IS NOT NULL
+                        AND fa.gh_comment_url = c.gh_comment_url
+                      )
+                    )
+                  ORDER BY fa.id DESC
+                  LIMIT 1
+                ),
+                c.finished_at,
+                c.created_at
+              ) AS at
+            FROM consolidations c
+            JOIN prs p ON p.id = c.pr_id
+            WHERE c.feedback_provided = 1
+            """
+        ).fetchall()
+    )
+
+
+def _fill_resolution_buckets(
+    *,
+    by_day: dict[str, dict[str, int]],
+    start: Any,
+    today: Any,
+    use_weekly: bool,
+    period_key: str,
+) -> list[dict[str, Any]]:
+    from datetime import timedelta
+
+    def empty_slot() -> dict[str, int]:
+        return {"approve": 0, "request_changes": 0, "comment": 0}
+
+    buckets: list[dict[str, Any]] = []
+    if use_weekly:
+        cursor = start - timedelta(days=start.weekday())
+        while cursor <= today:
+            week_end = min(cursor + timedelta(days=6), today)
+            slot = empty_slot()
+            d = cursor
+            while d <= week_end:
+                day_slot = by_day.get(d.isoformat())
+                if day_slot:
+                    for k in slot:
+                        slot[k] += int(day_slot.get(k) or 0)
+                d += timedelta(days=1)
+            total = slot["approve"] + slot["request_changes"] + slot["comment"]
+            buckets.append(
+                {
+                    "date": cursor.isoformat(),
+                    "end_date": week_end.isoformat(),
+                    "label": f"{cursor.strftime('%b')} {cursor.day}",
+                    **slot,
+                    "total": total,
+                }
+            )
+            cursor += timedelta(days=7)
+    else:
+        cursor = start
+        while cursor <= today:
+            day_s = cursor.isoformat()
+            slot = by_day.get(day_s) or empty_slot()
+            approve = int(slot.get("approve") or 0)
+            request_changes = int(slot.get("request_changes") or 0)
+            comment = int(slot.get("comment") or 0)
+            if period_key == "week":
+                label = f"{cursor.strftime('%a')} {cursor.day}"
+            else:
+                label = f"{cursor.strftime('%b')} {cursor.day}"
+            buckets.append(
+                {
+                    "date": day_s,
+                    "label": label,
+                    "approve": approve,
+                    "request_changes": request_changes,
+                    "comment": comment,
+                    "total": approve + request_changes + comment,
+                }
+            )
+            cursor += timedelta(days=1)
+    return buckets
+
+
+def analytics_prs_by_repo(conn: sqlite3.Connection, *, period: str = "month") -> list[dict[str, Any]]:
+    """Distinct PRs resolved (comment / approve / request_changes) in the period, by repo."""
+    from datetime import timedelta
+
+    key = (period or "month").strip().lower()
+    if key not in _ANALYTICS_PERIOD_DAYS:
+        key = "month"
+    days = _ANALYTICS_PERIOD_DAYS[key]
+    cutoff: str | None = None
+    if days is not None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days - 1)).replace(
+            microsecond=0
+        ).date().isoformat()
+
+    by_repo: dict[str, set[int]] = {}
+    for row in _analytics_resolution_rows(conn):
+        day_s = _parse_run_day(row.get("at"))
+        if not day_s:
+            continue
+        if cutoff is not None and day_s < cutoff:
+            continue
+        repo = (row.get("repo") or "").strip() or "unknown"
+        pr_id = int(row.get("pr_id") or 0)
+        if not pr_id:
+            continue
+        by_repo.setdefault(repo, set()).add(pr_id)
+
+    out = [
+        {"repo": repo, "pr_count": len(pr_ids)}
+        for repo, pr_ids in by_repo.items()
+    ]
+    out.sort(key=lambda x: (-int(x["pr_count"]), str(x["repo"])))
+    return out
+
+
+def analytics_repo_activity(conn: sqlite3.Connection, *, period: str = "month") -> dict[str, Any]:
+    """
+    Resolved-PR time series for All + each repo (comment / approve / request_changes).
+
+    Client filters which series to plot as a line chart.
+    """
+    from datetime import date
+
+    rows = _analytics_resolution_rows(conn)
+    repos = sorted({(r.get("repo") or "").strip() for r in rows if (r.get("repo") or "").strip()})
+    earliest: date | None = None
+    for row in rows:
+        day_s = _parse_run_day(row.get("at"))
+        if not day_s:
+            continue
+        day = date.fromisoformat(day_s)
+        if earliest is None or day < earliest:
+            earliest = day
+    key, start, today, use_weekly = _analytics_window(period, earliest)
+
+    def buckets_for(repo_filter: str | None) -> list[dict[str, Any]]:
+        by_day: dict[str, dict[str, int]] = {}
+        for row in rows:
+            if repo_filter is not None and (row.get("repo") or "") != repo_filter:
+                continue
+            day_s = _parse_run_day(row.get("at"))
+            if not day_s:
+                continue
+            day = date.fromisoformat(day_s)
+            if day < start or day > today:
+                continue
+            slot = by_day.get(day_s)
+            if slot is None:
+                slot = {"approve": 0, "request_changes": 0, "comment": 0}
+                by_day[day_s] = slot
+            action = (row.get("gh_action") or "comment").strip().lower() or "comment"
+            if action not in slot:
+                action = "comment"
+            slot[action] += 1
+        return _fill_resolution_buckets(
+            by_day=by_day,
+            start=start,
+            today=today,
+            use_weekly=use_weekly,
+            period_key=key,
+        )
+
+    series: dict[str, list[dict[str, Any]]] = {"all": buckets_for(None)}
+    active_repos: list[str] = []
+    for repo in repos:
+        buckets = buckets_for(repo)
+        if any(int(b.get("total") or 0) for b in buckets):
+            series[repo] = buckets
+            active_repos.append(repo)
 
     return {
         "period": key,
         "granularity": "week" if use_weekly else "day",
-        "buckets": buckets,
+        "repos": active_repos,
+        "series": series,
+    }
+
+
+def analytics_weekday_pattern(conn: sqlite3.Connection, *, period: str = "month") -> dict[str, Any]:
+    """
+    PRs resolved by weekday (Mon–Sun, UTC resolve day).
+
+    Counts posted review actions (comment / approve / request_changes).
+    """
+    from datetime import date, timedelta
+
+    key = (period or "month").strip().lower()
+    if key not in _ANALYTICS_PERIOD_DAYS:
+        key = "month"
+    days = _ANALYTICS_PERIOD_DAYS[key]
+    cutoff: str | None = None
+    if days is not None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days - 1)).replace(
+            microsecond=0
+        ).date().isoformat()
+
+    labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    counts = [0, 0, 0, 0, 0, 0, 0]
+    for row in _analytics_resolution_rows(conn):
+        day_s = _parse_run_day(row.get("at"))
+        if not day_s:
+            continue
+        if cutoff is not None and day_s < cutoff:
+            continue
+        weekday = date.fromisoformat(day_s).weekday()  # Mon=0
+        counts[weekday] += 1
+
+    return {
+        "period": key,
+        "labels": labels,
+        "counts": counts,
+        "total": sum(counts),
+    }
+
+
+def analytics_repo_pattern(conn: sqlite3.Connection, *, period: str = "month") -> dict[str, Any]:
+    """
+    PRs resolved by repo in the period.
+
+    Counts posted review actions (comment / approve / request_changes).
+    """
+    from datetime import timedelta
+
+    key = (period or "month").strip().lower()
+    if key not in _ANALYTICS_PERIOD_DAYS:
+        key = "month"
+    days = _ANALYTICS_PERIOD_DAYS[key]
+    cutoff: str | None = None
+    if days is not None:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days - 1)).replace(
+            microsecond=0
+        ).date().isoformat()
+
+    by_repo: dict[str, int] = {}
+    for row in _analytics_resolution_rows(conn):
+        day_s = _parse_run_day(row.get("at"))
+        if not day_s:
+            continue
+        if cutoff is not None and day_s < cutoff:
+            continue
+        repo = (row.get("repo") or "").strip() or "unknown"
+        by_repo[repo] = by_repo.get(repo, 0) + 1
+
+    ordered = sorted(by_repo.items(), key=lambda kv: (-kv[1], kv[0]))
+    labels = [repo for repo, _ in ordered]
+    counts = [n for _, n in ordered]
+    return {
+        "period": key,
+        "labels": labels,
+        "counts": counts,
+        "total": sum(counts),
     }
 
 
@@ -1220,6 +1826,10 @@ def analytics_dashboard(conn: sqlite3.Connection, *, period: str = "all") -> dic
         "table": analytics_combos(conn, period=key),
         "bubbles": bubbles,
         "activity": analytics_activity(conn, period=key),
+        "prs_by_repo": analytics_prs_by_repo(conn, period=key),
+        "repo_activity": analytics_repo_activity(conn, period=key),
+        "weekday_pattern": analytics_weekday_pattern(conn, period=key),
+        "repo_pattern": analytics_repo_pattern(conn, period=key),
     }
 
 

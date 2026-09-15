@@ -81,10 +81,10 @@ allows (new head, remaining gaps, or re-check) — do not invent history you can
 2. **Against existing PR feedback (from `gh`):** if a finding is already covered by an
    unresolved human comment/review (title/claim overlap or same path+issue):
    - **S1 / S2 (High / Medium):** do **not** put it in the main findings list. Record it
-     for the **Already addressed by other reviewers** section (see below).
+     for the **Already addressed** section (see below).
    - **S3 (Low):** drop silently — do not list it in that section or the main findings.
 3. **Zero kept findings is valid** — still write the coverage table + totals and a
-   short comment saying so. Include the "Already addressed…" section only when there is
+   short comment saying so. Include the "Already addressed" section only when there is
    at least one S1/S2 duplicate.
 
 ## Recommended GitHub action (required)
@@ -144,16 +144,20 @@ Lead with `**C<n> · <Severity> — <claim>.**`, then **at most three sentences*
 disposition in italics (`_Fix before merge._`, `_Fast-follow._`, `_Author's call._`,
 `_Out of scope._`). Order by severity. Never put finding write-ups in a markdown table.
 
-**4. Already addressed by other reviewers (REQUIRED when any S1/S2 duplicates exist;
-omit the whole section if none).** After the main findings list. Only **S1 and S2**
-agent findings that match existing human feedback. Short bullets — claim + who already
-raised it (login or review link when known). Do **not** restate the full finding body.
-Do **not** include S3 duplicates here.
+**4. Already addressed (REQUIRED when any S1/S2 duplicates exist; omit the whole
+section if none).** After the main findings list. Only **S1 and S2** agent findings
+that match existing human feedback. Short bullets — claim + who already raised it.
+Do **not** restate the full finding body. Do **not** include S3 duplicates here.
+
+**First person for the current reviewer (required):** resolve your login from
+`gh api user` (same identity as the review-pass count). When the matching comment or
+review was authored by **you**, attribute it in the first person — **me / myself /
+my earlier review** — never `@your_login`. Only use `@login` for other people.
 
 ```markdown
-### Already addressed by other reviewers
+### Already addressed
 
-- **High — <one-line claim>.** Already raised by @alice in <link or “PR review”>.
+- **High — <one-line claim>.** Already raised by me in <link or “my earlier review”>.
 - **Medium — <one-line claim>.** Already covered by @bob’s comment on `path/file.go`.
 ```
 
@@ -161,7 +165,7 @@ Do **not** include S3 duplicates here.
 one short paragraph: which source review agents/models you merged
 (`{source_runs_label}`), that you used the analysis brief when present, that you
 fetched existing PR feedback with `gh` and deduped against it (including the S1/S2
-already-addressed list), which review pass this is (1st / 2nd / …), and limits.
+Already addressed list), which review pass this is (1st / 2nd / …), and limits.
 
 **6. Suggested split** — heading `## Suggested split`, then one or two sentences
 separating fix-before-merge from follow-ups.

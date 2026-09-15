@@ -231,7 +231,7 @@ DEFAULT_SETTINGS = {
     # batch_review_defaults seeded in init_db (JSON list of {agent,model,effort})
 }
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -551,6 +551,24 @@ def init_db(conn: sqlite3.Connection) -> None:
 
     if prev is not None and prev < 19:
         # Publish draft: disposition lead-in; drop agent/dedup tables from GitHub body.
+        publish_prompt_seed = _default_publish_prompt()
+        if publish_prompt_seed:
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("publish_prompt", publish_prompt_seed),
+            )
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'publish_prompt'",
+                (publish_prompt_seed,),
+            )
+
+    if prev is not None and prev < 20:
+        # First-person attribution for the current reviewer's own prior feedback.
+        if prompt_seed:
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'consolidator_prompt'",
+                (prompt_seed,),
+            )
         publish_prompt_seed = _default_publish_prompt()
         if publish_prompt_seed:
             conn.execute(

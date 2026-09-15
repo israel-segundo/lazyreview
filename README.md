@@ -125,9 +125,11 @@ flowchart TD
 
 ## PR analysis & shared workspaces
 
-lazyreview runs a **PR Analysis** job (orientation brief) before reviews or
-consolidations can start. At most **`max_concurrent_analyses`** (default `2`)
-analyses run at once; the rest stay queued.
+lazyreview runs a **PR Analysis** job (orientation brief) when a PR is first
+added to the system (and whenever you click **Run analysis** / **Retry**). New
+commits on an existing PR do **not** auto-retrigger analysis. At most
+**`max_concurrent_analyses`** (default `2`) analyses run at once; the rest stay
+queued.
 
 Checkouts live under `{data_dir}/workspaces/` (bare mirrors + per-PR worktrees)
 and are reused by analysis and reviews. When a PR is closed or merged, its
