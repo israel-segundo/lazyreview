@@ -288,11 +288,11 @@
     <div class="mt-4">
       <pre x-show="logTab === 'stdout'"
            x-ref="stdout"
-           class="h-[36rem] max-h-[85vh] min-h-[12rem] resize-y overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+           class="h-[min(36rem,60dvh)] max-h-[85dvh] min-h-[12rem] resize-y overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
            x-text="stdout || '(empty)'">{{ initial_stdout or '(empty)' }}</pre>
       <pre x-show="logTab === 'stderr'" {% if run.status != 'failed' %}x-cloak{% endif %}
            x-ref="stderr"
-           class="h-[36rem] max-h-[85vh] min-h-[12rem] resize-y overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+           class="h-[min(36rem,60dvh)] max-h-[85dvh] min-h-[12rem] resize-y overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
            x-text="stderr || '(empty)'">{{ initial_stderr or '(empty)' }}</pre>
     </div>
     </div>

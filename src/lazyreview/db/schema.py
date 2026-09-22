@@ -191,6 +191,28 @@ CREATE TABLE IF NOT EXISTS pr_events (
 
 CREATE INDEX IF NOT EXISTS idx_pr_events_pr ON pr_events(pr_id, id DESC);
 
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  pr_id INTEGER NOT NULL REFERENCES prs(id) ON DELETE CASCADE,
+  analysis_id INTEGER,
+  run_id INTEGER,
+  consolidation_id INTEGER,
+  agent TEXT,
+  model TEXT,
+  effort TEXT,
+  read_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (pr_id) REFERENCES prs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(id DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(read_at, id DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_pr ON notifications(pr_id, kind, id DESC);
+
 CREATE TABLE IF NOT EXISTS agent_model_cache (
   agent TEXT PRIMARY KEY,
   models_json TEXT NOT NULL,
@@ -231,7 +253,7 @@ DEFAULT_SETTINGS = {
     # batch_review_defaults seeded in init_db (JSON list of {agent,model,effort})
 }
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -374,6 +396,28 @@ CREATE TABLE IF NOT EXISTS pr_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pr_events_pr ON pr_events(pr_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  pr_id INTEGER NOT NULL REFERENCES prs(id) ON DELETE CASCADE,
+  analysis_id INTEGER,
+  run_id INTEGER,
+  consolidation_id INTEGER,
+  agent TEXT,
+  model TEXT,
+  effort TEXT,
+  read_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (pr_id) REFERENCES prs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(id DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(read_at, id DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_pr ON notifications(pr_id, kind, id DESC);
         """
     )
 
@@ -587,6 +631,40 @@ def init_db(conn: sqlite3.Connection) -> None:
                 "UPDATE settings SET value = ? WHERE key = 'pr_analysis_prompt'",
                 (analysis_prompt_seed,),
             )
+
+    if prev is not None and prev < 22:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS notifications (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              kind TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT '',
+              title TEXT NOT NULL DEFAULT '',
+              body TEXT NOT NULL DEFAULT '',
+              pr_id INTEGER NOT NULL REFERENCES prs(id) ON DELETE CASCADE,
+              analysis_id INTEGER,
+              run_id INTEGER,
+              consolidation_id INTEGER,
+              agent TEXT,
+              model TEXT,
+              effort TEXT,
+              read_at TEXT,
+              created_at TEXT NOT NULL DEFAULT (datetime('now')),
+              FOREIGN KEY (pr_id) REFERENCES prs(id)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(id DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_notifications_unread "
+            "ON notifications(read_at, id DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_notifications_pr "
+            "ON notifications(pr_id, kind, id DESC)"
+        )
 
     if prev is not None and prev < 10 and prompt_seed:
         conn.execute(

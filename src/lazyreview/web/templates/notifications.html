@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% block title %} — Notifications{% endblock %}
+{% block main_width %}w-full max-w-none md:w-[90%]{% endblock %}
+{% block footer_width %}w-full max-w-none md:w-[90%]{% endblock %}
+{% block content %}
+<div class="space-y-6" x-data="notificationsPage()" x-init="init()">
+  <div class="flex flex-wrap items-end justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">Notifications</h1>
+      <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
+        Job finishes across analyses, review runs, and consolidations — newest first.
+      </p>
+    </div>
+    <div class="flex flex-wrap items-center gap-3 text-sm">
+      <label class="inline-flex items-center gap-2 text-slate-700 dark:text-slate-300">
+        <input type="checkbox" class="rounded border-slate-300"
+               x-model="unreadOnly" @change="onFilterChange()" />
+        Unread only
+      </label>
+      <label class="inline-flex items-center gap-2 text-slate-700 dark:text-slate-300">
+        <span class="text-xs uppercase tracking-wide text-slate-500">Page size</span>
+        <select x-model.number="pageSize" @change="onPageSizeChange()"
+                class="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+          <template x-for="n in pageSizes" :key="n">
+            <option :value="n" x-text="n"></option>
+          </template>
+        </select>
+      </label>
+      <button type="button"
+              class="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs hover:bg-slate-50 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
+              :disabled="!unreadCount || loading"
+              @click="markAllRead()">Mark all as read</button>
+      <span class="text-xs text-slate-500 dark:text-slate-400"
+            x-show="unreadCount > 0" x-cloak
+            x-text="unreadCount + ' unread'"></span>
+    </div>
+  </div>
+
+  <p x-show="error" x-cloak class="text-sm text-red-600 dark:text-red-400" x-text="error"></p>
+
+  <section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <ul class="divide-y divide-slate-100 dark:divide-slate-800">
+      <template x-for="item in items" :key="item.id">
+        <li>
+          <a class="flex gap-3 px-4 py-3 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50"
+             :class="item.unread ? 'bg-sky-50/70 dark:bg-sky-950/30' : ''"
+             :href="item.href"
+             @click="onOpen(item, $event)">
+            <span class="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
+                  :class="item.unread ? 'bg-sky-500' : 'bg-transparent'"
+                  aria-hidden="true"></span>
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <span class="font-medium text-slate-900 dark:text-slate-100"
+                      x-text="item.title"></span>
+                <span class="rounded-full px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
+                      :class="statusPillClass(item.status)"
+                      x-text="item.status || ''"></span>
+              </div>
+              <p class="mt-0.5 truncate text-sm text-slate-600 dark:text-slate-300"
+                 x-text="item.body || ''"></p>
+              <p class="mt-1 text-xs text-slate-400"
+                 :title="formatAbsolute(item.created_at) || ''"
+                 x-text="kindLabel(item.kind) + ' · ' + (formatRelative(item.created_at) || '')"></p>
+            </div>
+          </a>
+        </li>
+      </template>
+      <li x-show="!loading && !items.length" class="px-4 py-10 text-center text-slate-500">
+        <span x-text="unreadOnly ? 'No unread notifications.' : 'No notifications yet.'"></span>
+      </li>
+      <li x-show="loading && !items.length" class="px-4 py-10 text-center text-slate-500">Loading…</li>
+    </ul>
+    <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 text-sm dark:border-slate-800"
+         x-show="total > 0" x-cloak>
+      <span class="text-xs text-slate-500" x-text="rangeLabel()"></span>
+      <div class="flex items-center gap-2">
+        <button type="button"
+                class="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs hover:bg-slate-50 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
+                :disabled="page <= 1 || loading"
+                @click="goPage(page - 1)">Previous</button>
+        <span class="tabular-nums text-xs text-slate-600 dark:text-slate-300"
+              x-text="'Page ' + page + ' of ' + pages"></span>
+        <button type="button"
+                class="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs hover:bg-slate-50 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
+                :disabled="page >= pages || loading"
+                @click="goPage(page + 1)">Next</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+function notificationsPage() {
+  return {
+    items: {{ items | tojson }},
+    total: {{ total | tojson }},
+    page: {{ page | tojson }},
+    pages: {{ pages | tojson }},
+    pageSize: {{ page_size | tojson }},
+    pageSizes: {{ page_sizes | tojson }},
+    unreadOnly: {{ unread_only | tojson }},
+    unreadCount: {{ unread_count | tojson }},
+    loading: false,
+    error: '',
+    init() {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('unread') === '1') this.unreadOnly = true;
+        const ps = Number(params.get('page_size') || this.pageSize);
+        if (this.pageSizes.includes(ps)) this.pageSize = ps;
+        const pg = Number(params.get('page') || this.page);
+        if (Number.isFinite(pg) && pg >= 1) this.page = pg;
+      } catch (_) { /* ignore */ }
+      this.syncUrl();
+    },
+    formatAbsolute(raw) {
+      return (window.LR && window.LR.formatAbsolute) ? window.LR.formatAbsolute(raw) : '';
+    },
+    formatRelative(raw) {
+      return (window.LR && window.LR.formatRelative) ? window.LR.formatRelative(raw) : '';
+    },
+    kindLabel(kind) {
+      if (kind === 'analysis_finished') return 'Analysis';
+      if (kind === 'run_finished') return 'Review run';
+      if (kind === 'consolidation_finished') return 'Consolidation';
+      return kind || 'Job';
+    },
+    statusPillClass(status) {
+      if (status === 'succeeded') return 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200';
+      if (status === 'failed') return 'bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200';
+      if (status === 'cancelled') return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+      return 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400';
+    },
+    rangeLabel() {
+      if (!this.total) return '';
+      const start = (this.page - 1) * this.pageSize + 1;
+      const end = Math.min(this.total, this.page * this.pageSize);
+      return start + '–' + end + ' of ' + this.total;
+    },
+    syncUrl() {
+      const params = new URLSearchParams();
+      if (this.unreadOnly) params.set('unread', '1');
+      if (this.pageSize !== 25) params.set('page_size', String(this.pageSize));
+      if (this.page > 1) params.set('page', String(this.page));
+      const qs = params.toString();
+      const next = window.location.pathname + (qs ? ('?' + qs) : '');
+      if (next !== window.location.pathname + window.location.search) {
+        history.replaceState(null, '', next);
+      }
+    },
+    onFilterChange() {
+      this.page = 1;
+      this.reload();
+    },
+    onPageSizeChange() {
+      this.page = 1;
+      this.reload();
+    },
+    goPage(p) {
+      this.page = Math.max(1, Math.min(this.pages, p));
+      this.reload();
+    },
+    async reload() {
+      this.loading = true;
+      this.error = '';
+      this.syncUrl();
+      try {
+        const qs = new URLSearchParams({
+          limit: String(this.pageSize),
+          offset: String((this.page - 1) * this.pageSize),
+        });
+        if (this.unreadOnly) qs.set('unread_only', 'true');
+        const res = await fetch('/api/notifications?' + qs.toString());
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to load notifications');
+        this.items = data.items || [];
+        this.total = data.total || 0;
+        this.unreadCount = data.unread_count || 0;
+        this.pages = Math.max(1, Math.ceil(this.total / this.pageSize) || 1);
+        if (window.Alpine && Alpine.store('notifications')) {
+          Alpine.store('notifications').setUnread(this.unreadCount);
+        }
+      } catch (e) {
+        this.error = e.message || String(e);
+      } finally {
+        this.loading = false;
+      }
+    },
+    async onOpen(item, ev) {
+      if (!item || !item.unread) return;
+      try {
+        const res = await fetch('/api/notifications/' + item.id + '/read', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && window.Alpine && Alpine.store('notifications')) {
+          Alpine.store('notifications').setUnread(data.unread_count || 0);
+        }
+      } catch (_) { /* navigation still proceeds */ }
+    },
+    async markAllRead() {
+      try {
+        const res = await fetch('/api/notifications/read-all', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to mark all read');
+        this.unreadCount = data.unread_count || 0;
+        if (window.Alpine && Alpine.store('notifications')) {
+          Alpine.store('notifications').setUnread(this.unreadCount);
+        }
+        await this.reload();
+      } catch (e) {
+        this.error = e.message || String(e);
+      }
+    },
+  };
+}
+</script>
+{% endblock %}

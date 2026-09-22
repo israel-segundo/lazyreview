@@ -711,10 +711,14 @@ def list_runs_for_pr(conn: sqlite3.Connection, pr_id: int) -> list[dict[str, Any
 def update_run(conn: sqlite3.Connection, run_id: int, **fields: Any) -> dict[str, Any] | None:
     if not fields:
         return get_run(conn, run_id)
+    prev = get_run(conn, run_id)
     cols = ", ".join(f"{k} = ?" for k in fields)
     conn.execute(f"UPDATE review_runs SET {cols} WHERE id = ?", (*fields.values(), run_id))
     conn.commit()
-    return get_run(conn, run_id)
+    updated = get_run(conn, run_id)
+    if updated is not None:
+        _maybe_notify_run_finished(conn, prev, updated)
+    return updated
 
 
 def reset_run_for_rerun(
@@ -874,13 +878,17 @@ def update_consolidation(
 ) -> dict[str, Any] | None:
     if not fields:
         return get_consolidation(conn, consolidation_id)
+    prev = get_consolidation(conn, consolidation_id)
     cols = ", ".join(f"{k} = ?" for k in fields)
     conn.execute(
         f"UPDATE consolidations SET {cols} WHERE id = ?",
         (*fields.values(), consolidation_id),
     )
     conn.commit()
-    return get_consolidation(conn, consolidation_id)
+    updated = get_consolidation(conn, consolidation_id)
+    if updated is not None:
+        _maybe_notify_consolidation_finished(conn, prev, updated)
+    return updated
 
 
 def record_external_pr_review(
@@ -2085,7 +2093,7 @@ def record_analysis_finished_event(
         "failed": "PR analysis failed",
         "cancelled": "PR analysis cancelled",
     }
-    return create_pr_event(
+    event = create_pr_event(
         conn,
         pr_id=int(analysis["pr_id"]),
         kind="analysis_finished",
@@ -2096,8 +2104,12 @@ def record_analysis_finished_event(
         analysis_id=int(analysis["id"]),
         meta={"status": status},
         created_at=analysis.get("finished_at") or None,
-        commit=commit,
+        commit=False,
     )
+    create_notification_for_analysis(conn, analysis, commit=False)
+    if commit:
+        conn.commit()
+    return event
 
 
 def list_pr_events(conn: sqlite3.Connection, pr_id: int) -> list[dict[str, Any]]:
@@ -2121,3 +2133,411 @@ def _pr_event_dict(row: sqlite3.Row) -> dict[str, Any]:
             meta = {}
     d["meta"] = meta
     return d
+
+
+# --- Notifications ------------------------------------------------------------
+
+_JOB_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
+
+NOTIFICATION_KIND_ANALYSIS = "analysis_finished"
+NOTIFICATION_KIND_RUN = "run_finished"
+NOTIFICATION_KIND_CONSOLIDATION = "consolidation_finished"
+
+_NOTIFICATION_KINDS = frozenset(
+    {
+        NOTIFICATION_KIND_ANALYSIS,
+        NOTIFICATION_KIND_RUN,
+        NOTIFICATION_KIND_CONSOLIDATION,
+    }
+)
+
+
+def _pr_notification_body(pr: dict[str, Any] | None) -> str:
+    if not pr:
+        return ""
+    label = f"{pr.get('repo') or ''}#{pr.get('number') or ''}".strip("#")
+    title = (pr.get("title") or "").strip()
+    if label and title:
+        return f"{label} — {title}"
+    return label or title
+
+
+def notification_href(row: dict[str, Any]) -> str:
+    pr_id = int(row["pr_id"])
+    kind = row.get("kind") or ""
+    if kind == NOTIFICATION_KIND_ANALYSIS:
+        return f"/prs/{pr_id}?tab=overview"
+    if kind == NOTIFICATION_KIND_RUN:
+        return f"/prs/{pr_id}?tab=runs"
+    if kind == NOTIFICATION_KIND_CONSOLIDATION:
+        cid = row.get("consolidation_id")
+        if cid and (row.get("status") or "") == "succeeded":
+            return f"/consolidations/{int(cid)}"
+        return f"/prs/{pr_id}?tab=consolidations"
+    return f"/prs/{pr_id}"
+
+
+def _notification_dict(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    d = dict(row)
+    d["unread"] = not d.get("read_at")
+    d["href"] = notification_href(d)
+    return d
+
+
+def _notification_already_exists(
+    conn: sqlite3.Connection,
+    *,
+    kind: str,
+    analysis_id: int | None = None,
+    run_id: int | None = None,
+    consolidation_id: int | None = None,
+) -> bool:
+    if kind == NOTIFICATION_KIND_ANALYSIS and analysis_id is not None:
+        row = conn.execute(
+            """
+            SELECT 1 AS ok FROM notifications
+            WHERE kind = ? AND analysis_id = ?
+            LIMIT 1
+            """,
+            (kind, int(analysis_id)),
+        ).fetchone()
+        return row is not None
+    if kind == NOTIFICATION_KIND_RUN and run_id is not None:
+        row = conn.execute(
+            """
+            SELECT 1 AS ok FROM notifications
+            WHERE kind = ? AND run_id = ?
+            LIMIT 1
+            """,
+            (kind, int(run_id)),
+        ).fetchone()
+        return row is not None
+    if kind == NOTIFICATION_KIND_CONSOLIDATION and consolidation_id is not None:
+        row = conn.execute(
+            """
+            SELECT 1 AS ok FROM notifications
+            WHERE kind = ? AND consolidation_id = ?
+            LIMIT 1
+            """,
+            (kind, int(consolidation_id)),
+        ).fetchone()
+        return row is not None
+    return False
+
+
+def create_notification(
+    conn: sqlite3.Connection,
+    *,
+    kind: str,
+    pr_id: int,
+    status: str = "",
+    title: str = "",
+    body: str = "",
+    analysis_id: int | None = None,
+    run_id: int | None = None,
+    consolidation_id: int | None = None,
+    agent: str | None = None,
+    model: str | None = None,
+    effort: str | None = None,
+    created_at: str | None = None,
+    commit: bool = True,
+) -> dict[str, Any] | None:
+    """Insert a job-finished notification. Dedupes per job id. Returns None if skipped."""
+    if kind not in _NOTIFICATION_KINDS:
+        return None
+    if _notification_already_exists(
+        conn,
+        kind=kind,
+        analysis_id=analysis_id,
+        run_id=run_id,
+        consolidation_id=consolidation_id,
+    ):
+        return None
+    when = created_at or utcnow()
+    cur = conn.execute(
+        """
+        INSERT INTO notifications (
+          kind, status, title, body, pr_id,
+          analysis_id, run_id, consolidation_id,
+          agent, model, effort, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            kind,
+            status or "",
+            title or "",
+            body or "",
+            int(pr_id),
+            int(analysis_id) if analysis_id is not None else None,
+            int(run_id) if run_id is not None else None,
+            int(consolidation_id) if consolidation_id is not None else None,
+            agent,
+            model,
+            effort,
+            when,
+        ),
+    )
+    if commit:
+        conn.commit()
+    row = conn.execute(
+        "SELECT * FROM notifications WHERE id = ?", (cur.lastrowid,)
+    ).fetchone()
+    assert row is not None
+    return _notification_dict(row)
+
+
+def create_notification_for_analysis(
+    conn: sqlite3.Connection,
+    analysis: dict[str, Any],
+    *,
+    commit: bool = True,
+) -> dict[str, Any] | None:
+    status = (analysis.get("status") or "").strip()
+    if status not in _JOB_TERMINAL_STATUSES:
+        return None
+    pr = get_pr(conn, int(analysis["pr_id"]))
+    verb = {
+        "succeeded": "finished",
+        "failed": "failed",
+        "cancelled": "cancelled",
+    }[status]
+    return create_notification(
+        conn,
+        kind=NOTIFICATION_KIND_ANALYSIS,
+        pr_id=int(analysis["pr_id"]),
+        status=status,
+        title=f"PR analysis {verb}",
+        body=_pr_notification_body(pr),
+        analysis_id=int(analysis["id"]),
+        agent=analysis.get("agent") or None,
+        model=analysis.get("model") or None,
+        effort=analysis.get("effort") or None,
+        created_at=analysis.get("finished_at") or None,
+        commit=commit,
+    )
+
+
+def create_notification_for_run(
+    conn: sqlite3.Connection,
+    run: dict[str, Any],
+    *,
+    commit: bool = True,
+) -> dict[str, Any] | None:
+    status = (run.get("status") or "").strip()
+    if status not in _JOB_TERMINAL_STATUSES:
+        return None
+    pr = get_pr(conn, int(run["pr_id"]))
+    agent = (run.get("agent") or "").strip()
+    model = (run.get("model") or "").strip()
+    combo = " / ".join(p for p in (agent, model) if p)
+    verb = {
+        "succeeded": "finished",
+        "failed": "failed",
+        "cancelled": "cancelled",
+    }[status]
+    title = f"Review run {verb}"
+    if combo:
+        title = f"Review run {verb} ({combo})"
+    return create_notification(
+        conn,
+        kind=NOTIFICATION_KIND_RUN,
+        pr_id=int(run["pr_id"]),
+        status=status,
+        title=title,
+        body=_pr_notification_body(pr),
+        run_id=int(run["id"]),
+        agent=agent or None,
+        model=model or None,
+        effort=run.get("effort") or None,
+        created_at=run.get("finished_at") or None,
+        commit=commit,
+    )
+
+
+def create_notification_for_consolidation(
+    conn: sqlite3.Connection,
+    consolidation: dict[str, Any],
+    *,
+    commit: bool = True,
+) -> dict[str, Any] | None:
+    status = (consolidation.get("status") or "").strip()
+    if status not in _JOB_TERMINAL_STATUSES:
+        return None
+    # External GitHub sync rows are not local jobs.
+    if (consolidation.get("agent") or "").strip().lower() == "external":
+        return None
+    pr = get_pr(conn, int(consolidation["pr_id"]))
+    verb = {
+        "succeeded": "finished",
+        "failed": "failed",
+        "cancelled": "cancelled",
+    }[status]
+    return create_notification(
+        conn,
+        kind=NOTIFICATION_KIND_CONSOLIDATION,
+        pr_id=int(consolidation["pr_id"]),
+        status=status,
+        title=f"Consolidation {verb}",
+        body=_pr_notification_body(pr),
+        consolidation_id=int(consolidation["id"]),
+        agent=consolidation.get("agent") or None,
+        model=consolidation.get("model") or None,
+        effort=consolidation.get("effort") or None,
+        created_at=consolidation.get("finished_at") or None,
+        commit=commit,
+    )
+
+
+def _maybe_notify_run_finished(
+    conn: sqlite3.Connection,
+    prev: dict[str, Any] | None,
+    updated: dict[str, Any],
+) -> None:
+    new_status = (updated.get("status") or "").strip()
+    if new_status not in _JOB_TERMINAL_STATUSES:
+        return
+    old_status = (prev.get("status") or "").strip() if prev else ""
+    if old_status in _JOB_TERMINAL_STATUSES:
+        return
+    create_notification_for_run(conn, updated)
+
+
+def _maybe_notify_consolidation_finished(
+    conn: sqlite3.Connection,
+    prev: dict[str, Any] | None,
+    updated: dict[str, Any],
+) -> None:
+    new_status = (updated.get("status") or "").strip()
+    if new_status not in _JOB_TERMINAL_STATUSES:
+        return
+    old_status = (prev.get("status") or "").strip() if prev else ""
+    if old_status in _JOB_TERMINAL_STATUSES:
+        return
+    create_notification_for_consolidation(conn, updated)
+
+
+def notify_consolidation_finished(
+    conn: sqlite3.Connection, consolidation: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Create a notification after a raw-SQL terminal update (bypassing update_consolidation)."""
+    return create_notification_for_consolidation(conn, consolidation)
+
+
+def list_notifications(
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 15,
+    offset: int = 0,
+    unread_only: bool = False,
+) -> dict[str, Any]:
+    limit = max(1, min(int(limit or 15), 200))
+    offset = max(0, int(offset or 0))
+    where = "WHERE read_at IS NULL" if unread_only else ""
+    total = int(
+        conn.execute(f"SELECT COUNT(*) AS n FROM notifications {where}").fetchone()["n"]
+    )
+    rows = conn.execute(
+        f"""
+        SELECT * FROM notifications
+        {where}
+        ORDER BY id DESC
+        LIMIT ? OFFSET ?
+        """,
+        (limit, offset),
+    ).fetchall()
+    return {
+        "items": [_notification_dict(r) for r in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+def count_unread_notifications(conn: sqlite3.Connection) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM notifications WHERE read_at IS NULL"
+    ).fetchone()
+    return int(row["n"] if row else 0)
+
+
+def get_notification(conn: sqlite3.Connection, notification_id: int) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT * FROM notifications WHERE id = ?", (int(notification_id),)
+    ).fetchone()
+    return _notification_dict(row) if row else None
+
+
+def mark_notification_read(
+    conn: sqlite3.Connection, notification_id: int
+) -> dict[str, Any] | None:
+    row = get_notification(conn, notification_id)
+    if not row:
+        return None
+    if row.get("read_at"):
+        return row
+    when = utcnow()
+    conn.execute(
+        "UPDATE notifications SET read_at = ? WHERE id = ? AND read_at IS NULL",
+        (when, int(notification_id)),
+    )
+    conn.commit()
+    return get_notification(conn, notification_id)
+
+
+def mark_notifications_read_for_pr(
+    conn: sqlite3.Connection,
+    pr_id: int,
+    *,
+    kind: str | None = None,
+) -> int:
+    """Mark unread notifications for a PR (optionally filtered by kind) as read."""
+    if kind is not None and kind not in _NOTIFICATION_KINDS:
+        return 0
+    when = utcnow()
+    if kind:
+        cur = conn.execute(
+            """
+            UPDATE notifications
+            SET read_at = ?
+            WHERE pr_id = ? AND kind = ? AND read_at IS NULL
+            """,
+            (when, int(pr_id), kind),
+        )
+    else:
+        cur = conn.execute(
+            """
+            UPDATE notifications
+            SET read_at = ?
+            WHERE pr_id = ? AND read_at IS NULL
+            """,
+            (when, int(pr_id)),
+        )
+    conn.commit()
+    return int(cur.rowcount or 0)
+
+
+def mark_notification_read_for_consolidation(
+    conn: sqlite3.Connection, consolidation_id: int
+) -> int:
+    when = utcnow()
+    cur = conn.execute(
+        """
+        UPDATE notifications
+        SET read_at = ?
+        WHERE consolidation_id = ? AND read_at IS NULL
+        """,
+        (when, int(consolidation_id)),
+    )
+    conn.commit()
+    return int(cur.rowcount or 0)
+
+
+def mark_all_notifications_read(conn: sqlite3.Connection) -> int:
+    when = utcnow()
+    cur = conn.execute(
+        "UPDATE notifications SET read_at = ? WHERE read_at IS NULL",
+        (when,),
+    )
+    conn.commit()
+    return int(cur.rowcount or 0)

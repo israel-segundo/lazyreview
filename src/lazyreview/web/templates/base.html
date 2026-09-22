@@ -95,21 +95,89 @@
     })();
   </script>
 </head>
-<body class="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-  <header class="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-    <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
-      <a href="/" class="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+<body class="min-h-screen overflow-x-clip bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+  <header class="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+          x-data="{ navOpen: false }"
+          @keydown.escape.window="navOpen = false">
+    <div class="mx-auto flex max-w-7xl items-center justify-between gap-2 px-3 py-3 sm:gap-4 sm:px-4">
+      <a href="/" class="flex min-w-0 items-center gap-2 text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-100">
         <img src="/static/img/logo.png" alt="" width="32" height="32"
              class="h-8 w-8 shrink-0 dark:invert" />
-        <span>lazyreview</span>
+        <span class="truncate">lazyreview</span>
       </a>
-      <div class="flex items-center gap-4">
-        <nav class="flex items-center gap-4 text-sm text-slate-600 dark:text-slate-300">
+      <div class="flex shrink-0 items-center gap-2 sm:gap-3">
+        <nav class="hidden items-center gap-4 text-sm text-slate-600 dark:text-slate-300 md:flex">
           <a class="hover:text-slate-900 dark:hover:text-white" href="/">PRs</a>
           <a class="hover:text-slate-900 dark:hover:text-white" href="/activity">Activity</a>
           <a class="hover:text-slate-900 dark:hover:text-white" href="/analytics">Analytics</a>
           <a class="hover:text-slate-900 dark:hover:text-white" href="/settings">Settings</a>
         </nav>
+        <div class="relative" x-data
+             @keydown.escape.window="$store.notifications.open && $store.notifications.close()">
+          <button type="button"
+                  class="relative inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                  aria-label="Notifications"
+                  :aria-expanded="$store.notifications.open ? 'true' : 'false'"
+                  @click="$store.notifications.toggle()">
+            <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                 stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
+            </svg>
+            <span x-show="$store.notifications.unreadCount > 0"
+                  class="absolute -right-1 -top-1 inline-flex min-w-[1.15rem] items-center justify-center rounded-full bg-sky-600 px-1 text-[10px] font-semibold leading-4 text-white"
+                  x-text="$store.notifications.badgeLabel()"></span>
+          </button>
+          <div x-show="$store.notifications.open"
+               x-cloak
+               x-transition.opacity.duration.150ms
+               @click.outside="$store.notifications.close()"
+               class="lr-notif-panel absolute right-0 z-40 mt-2 w-[22rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
+               role="menu" aria-label="Notifications">
+            <div class="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5 dark:border-slate-800">
+              <span class="text-sm font-semibold text-slate-900 dark:text-slate-100">Notifications</span>
+              <button type="button"
+                      class="text-xs text-sky-600 hover:underline disabled:opacity-40 dark:text-sky-400"
+                      :disabled="!$store.notifications.unreadCount"
+                      @click="$store.notifications.markAllRead()">Mark all as read</button>
+            </div>
+            <ul class="max-h-[min(24rem,60dvh)] divide-y divide-slate-100 overflow-y-auto overscroll-contain dark:divide-slate-800">
+              <template x-for="item in $store.notifications.items" :key="item.id">
+                <li>
+                  <a class="flex gap-2.5 px-3 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60"
+                     :class="item.unread ? 'bg-sky-50/80 dark:bg-sky-950/40' : ''"
+                     :href="item.href"
+                     @click="$store.notifications.openItem(item, $event)">
+                    <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full"
+                          :class="item.unread ? 'bg-sky-500' : 'bg-transparent'"
+                          aria-hidden="true"></span>
+                    <span class="min-w-0 flex-1">
+                      <span class="block truncate text-sm font-medium text-slate-900 dark:text-slate-100"
+                            x-text="item.title"></span>
+                      <span class="mt-0.5 block truncate text-xs text-slate-600 dark:text-slate-300"
+                            x-text="item.body || ''"></span>
+                      <span class="mt-1 block text-[11px] text-slate-400"
+                            x-text="$store.notifications.relative(item.created_at)"></span>
+                    </span>
+                  </a>
+                </li>
+              </template>
+              <li x-show="!$store.notifications.loading && !$store.notifications.items.length"
+                  class="px-3 py-8 text-center text-sm text-slate-500">
+                No notifications yet.
+              </li>
+              <li x-show="$store.notifications.loading && !$store.notifications.items.length"
+                  class="px-3 py-8 text-center text-sm text-slate-500">
+                Loading…
+              </li>
+            </ul>
+            <div class="border-t border-slate-100 px-3 py-2.5 dark:border-slate-800">
+              <a href="/notifications"
+                 class="block text-center text-sm font-medium text-sky-600 hover:underline dark:text-sky-400"
+                 @click="$store.notifications.close()">See more</a>
+            </div>
+          </div>
+        </div>
         <button type="button" id="theme-toggle" aria-label="Toggle theme"
                 class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
           <svg class="h-4 w-4 dark:hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
@@ -119,13 +187,35 @@
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" />
           </svg>
         </button>
+        <button type="button"
+                class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 md:hidden dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                aria-label="Menu"
+                :aria-expanded="navOpen ? 'true' : 'false'"
+                @click="navOpen = !navOpen">
+          <svg x-show="!navOpen" class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+          </svg>
+          <svg x-show="navOpen" x-cloak class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
     </div>
+    <nav x-show="navOpen" x-cloak
+         class="border-t border-slate-200 px-3 py-2 md:hidden dark:border-slate-800"
+         aria-label="Mobile">
+      <div class="mx-auto flex max-w-7xl flex-col gap-1 text-sm">
+        <a class="rounded-lg px-3 py-2.5 text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800" href="/" @click="navOpen = false">PRs</a>
+        <a class="rounded-lg px-3 py-2.5 text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800" href="/activity" @click="navOpen = false">Activity</a>
+        <a class="rounded-lg px-3 py-2.5 text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800" href="/analytics" @click="navOpen = false">Analytics</a>
+        <a class="rounded-lg px-3 py-2.5 text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800" href="/settings" @click="navOpen = false">Settings</a>
+      </div>
+    </nav>
   </header>
-  <main class="mx-auto px-4 py-8 {% block main_width %}max-w-7xl{% endblock %}">
+  <main class="mx-auto w-full px-3 py-4 sm:px-4 sm:py-8 {% block main_width %}max-w-7xl{% endblock %}">
     {% block content %}{% endblock %}
   </main>
-  <footer class="mx-auto px-4 pb-8 text-center text-xs text-slate-400 dark:text-slate-500 {% block footer_width %}max-w-7xl{% endblock %}">
+  <footer class="mx-auto w-full px-3 pb-8 text-center text-xs text-slate-400 dark:text-slate-500 sm:px-4 {% block footer_width %}max-w-7xl{% endblock %}">
     lazyreview {{ version }}
     <span aria-hidden="true"> · </span>
     <a href="/why" class="hover:text-slate-600 hover:underline dark:hover:text-slate-300">Why lazyreview?</a>
@@ -216,6 +306,102 @@
           if (resolve) resolve(this.mode === 'confirm' ? false : undefined);
         }
       });
+
+      Alpine.store('notifications', {
+        open: false,
+        items: [],
+        unreadCount: 0,
+        loading: false,
+        _timer: null,
+        _loadedOnce: false,
+        init() {
+          var self = this;
+          self.refreshCount();
+          self._timer = setInterval(function () { self.refreshCount(); }, 15000);
+        },
+        badgeLabel() {
+          var n = Number(this.unreadCount || 0);
+          if (n <= 0) return '';
+          return n > 99 ? '99+' : String(n);
+        },
+        setUnread(n) {
+          this.unreadCount = Math.max(0, Number(n || 0));
+        },
+        relative(raw) {
+          return (window.LR && window.LR.formatRelative) ? window.LR.formatRelative(raw) : '';
+        },
+        async refreshCount() {
+          try {
+            var res = await fetch('/api/notifications/unread-count');
+            if (!res.ok) return;
+            var data = await res.json();
+            this.setUnread(data.unread_count || 0);
+          } catch (_) { /* ignore */ }
+        },
+        async loadPanel() {
+          this.loading = true;
+          try {
+            var res = await fetch('/api/notifications?limit=15&offset=0');
+            if (!res.ok) return;
+            var data = await res.json();
+            this.items = data.items || [];
+            this.setUnread(data.unread_count || 0);
+            this._loadedOnce = true;
+          } catch (_) { /* ignore */ }
+          finally {
+            this.loading = false;
+          }
+        },
+        toggle() {
+          if (this.open) {
+            this.close();
+            return;
+          }
+          this.open = true;
+          this.loadPanel();
+        },
+        close() {
+          this.open = false;
+        },
+        async openItem(item, ev) {
+          if (!item) return;
+          this.close();
+          if (!item.unread) return;
+          try {
+            var res = await fetch('/api/notifications/' + item.id + '/read', { method: 'POST' });
+            var data = await res.json().catch(function () { return {}; });
+            if (res.ok) this.setUnread(data.unread_count || 0);
+          } catch (_) { /* navigation still proceeds */ }
+        },
+        async markAllRead() {
+          try {
+            var res = await fetch('/api/notifications/read-all', { method: 'POST' });
+            var data = await res.json();
+            if (!res.ok) return;
+            this.setUnread(data.unread_count || 0);
+            this.items = (this.items || []).map(function (n) {
+              return Object.assign({}, n, { unread: false, read_at: n.read_at || (new Date()).toISOString() });
+            });
+          } catch (_) { /* ignore */ }
+        },
+        async markPrRead(prId, kind) {
+          if (!prId) return;
+          try {
+            var res = await fetch('/api/notifications/read-pr/' + prId, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(kind ? { kind: kind } : {}),
+            });
+            var data = await res.json().catch(function () { return {}; });
+            if (res.ok) this.setUnread(data.unread_count || 0);
+          } catch (_) { /* ignore */ }
+        },
+      });
+    });
+    document.addEventListener('alpine:initialized', function () {
+      try {
+        Alpine.store('notifications').init();
+      } catch (_) { /* ignore */ }
     });
     window.lrAlert = function (message, opts) {
       return Alpine.store('dialog').alert(message, opts);

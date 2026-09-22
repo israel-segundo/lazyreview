@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %} — PRs{% endblock %}
-{% block main_width %}w-[90%] max-w-none{% endblock %}
-{% block footer_width %}w-[90%] max-w-none{% endblock %}
+{% block main_width %}w-full max-w-none md:w-[90%]{% endblock %}
+{% block footer_width %}w-full max-w-none md:w-[90%]{% endblock %}
 {% block content %}
 <div class="space-y-6" x-data="homePage()" x-init="init()">
   <div>
@@ -84,7 +84,7 @@
           <th class="px-4 py-3 whitespace-nowrap">Title</th>
           <th class="px-4 py-3 whitespace-nowrap">Author</th>
           <th class="px-4 py-3 whitespace-nowrap"
-              title="Additions and deletions on the PR">Diff</th>
+              title="Additions, deletions, and files changed on the PR">Diff</th>
           <th class="px-4 py-3 whitespace-nowrap">PR status</th>
           <th class="px-4 py-3 whitespace-nowrap">Review status</th>
           <th class="px-4 py-3 whitespace-nowrap"
@@ -105,12 +105,13 @@
             <td class="px-4 py-3 whitespace-nowrap tabular-nums text-xs"
                 :title="diffTitle(pr)">
               <template x-if="hasDiff(pr)">
-                <span>
+                <span class="inline-flex items-center gap-1 whitespace-nowrap">
                   <span class="text-emerald-700 dark:text-emerald-400"
                         x-text="'+' + Number(pr.additions || 0)"></span>
-                  <span class="text-slate-400 dark:text-slate-500"> </span>
                   <span class="text-red-700 dark:text-red-400"
                         x-text="'−' + Number(pr.deletions || 0)"></span>
+                  <span class="text-slate-500 dark:text-slate-400"
+                        x-text="diffFilesLabel(pr)"></span>
                 </span>
               </template>
               <template x-if="!hasDiff(pr)">
@@ -231,14 +232,20 @@ function homePage() {
       return n === 1 ? '1 day' : n + ' days';
     },
     hasDiff(pr) {
-      return pr.additions != null || pr.deletions != null;
+      return pr.additions != null || pr.deletions != null || pr.changed_files != null;
+    },
+    diffFilesLabel(pr) {
+      const files = pr.changed_files;
+      if (files == null || files === '') return '';
+      const n = Number(files);
+      if (Number.isNaN(n)) return '';
+      return '· ' + n + (n === 1 ? ' file' : ' files');
     },
     diffTitle(pr) {
       if (!this.hasDiff(pr)) return '';
-      const files = pr.changed_files;
       const base = '+' + Number(pr.additions || 0) + ' / −' + Number(pr.deletions || 0);
-      if (files == null || files === '') return base;
-      return base + ' · ' + Number(files) + ' files';
+      const files = this.diffFilesLabel(pr);
+      return files ? (base + ' ' + files.replace(/^·\s*/, '')) : base;
     },
     showPriorApproved(pr) {
       const s = pr.internal_status || 'needs_review';

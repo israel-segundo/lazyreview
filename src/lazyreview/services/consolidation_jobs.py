@@ -26,6 +26,7 @@ from lazyreview.db import (
     get_run,
     list_findings,
     mark_runs_consolidated,
+    notify_consolidation_finished,
     update_consolidation,
     utcnow,
 )
@@ -89,7 +90,12 @@ def try_activate_dormant_consolidation(
             (utcnow(), "No source runs to consolidate", consolidation_id),
         )
         conn.commit()
-        return get_consolidation(conn, consolidation_id) if cur.rowcount else None
+        if not cur.rowcount:
+            return None
+        updated = get_consolidation(conn, consolidation_id)
+        if updated:
+            notify_consolidation_finished(conn, updated)
+        return updated
 
     runs_by_id: dict[int, dict[str, Any] | None] = {
         rid: get_run(conn, rid) for rid in source_ids
@@ -125,7 +131,12 @@ def try_activate_dormant_consolidation(
             ),
         )
         conn.commit()
-        return get_consolidation(conn, consolidation_id) if cur.rowcount else None
+        if not cur.rowcount:
+            return None
+        updated = get_consolidation(conn, consolidation_id)
+        if updated:
+            notify_consolidation_finished(conn, updated)
+        return updated
 
     cur = conn.execute(
         """

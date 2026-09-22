@@ -20,6 +20,7 @@ from lazyreview.api import (
     consolidations,
     feedback,
     health,
+    notifications as notifications_api,
     prs,
     runs,
     settings as settings_api,
@@ -165,6 +166,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_api.router, prefix="/api")
     app.include_router(analyses_api.router, prefix="/api")
     app.include_router(activity_api.router, prefix="/api")
+    app.include_router(notifications_api.router, prefix="/api")
 
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
@@ -311,11 +313,24 @@ def create_app() -> FastAPI:
 
     @app.get("/consolidations/{consolidation_id}", response_class=HTMLResponse)
     async def consolidation_detail(request: Request, consolidation_id: int):
-        from lazyreview.db import get_consolidation, get_pr, get_run
+        from lazyreview.db import (
+            get_consolidation,
+            get_pr,
+            get_run,
+            mark_notification_read_for_consolidation,
+        )
 
         consolidation = get_consolidation(request.app.state.db, consolidation_id)
         if not consolidation:
             return HTMLResponse("Consolidation not found", status_code=404)
+        try:
+            mark_notification_read_for_consolidation(
+                request.app.state.db, consolidation_id
+            )
+        except Exception:
+            logger.exception(
+                "failed to mark consolidation %s notifications read", consolidation_id
+            )
         pr = get_pr(request.app.state.db, int(consolidation["pr_id"]))
         source_runs = []
         for rid in consolidation.get("source_run_ids") or []:
@@ -345,6 +360,57 @@ def create_app() -> FastAPI:
                 "consolidation": consolidation,
                 "pr": pr,
                 "source_runs": source_runs,
+                "version": __version__,
+            },
+        )
+
+    @app.get("/notifications", response_class=HTMLResponse)
+    async def notifications_page(request: Request):
+        from lazyreview.db import count_unread_notifications, list_notifications
+
+        try:
+            page = max(1, int(request.query_params.get("page") or 1))
+        except ValueError:
+            page = 1
+        try:
+            page_size = int(request.query_params.get("page_size") or 25)
+        except ValueError:
+            page_size = 25
+        if page_size not in (15, 25, 50, 100):
+            page_size = 25
+        unread_only = str(request.query_params.get("unread") or "") in (
+            "1",
+            "true",
+            "yes",
+        )
+        result = list_notifications(
+            request.app.state.db,
+            limit=page_size,
+            offset=(page - 1) * page_size,
+            unread_only=unread_only,
+        )
+        total = int(result["total"])
+        pages = max(1, (total + page_size - 1) // page_size) if total else 1
+        if page > pages:
+            page = pages
+            result = list_notifications(
+                request.app.state.db,
+                limit=page_size,
+                offset=(page - 1) * page_size,
+                unread_only=unread_only,
+            )
+        return TEMPLATES.TemplateResponse(
+            request,
+            "notifications.html",
+            {
+                "items": result["items"],
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "pages": pages,
+                "page_sizes": [15, 25, 50, 100],
+                "unread_only": unread_only,
+                "unread_count": count_unread_notifications(request.app.state.db),
                 "version": __version__,
             },
         )

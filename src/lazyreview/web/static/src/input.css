@@ -9,6 +9,22 @@
 @source inline("lg:w-80");
 @source inline("xl:grid-cols-3");
 @source inline("sm:col-span-2");
+@source inline("md:flex");
+@source inline("md:hidden");
+@source inline("md:w-[90%]");
+@source inline("overscroll-contain");
+@source inline("break-words");
+@source inline("overflow-x-clip");
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Notification dropdown shell (keep Tailwind from dropping panel constraints). */
+.lr-notif-panel {
+  min-width: 18rem;
+}
 
 /* Modal shells — explicit sizes so a stale Tailwind scan can't drop constraints. */
 .lr-modal-backdrop {
@@ -18,7 +34,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
+  padding: max(0.75rem, env(safe-area-inset-top, 0px))
+           max(0.75rem, env(safe-area-inset-right, 0px))
+           max(0.75rem, env(safe-area-inset-bottom, 0px))
+           max(0.75rem, env(safe-area-inset-left, 0px));
 }
 .lr-modal-panel {
   position: relative;
@@ -27,10 +46,10 @@
   flex-direction: column;
   overflow: hidden;
   width: 100%;
-  min-width: 17.5rem;
+  min-width: 0;
   max-width: min(100%, 42rem);
   height: auto;
-  max-height: 80vh;
+  max-height: min(80vh, 80dvh);
   min-height: 0;
   border-radius: 0.75rem;
   border: 1px solid var(--color-slate-200, #e2e8f0);
@@ -46,7 +65,7 @@
   max-width: min(100%, 64rem);
   width: min(100%, 64rem);
   height: auto;
-  max-height: 80vh;
+  max-height: min(80vh, 80dvh);
   min-height: 0;
 }
 /* Wide modals (consolidation view/submit, logs, run findings): same content-sized height. */
@@ -54,7 +73,7 @@
   width: min(100%, 80vw);
   max-width: min(100%, 80vw);
   height: auto;
-  max-height: 80vh;
+  max-height: min(80vh, 80dvh);
   min-height: 0;
   min-width: 0;
 }
@@ -63,7 +82,7 @@
   width: min(100%, 96vw);
   max-width: min(100%, 96vw);
   height: auto;
-  max-height: 92vh;
+  max-height: min(92vh, 92dvh);
   min-height: 0;
   min-width: 0;
 }
@@ -80,6 +99,8 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   margin-top: 1rem;
   border: 1px solid var(--color-slate-200, #e2e8f0);
   border-radius: 0.75rem;
@@ -151,6 +172,8 @@
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 /* Only for log / source panes — do NOT put this on containers that wrap markup,
    or HTML indentation becomes giant vertical gaps. */
@@ -1160,7 +1183,8 @@
   .lr-settings {
     flex-direction: column;
     height: auto;
-    min-height: auto;
+    min-height: 0;
+    overflow: visible;
   }
   .lr-settings-nav {
     width: 100%;
@@ -1182,14 +1206,32 @@
   }
   .lr-settings-main {
     padding: 1.25rem 1rem;
+    overflow: visible;
+  }
+  /* Drop nested flex-fill on mobile so page scroll works and editors keep height. */
+  .lr-settings-panel--agents,
+  .lr-settings-tab-body,
+  .lr-settings-tab-body--prompt,
+  .lr-prompt-shell,
+  .lr-settings-card.flex {
+    flex: none !important;
+    min-height: 0 !important;
+    overflow: visible !important;
   }
   .lr-prompt-editor {
-    min-height: 18rem;
+    height: min(55dvh, 24rem);
+    min-height: 16rem;
+    max-height: min(70dvh, 28rem);
+  }
+  .lr-prompt-canvas,
+  .lr-prompt-body,
+  .lr-prompt-source {
+    -webkit-overflow-scrolling: touch;
   }
 }
 
 /* —— Consolidation detail page —— */
-/* Lock page scroll: header stays, footer hides, card fills remaining height. */
+/* Lock page scroll on desktop: header stays, footer hides, card fills remaining height. */
 body:has(.lr-consol) {
   display: flex;
   flex-direction: column;
@@ -1291,6 +1333,7 @@ body:has(.lr-consol) > footer {
   min-height: 0;
   padding: 1.25rem 1.5rem 1.5rem;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
 /* Tabs that keep chrome fixed and scroll only the content pane. */
@@ -1377,4 +1420,79 @@ body:has(.lr-consol) > footer {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border-width: 0;
+}
+
+/* —— Mobile: unlock nested scroll traps; prefer document scroll —— */
+@media (max-width: 1023px) {
+  body:has(.lr-consol) {
+    display: block;
+    overflow: auto;
+    height: auto;
+    min-height: 100dvh;
+  }
+  body:has(.lr-consol) > main {
+    display: block;
+    overflow: visible;
+    min-height: 0;
+    padding-bottom: 2rem;
+  }
+  body:has(.lr-consol) > footer {
+    display: block;
+  }
+  .lr-consol,
+  .lr-consol-card,
+  .lr-consol-panels {
+    overflow: visible;
+    min-height: 0;
+    flex: none;
+  }
+  .lr-consol-panel,
+  .lr-consol-panel--fill {
+    overflow: visible;
+    min-height: 0;
+    flex: none;
+    padding: 1rem;
+  }
+  .lr-consol-panel--fill .flex.min-h-0.flex-1.flex-col.overflow-hidden,
+  .lr-consol-panel--fill .min-h-0.flex-1.overflow-auto,
+  .lr-consol-panel--fill .lr-consol-md {
+    overflow: visible !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    flex: none !important;
+  }
+  /* Keep the GitHub draft editor usable with its own scroll region. */
+  .lr-consol-panel--fill .lr-prompt-editor {
+    height: min(55dvh, 22rem);
+    min-height: 14rem;
+    max-height: min(70dvh, 28rem);
+    overflow: hidden;
+  }
+  .lr-consol-panel--fill .lr-prompt-canvas {
+    overflow: hidden;
+    min-height: 0;
+  }
+  .lr-consol-panel--fill .lr-prompt-body,
+  .lr-consol-panel--fill .lr-prompt-source {
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    max-height: none;
+  }
+
+  .lr-pr-sidebar {
+    max-width: 100%;
+  }
+
+  .lr-dialog-backdrop {
+    padding: max(0.75rem, env(safe-area-inset-top, 0px))
+             max(0.75rem, env(safe-area-inset-right, 0px))
+             max(0.75rem, env(safe-area-inset-bottom, 0px))
+             max(0.75rem, env(safe-area-inset-left, 0px));
+  }
+  .lr-dialog-panel {
+    max-width: min(100%, 28rem);
+    max-height: min(80vh, 80dvh);
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 }

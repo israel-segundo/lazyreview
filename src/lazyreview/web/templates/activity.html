@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %} — Activity{% endblock %}
-{% block main_width %}w-[90%] max-w-none{% endblock %}
-{% block footer_width %}w-[90%] max-w-none{% endblock %}
+{% block main_width %}w-full max-w-none md:w-[90%]{% endblock %}
+{% block footer_width %}w-full max-w-none md:w-[90%]{% endblock %}
 {% block content %}
 <div class="space-y-6" x-data="activityPage()" x-init="init()">
   <div class="flex flex-wrap items-end justify-between gap-4">
@@ -35,8 +35,8 @@
 
   <p x-show="error" x-cloak class="text-sm text-red-600 dark:text-red-400" x-text="error"></p>
 
-  <section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-    <ul class="divide-y divide-slate-100 text-sm dark:divide-slate-800">
+  <section class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <ul class="min-w-[28rem] divide-y divide-slate-100 text-sm dark:divide-slate-800 sm:min-w-0">
       <template x-for="item in items" :key="item.kind + '-' + item.id">
         <li class="flex flex-wrap items-center gap-2 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/50">
           <span class="inline-flex items-center gap-1">

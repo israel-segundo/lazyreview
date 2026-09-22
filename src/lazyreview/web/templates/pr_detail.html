@@ -10,10 +10,10 @@
   <a href="/" class="inline-block text-sm text-blue-600 hover:underline dark:text-blue-400">← PRs</a>
 
   {# Full-width title + New Review #}
-  <div class="flex items-start justify-between gap-4">
-    <h1 class="min-w-0 text-2xl font-semibold tracking-tight">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <h1 class="min-w-0 text-xl font-semibold tracking-tight sm:text-2xl">
       <a class="text-blue-600 hover:underline dark:text-blue-400" href="{{ pr.url }}" target="_blank" rel="noopener">{{ pr.repo }}#{{ pr.number }}</a>
-      <span class="ml-1.5 text-slate-900 dark:text-slate-100">{{ pr.title }}</span>
+      <span class="ml-1.5 break-words text-slate-900 dark:text-slate-100">{{ pr.title }}</span>
     </h1>
     <button type="button" @click="openBatchModal()"
             :disabled="!analysisReady"
@@ -132,7 +132,7 @@
         <div class="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-700" role="tablist">
           <template x-for="t in tabItems()" :key="t.id">
             <button type="button" role="tab"
-                    @click="tab = t.id"
+                    @click="setTab(t.id)"
                     :aria-selected="tab === t.id"
                     class="inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors"
                     :class="tab === t.id
@@ -1151,6 +1151,7 @@ function reviewForm() {
     _batchKeySeq: 1,
     toast: '',
     tab: 'overview',
+    prId: {{ pr.id }},
     analysisStatus: {{ (pr.analysis_status or none)|tojson }},
     analysisId: {{ (pr.analysis_id or none)|tojson }},
     analysisError: {{ (pr.analysis_error or '')|tojson }},
@@ -1435,7 +1436,7 @@ function reviewForm() {
       this.tickAnalysis();
       this.analysisPollTimer = setInterval(() => this.tickAnalysis(), 2000);
     },
-    sidebarOpen: true,
+    sidebarOpen: false,
     sidebarAnalysesOpen: true,
     sidebarRunsOpen: true,
     sidebarConsolOpen: true,
@@ -1453,10 +1454,17 @@ function reviewForm() {
         }
       } catch (_) { /* ignore */ }
       this.$nextTick(() => this.ensureTabVisible());
+      this.markTabNotificationsRead();
       try {
-        const saved = localStorage.getItem('lazyreview-pr-sidebar-open');
-        if (saved === '0') this.sidebarOpen = false;
-        else if (saved === '1') this.sidebarOpen = true;
+        const isDesktop = window.matchMedia('(min-width: 1024px)').matches;
+        // Sidebars stay closed on mobile; restore desktop preference only.
+        if (isDesktop) {
+          const saved = localStorage.getItem('lazyreview-pr-sidebar-open');
+          if (saved === '1') this.sidebarOpen = true;
+          else if (saved === '0') this.sidebarOpen = false;
+        } else {
+          this.sidebarOpen = false;
+        }
       } catch (_) { /* ignore */ }
       const toast = sessionStorage.getItem('lazyreview-toast');
       if (toast) {
@@ -1481,10 +1489,42 @@ function reviewForm() {
       this.maybeStartPoll();
       this.pollAnalysis();
     },
+    setTab(id) {
+      this.tab = id;
+      this.markTabNotificationsRead();
+      try {
+        const url = new URL(window.location.href);
+        if (id && id !== 'overview') url.searchParams.set('tab', id);
+        else url.searchParams.delete('tab');
+        history.replaceState(null, '', url.pathname + url.search + url.hash);
+      } catch (_) { /* ignore */ }
+    },
+    notificationKindForTab(tab) {
+      if (tab === 'overview') return 'analysis_finished';
+      if (tab === 'runs') return 'run_finished';
+      if (tab === 'consolidations' || tab === 'findings') return 'consolidation_finished';
+      return null;
+    },
+    markTabNotificationsRead() {
+      const kind = this.notificationKindForTab(this.tab);
+      if (!kind || !this.prId) return;
+      if (window.Alpine && Alpine.store('notifications')) {
+        Alpine.store('notifications').markPrRead(this.prId, kind);
+      } else {
+        fetch('/api/notifications/read-pr/' + this.prId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind }),
+        }).catch(() => {});
+      }
+    },
     setSidebarOpen(open) {
       this.sidebarOpen = !!open;
       try {
-        localStorage.setItem('lazyreview-pr-sidebar-open', this.sidebarOpen ? '1' : '0');
+        // Only persist preference on desktop widths.
+        if (window.matchMedia('(min-width: 1024px)').matches) {
+          localStorage.setItem('lazyreview-pr-sidebar-open', this.sidebarOpen ? '1' : '0');
+        }
       } catch (_) { /* ignore */ }
     },
     tabItems() {
@@ -1533,7 +1573,7 @@ function reviewForm() {
     },
     ensureTabVisible() {
       const ids = new Set(this.tabItems().map(t => t.id));
-      if (!ids.has(this.tab)) this.tab = 'overview';
+      if (!ids.has(this.tab)) this.setTab('overview');
     },
     _cloneJson(value) {
       return JSON.parse(JSON.stringify(value == null ? null : value));
@@ -1693,7 +1733,7 @@ function reviewForm() {
         this.ensureTabVisible();
         // If Findings just became available, land there once.
         if (!prevCount && this.consolidations.length && this.tab === 'overview') {
-          this.tab = 'findings';
+          this.setTab('findings');
         }
         const stillActive = this.consolidations.some(c => this.consolidationIsActive(c.status));
         const stillRunning = this.consolidations.some(c =>
@@ -1804,7 +1844,7 @@ function reviewForm() {
       return items;
     },
     openSidebarAnalysis(id) {
-      this.tab = 'overview';
+      this.setTab('overview');
       this.$nextTick(() => {
         const el = document.getElementById('pr-analysis');
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1820,7 +1860,7 @@ function reviewForm() {
       return s || 'unknown';
     },
     openSidebarRun(id) {
-      this.tab = 'runs';
+      this.setTab('runs');
       this.highlightRunId = Number(id);
       this.$nextTick(() => {
         const el = document.getElementById('run-' + id);
@@ -1834,7 +1874,7 @@ function reviewForm() {
         window.location.href = '/consolidations/' + c.id;
         return;
       }
-      this.tab = 'consolidations';
+      this.setTab('consolidations');
       if (!c) return;
       this.$nextTick(() => this.openConsolLogs(c));
     },
