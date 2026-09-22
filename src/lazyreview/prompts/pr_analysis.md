@@ -81,6 +81,21 @@ Rules:
 - Label diagrams `### Before` / `### After` under `## Diagrams`.
 - Max **two pairs** (four diagrams). Prefer the highest-signal type (often ERD for data PRs, sequence for flow PRs).
 - Bug fix / config / single-module change → one sentence, no diagram.
+- **Mermaid must parse.** A missing diagram beats a broken fence. Follow the syntax guards below or omit the diagram.
+
+**Mermaid syntax guards** (GitHub + Mermaid 11; violations silently fail in the UI):
+
+1. **One quoted label, no nested `"`.** Wrap any label that has spaces, punctuation, `/`, `<br/>`, or shape-confusing chars in a **single** pair of ASCII double quotes:
+   - Good: `TB(["INVALID · ROUTING_ERROR<br/>buyer mismatch"])`
+   - Bad: `TB([INVALID · ROUTING_ERROR<br/>"buyer mismatch"])` — mid-label `"` → parse error (`got 'STR'`)
+   - Bad: `TB(["INVALID · ROUTING_ERROR<br/>"buyer mismatch""])` — nested quotes
+2. **Never put ASCII `"` inside label or edge text.** Drop the quotes or use a single-quoted word (`'buyer'`) if emphasis is needed. Do not write `"buyer/supplier …"` as a phrase inside a node.
+3. **`<br/>` only inside that one quoted label.** Allowed: `ID["line1<br/>line2"]`. Never open a new `"` after `<br/>`.
+4. **Quote labels that contain `( ) [ ] { }`.** Unquoted parens/brackets inside `[…]` / `([…])` / `{…}` break shape parsing. Prefer plain `ID["text"]` over stadium `ID(["text"])` unless the shape matters.
+5. **Node IDs are bare tokens.** Alphanumeric + underscore only (`buyerCheck`, not `buyer check`). Never use reserved IDs: `end`, `subgraph`, `graph`, `flowchart`, `class`, `click`, `style`.
+6. **Edge labels:** `A -->|"no · PRODUCT / SERVICE"| B` — one outer quote pair max; no nested `"`.
+7. **`erDiagram` fields:** no spaces in names (`buyerId`, not `buyer id`); relationship labels are single words or one `"quoted phrase"`.
+8. **Self-check before emitting:** each node/edge line should contain at most **two** `"` characters (the wrapping pair). If you need a third, rewrite the wording. When unsure the fence will parse, skip the diagram and keep the prose.
 
 ### Blast radius & questions
 

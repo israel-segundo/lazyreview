@@ -83,6 +83,8 @@
           <th class="px-4 py-3 whitespace-nowrap">PR</th>
           <th class="px-4 py-3 whitespace-nowrap">Title</th>
           <th class="px-4 py-3 whitespace-nowrap">Author</th>
+          <th class="px-4 py-3 whitespace-nowrap"
+              title="Additions and deletions on the PR">Diff</th>
           <th class="px-4 py-3 whitespace-nowrap">PR status</th>
           <th class="px-4 py-3 whitespace-nowrap">Review status</th>
           <th class="px-4 py-3 whitespace-nowrap"
@@ -100,15 +102,35 @@
             </td>
             <td class="px-4 py-3 text-slate-700 dark:text-slate-300" x-text="pr.title"></td>
             <td class="px-4 py-3 whitespace-nowrap text-slate-600 dark:text-slate-300" x-text="pr.author || '—'"></td>
+            <td class="px-4 py-3 whitespace-nowrap tabular-nums text-xs"
+                :title="diffTitle(pr)">
+              <template x-if="hasDiff(pr)">
+                <span>
+                  <span class="text-emerald-700 dark:text-emerald-400"
+                        x-text="'+' + Number(pr.additions || 0)"></span>
+                  <span class="text-slate-400 dark:text-slate-500"> </span>
+                  <span class="text-red-700 dark:text-red-400"
+                        x-text="'−' + Number(pr.deletions || 0)"></span>
+                </span>
+              </template>
+              <template x-if="!hasDiff(pr)">
+                <span class="text-slate-400 dark:text-slate-500">—</span>
+              </template>
+            </td>
             <td class="px-4 py-3 whitespace-nowrap">
               <span class="rounded-full px-2 py-0.5 text-xs"
                     :class="prStatusClass(pr)"
                     x-text="prStatusLabel(pr)"></span>
             </td>
             <td class="px-4 py-3 whitespace-nowrap">
-              <span class="rounded-full px-2 py-0.5 text-xs"
-                    :class="internalStatusClass(pr)"
-                    x-text="pr.internal_status_label || 'needs review'"></span>
+              <span class="inline-flex flex-wrap items-center gap-1.5">
+                <span class="rounded-full px-2 py-0.5 text-xs"
+                      :class="internalStatusClass(pr)"
+                      x-text="pr.internal_status_label || 'needs review'"></span>
+                <span x-show="showPriorApproved(pr)" x-cloak
+                      class="rounded-full px-2 py-0.5 text-xs bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200"
+                      title="You approved an earlier head of this PR">approved</span>
+              </span>
             </td>
             <td class="px-4 py-3 whitespace-nowrap">
               <span class="inline-flex items-center"
@@ -125,7 +147,7 @@
           </tr>
         </template>
         <tr x-show="filteredPrs.length === 0">
-          <td colspan="7" class="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+          <td colspan="8" class="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
             No PRs match the current filters.
           </td>
         </tr>
@@ -207,6 +229,20 @@ function homePage() {
       const n = Number(pr.age_days);
       if (Number.isNaN(n)) return '—';
       return n === 1 ? '1 day' : n + ' days';
+    },
+    hasDiff(pr) {
+      return pr.additions != null || pr.deletions != null;
+    },
+    diffTitle(pr) {
+      if (!this.hasDiff(pr)) return '';
+      const files = pr.changed_files;
+      const base = '+' + Number(pr.additions || 0) + ' / −' + Number(pr.deletions || 0);
+      if (files == null || files === '') return base;
+      return base + ' · ' + Number(files) + ' files';
+    },
+    showPriorApproved(pr) {
+      const s = pr.internal_status || 'needs_review';
+      return s === 'needs_review' && !!pr.previously_approved;
     },
     prStatusLabel(pr) {
       if (pr.is_draft) return 'draft';

@@ -107,7 +107,7 @@ def _pr_and_run(conn, tmp_path: Path, *, status="succeeded", head="abc"):
 def test_schema_consolidations_and_settings(tmp_path: Path):
     conn = _conn(tmp_path)
     ver = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert ver == SCHEMA_VERSION == 19
+    assert ver == SCHEMA_VERSION == 21
     cols = {
         r["name"]
         for r in conn.execute("PRAGMA table_info(consolidations)").fetchall()
@@ -679,9 +679,11 @@ def test_pr_internal_status_from_submitted_consolidation(tmp_path: Path):
 
     update_consolidation(conn, 1, gh_action="approve")
     assert pr_internal_status(conn, get_pr(conn, pr["id"]))["status"] == "approved"
+    assert list_prs(conn)[0]["previously_approved"] is True
 
     update_consolidation(conn, 1, gh_action="request_changes")
     assert pr_internal_status(conn, get_pr(conn, pr["id"]))["status"] == "changes_requested"
+    assert list_prs(conn)[0]["previously_approved"] is False
 
     # New head → back to needs review even though old consolidation was submitted.
     upsert_pr(
@@ -700,6 +702,56 @@ def test_pr_internal_status_from_submitted_consolidation(tmp_path: Path):
     assert pr_internal_status(conn, refreshed)["status"] == "needs_review"
     listed = list_prs(conn)
     assert listed[0]["internal_status"] == "needs_review"
+    assert listed[0]["previously_approved"] is False
+
+
+def test_previously_approved_survives_new_head(tmp_path: Path):
+    from lazyreview.db import get_pr, list_prs, pr_internal_status, pr_previously_approved
+
+    conn = _conn(tmp_path)
+    pr, run = _pr_and_run(conn, tmp_path, head="deadbeef")
+    create_consolidation(
+        conn,
+        pr_id=pr["id"],
+        head_sha="deadbeef",
+        source_run_ids=[run["id"]],
+        agent="claude",
+        model="haiku",
+        effort="low",
+        workdir_path=str(tmp_path / "cs"),
+    )
+    update_consolidation(
+        conn,
+        1,
+        status="succeeded",
+        body="## ok",
+        feedback_provided=1,
+        gh_action="approve",
+    )
+    assert pr_previously_approved(conn, get_pr(conn, pr["id"])) is True
+
+    upsert_pr(
+        conn,
+        owner="o",
+        repo="r",
+        number=1,
+        url="https://example.com/o/r/pull/1",
+        title="t",
+        base_ref="main",
+        head_ref="feat",
+        head_sha="newhead",
+        additions=42,
+        deletions=7,
+        changed_files=3,
+    )
+    refreshed = get_pr(conn, pr["id"])
+    assert pr_internal_status(conn, refreshed)["status"] == "needs_review"
+    listed = list_prs(conn)[0]
+    assert listed["internal_status"] == "needs_review"
+    assert listed["previously_approved"] is True
+    assert listed["additions"] == 42
+    assert listed["deletions"] == 7
+    assert listed["changed_files"] == 3
 
 
 def test_render_prompt_placeholders():

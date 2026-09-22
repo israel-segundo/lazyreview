@@ -287,6 +287,27 @@ def pr_internal_status(conn: sqlite3.Connection, pr: dict[str, Any]) -> dict[str
     }
 
 
+def pr_previously_approved(conn: sqlite3.Connection, pr: dict[str, Any]) -> bool:
+    """
+    True if this PR ever had a submitted approve (any head).
+
+    Used on the homepage when the current head is needs_review so previously
+    approved PRs can still show an approved badge for prioritization.
+    """
+    row = conn.execute(
+        """
+        SELECT 1 AS ok FROM consolidations
+        WHERE pr_id = ?
+          AND status = 'succeeded'
+          AND feedback_provided = 1
+          AND LOWER(TRIM(COALESCE(gh_action, ''))) = 'approve'
+        LIMIT 1
+        """,
+        (int(pr["id"]),),
+    ).fetchone()
+    return row is not None
+
+
 def head_age_days(head_updated_at: str | None, *, now: datetime | None = None) -> int | None:
     """Whole days since the current head started awaiting review."""
     if not head_updated_at:
@@ -312,6 +333,7 @@ def _attach_internal_status(conn: sqlite3.Connection, pr: dict[str, Any]) -> dic
     out["internal_status"] = info["status"]
     out["internal_status_label"] = info["label"]
     out["feedback_gh_action"] = info["gh_action"]
+    out["previously_approved"] = pr_previously_approved(conn, pr)
     out["age_days"] = head_age_days(out.get("head_updated_at"))
     return out
 

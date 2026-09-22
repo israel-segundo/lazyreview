@@ -231,7 +231,7 @@ DEFAULT_SETTINGS = {
     # batch_review_defaults seeded in init_db (JSON list of {agent,model,effort})
 }
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -578,6 +578,14 @@ def init_db(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "UPDATE settings SET value = ? WHERE key = 'publish_prompt'",
                 (publish_prompt_seed,),
+            )
+
+    if prev is not None and prev < 21:
+        # Analysis prompt: Mermaid syntax guards (no nested quotes / mid-label STR).
+        if analysis_prompt_seed:
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'pr_analysis_prompt'",
+                (analysis_prompt_seed,),
             )
 
     if prev is not None and prev < 10 and prompt_seed:
