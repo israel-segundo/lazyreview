@@ -1,0 +1,228 @@
+{# In-flow right column chat. Parent must be .lr-page-with-chat with Alpine chat mixin. #}
+<aside class="lr-chat-rail"
+       x-ref="chatRail"
+       x-show="chatOpen"
+       x-cloak
+       x-bind:style="chatRailStyle()"
+       role="complementary"
+       aria-label="PR chat"
+       :aria-hidden="!chatOpen">
+  <div class="lr-chat-rail__resize"
+       title="Drag to resize"
+       @pointerdown.prevent="startChatResize($event)"
+       role="separator"
+       aria-orientation="vertical"
+       aria-label="Resize chat"
+       aria-valuemin="0"
+       :aria-valuemin="chatMinWidth()"
+       :aria-valuemax="chatMaxWidth()"
+       :aria-valuenow="chatWidthPx"></div>
+
+  <header class="lr-chat-rail__head">
+    <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Chat</span>
+    <div class="flex items-center gap-1">
+      <template x-if="chatMode === 'challenge' && chatSession && chatSession.status === 'open'">
+        <button type="button" class="rounded px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+                :disabled="chatBusy" @click="finishChat()" title="Write findings and regenerate publish draft">Done</button>
+      </template>
+      <button type="button" class="rounded p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+              @click="chatOpen = false; persistChatOpen()" aria-label="Collapse chat">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="lr-chat-rail__meta border-b border-slate-200 px-3 py-2 text-xs text-slate-500 dark:border-slate-700"
+       x-show="chatSession" x-cloak>
+    <span x-text="chatMode === 'challenge' ? 'Challenge' : 'Explore'"></span>
+    <span aria-hidden="true"> · </span>
+    <span x-text="(chatSession && chatSession.status) || '—'"></span>
+    <template x-if="chatSession && chatSession.working_recommended_action">
+      <span>
+        <span aria-hidden="true"> · </span>
+        <span class="font-medium text-slate-700 dark:text-slate-200"
+              x-text="chatSession.working_recommended_action"></span>
+      </span>
+    </template>
+  </div>
+
+  <div class="lr-chat-rail__turns" x-ref="chatTurns">
+    <template x-if="!chatSession">
+      <div class="px-4 py-8 text-center text-sm text-slate-500">
+        <p class="font-medium text-slate-700 dark:text-slate-300" x-text="chatMode === 'challenge' ? 'Challenge this consolidation' : 'Ask about this PR'"></p>
+        <p class="mt-2">Scoped to this PR’s worktree. Never posts to GitHub.</p>
+        <button type="button" class="mt-4 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+                :disabled="chatBusy" @click="ensureChatSession()">Start</button>
+      </div>
+    </template>
+    <template x-for="t in chatTurns" :key="t.id">
+      <div class="lr-chat-turn"
+           :class="t.role === 'user' ? 'lr-chat-turn--user' : 'lr-chat-turn--assistant'"
+           :title="formatChatTime(t.created_at)">
+        <div class="lr-chat-turn__bubble">
+          <div class="lr-chat-turn__role" x-text="t.role === 'user' ? 'You' : 'Agent'"></div>
+          <div class="lr-chat-turn__body"
+               x-html="renderChatMarkdown(t.text)"></div>
+        </div>
+      </div>
+    </template>
+    <template x-if="chatBusy">
+      <div class="lr-chat-turn lr-chat-turn--assistant">
+        <div class="lr-chat-turn__bubble lr-chat-turn__bubble--pending">
+          <div class="lr-chat-turn__role">Agent</div>
+          <div class="lr-chat-turn__body"><p class="lr-chat-muted">Thinking…</p></div>
+        </div>
+      </div>
+    </template>
+    <template x-if="chatError">
+      <div class="mx-3 mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
+           x-text="chatError"></div>
+    </template>
+  </div>
+
+  <footer class="lr-chat-rail__composer">
+    <form class="lr-chat-box" @submit.prevent="sendChatMessage()">
+      <textarea class="lr-chat-input" rows="3" placeholder="Ask about this PR…"
+                x-model="chatDraft"
+                :disabled="chatBusy || (chatSession && chatSession.status !== 'open')"
+                @input="autoSizeChatInput($event.target)"
+                @keydown.meta.enter.prevent="sendChatMessage()"
+                @keydown.ctrl.enter.prevent="sendChatMessage()"></textarea>
+
+      <div class="lr-chat-box__bar">
+        <div class="lr-chat-box__left">
+          <div class="lr-chat-combo lr-chat-combo--agent"
+               :class="chatOpenCombo === 'agent' ? 'lr-chat-combo--open' : ''"
+               @click.outside="chatCloseCombo('agent')"
+               @keydown.escape.stop="chatCloseCombo('agent')">
+            <button type="button" class="lr-chat-icon-btn"
+                    :disabled="chatBusy"
+                    :aria-expanded="chatOpenCombo === 'agent'"
+                    aria-label="Choose agent"
+                    @click="chatOpenCombo === 'agent' ? chatCloseCombo('agent') : chatOpenAgentCombo()">
+              <span class="lr-chat-agent-icon" aria-hidden="true">
+                <img x-show="agentKey(chatAgent) === LR.AgentName.CLAUDE" x-cloak
+                     src="/static/img/agents/claude.webp" alt="" width="16" height="16">
+                <img x-show="agentKey(chatAgent) === LR.AgentName.AGY" x-cloak
+                     src="/static/img/agents/agy.png" alt="" width="16" height="16">
+                <img x-show="agentKey(chatAgent) === LR.AgentName.CURSOR" x-cloak
+                     class="dark:hidden" src="/static/img/agents/cursor-light.png" alt="" width="16" height="16">
+                <img x-show="agentKey(chatAgent) === LR.AgentName.CURSOR" x-cloak
+                     class="hidden dark:block" src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16">
+                <svg x-show="!chatAgent" x-cloak class="h-4 w-4" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              </span>
+            </button>
+            <ul x-show="chatOpenCombo === 'agent'" x-cloak class="lr-chat-combo__menu lr-chat-combo__menu--up">
+              <template x-for="(a, idx) in chatFilteredAgents()" :key="a.name">
+                <li :class="chatComboOptionClass('agent', idx, a.available === false)"
+                    @mousedown.prevent="chatPickAgent(a)"
+                    @mouseenter="chatComboHighlight = idx">
+                  <span class="lr-chat-agent-icon" aria-hidden="true">
+                    <img x-show="agentKey(a.name) === LR.AgentName.CLAUDE" x-cloak
+                         src="/static/img/agents/claude.webp" alt="" width="14" height="14">
+                    <img x-show="agentKey(a.name) === LR.AgentName.AGY" x-cloak
+                         src="/static/img/agents/agy.png" alt="" width="14" height="14">
+                    <img x-show="agentKey(a.name) === LR.AgentName.CURSOR" x-cloak
+                         class="dark:hidden" src="/static/img/agents/cursor-light.png" alt="" width="14" height="14">
+                    <img x-show="agentKey(a.name) === LR.AgentName.CURSOR" x-cloak
+                         class="hidden dark:block" src="/static/img/agents/cursor-dark.png" alt="" width="14" height="14">
+                  </span>
+                  <span class="lr-chat-combo__option-main">
+                    <span class="lr-chat-combo__option-title"
+                          x-text="(a.display_name || a.name) + (a.available === false ? ' (missing)' : '')"></span>
+                  </span>
+                  <svg x-show="chatAgent === a.name" x-cloak class="lr-chat-combo__check" viewBox="0 0 24 24"
+                       fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+                    <path d="M5 13l4 4L19 7"/>
+                  </svg>
+                </li>
+              </template>
+            </ul>
+          </div>
+        </div>
+
+        <div class="lr-chat-box__right">
+          <div class="lr-chat-combo lr-chat-combo--model"
+               :class="(chatOpenCombo === 'model' || chatOpenCombo === 'effort') ? 'lr-chat-combo--open' : ''"
+               @click.outside="chatCloseCombo('model'); chatCloseCombo('effort')"
+               @keydown.escape.stop="chatCloseCombo('model'); chatCloseCombo('effort')">
+            <button type="button" class="lr-chat-model-pill"
+                    :disabled="chatBusy"
+                    :aria-expanded="chatOpenCombo === 'model' || chatOpenCombo === 'effort'"
+                    @click="(chatOpenCombo === 'model' || chatOpenCombo === 'effort') ? (chatCloseCombo('model'), chatCloseCombo('effort')) : chatOpenModelCombo()">
+              <span class="lr-chat-model-pill__model" x-text="chatModelLabel() || 'Model'"></span>
+              <span class="lr-chat-model-pill__effort" x-show="chatEffort" x-cloak
+                    x-text="chatEffortLabel()"></span>
+            </button>
+
+            <div x-show="chatOpenCombo === 'model'" x-cloak
+                 class="lr-chat-combo__menu lr-chat-combo__menu--up lr-chat-combo__menu--wide">
+              <ul class="lr-chat-combo__list">
+                <template x-for="(m, idx) in chatFilteredModels()" :key="m.id || m">
+                  <li :class="chatComboOptionClass('model', idx, false)"
+                      @mousedown.prevent="chatPickModel(m)"
+                      @mouseenter="chatComboHighlight = idx">
+                    <span class="lr-chat-combo__option-main">
+                      <span class="lr-chat-combo__option-title" x-text="m.label || m.id || m"></span>
+                    </span>
+                    <svg x-show="chatModel === (m.id || m)" x-cloak class="lr-chat-combo__check"
+                         viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                         aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
+                  </li>
+                </template>
+              </ul>
+              <div class="lr-chat-combo__divider" x-show="chatEffortOptions.length" x-cloak></div>
+              <button type="button" class="lr-chat-combo__row"
+                      x-show="chatEffortOptions.length" x-cloak
+                      @mousedown.prevent="chatOpenEffortCombo()">
+                <span>Effort</span>
+                <span class="lr-chat-combo__row-value">
+                  <span x-text="chatEffortLabel() || '—'"></span>
+                  <svg class="lr-chat-combo__chevron" viewBox="0 0 24 24" fill="none"
+                       stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path d="M9 18l6-6-6-6"/>
+                  </svg>
+                </span>
+              </button>
+            </div>
+
+            <div x-show="chatOpenCombo === 'effort'" x-cloak
+                 class="lr-chat-combo__menu lr-chat-combo__menu--up lr-chat-combo__menu--wide">
+              <button type="button" class="lr-chat-combo__row lr-chat-combo__row--back"
+                      @mousedown.prevent="chatOpenModelCombo()">
+                <svg class="lr-chat-combo__chevron lr-chat-combo__chevron--back" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M15 18l-6-6 6-6"/>
+                </svg>
+                <span>Effort</span>
+              </button>
+              <div class="lr-chat-combo__divider"></div>
+              <ul class="lr-chat-combo__list">
+                <template x-for="(e, idx) in chatFilteredEfforts()" :key="e">
+                  <li :class="chatComboOptionClass('effort', idx, false)"
+                      @mousedown.prevent="chatPickEffort(e)"
+                      @mouseenter="chatComboHighlight = idx">
+                    <span class="lr-chat-combo__option-main">
+                      <span class="lr-chat-combo__option-title" x-text="chatEffortLabel(e)"></span>
+                    </span>
+                    <svg x-show="chatEffort === e" x-cloak class="lr-chat-combo__check"
+                         viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                         aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
+                  </li>
+                </template>
+              </ul>
+            </div>
+          </div>
+
+          <button type="submit" class="lr-chat-send"
+                  :disabled="chatBusy || !chatDraft.trim() || (chatSession && chatSession.status !== 'open')"
+                  aria-label="Send">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"
+                 aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          </button>
+        </div>
+      </div>
+    </form>
+  </footer>
+</aside>

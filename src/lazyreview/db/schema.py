@@ -151,6 +151,51 @@ CREATE TABLE IF NOT EXISTS consolidations (
 );
 
 
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pr_id INTEGER NOT NULL REFERENCES prs(id) ON DELETE CASCADE,
+  head_sha TEXT NOT NULL DEFAULT '',
+  mode TEXT NOT NULL DEFAULT 'explore',
+  consolidation_id INTEGER REFERENCES consolidations(id) ON DELETE CASCADE,
+  agent TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  effort TEXT,
+  cli_session_id TEXT,
+  working_findings_json TEXT,
+  working_recommended_action TEXT,
+  working_recommended_action_rationale TEXT,
+  status TEXT NOT NULL DEFAULT 'open',
+  workdir_path TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at TEXT,
+  FOREIGN KEY (pr_id) REFERENCES prs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_pr ON chat_sessions(pr_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_status ON chat_sessions(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_consol ON chat_sessions(consolidation_id);
+
+CREATE TABLE IF NOT EXISTS chat_turns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  text TEXT NOT NULL DEFAULT '',
+  findings_delta TEXT,
+  recommended_action TEXT,
+  recommended_action_rationale TEXT,
+  tool_summary TEXT,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  total_tokens INTEGER,
+  cost_usd REAL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_turns_session ON chat_turns(session_id, id);
+
 CREATE TABLE IF NOT EXISTS pr_analyses (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   pr_id INTEGER NOT NULL REFERENCES prs(id) ON DELETE CASCADE,
@@ -251,9 +296,13 @@ DEFAULT_SETTINGS = {
     "pr_analysis_effort": EffortLevel.HIGH.value,
     # pr_analysis_prompt seeded in init_db from prompts/pr_analysis.md
     # batch_review_defaults seeded in init_db (JSON list of {agent,model,effort})
+    # Interactive chat (Explore / Challenge) — defaults Claude / Opus / high
+    "session_agent": AgentName.CLAUDE.value,
+    "session_model": ClaudeModelAlias.OPUS.value,
+    "session_effort": EffortLevel.HIGH.value,
 }
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -418,6 +467,51 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(id DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(read_at, id DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_pr ON notifications(pr_id, kind, id DESC);
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pr_id INTEGER NOT NULL REFERENCES prs(id) ON DELETE CASCADE,
+  head_sha TEXT NOT NULL DEFAULT '',
+  mode TEXT NOT NULL DEFAULT 'explore',
+  consolidation_id INTEGER REFERENCES consolidations(id) ON DELETE CASCADE,
+  agent TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  effort TEXT,
+  cli_session_id TEXT,
+  working_findings_json TEXT,
+  working_recommended_action TEXT,
+  working_recommended_action_rationale TEXT,
+  status TEXT NOT NULL DEFAULT 'open',
+  workdir_path TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at TEXT,
+  FOREIGN KEY (pr_id) REFERENCES prs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_pr ON chat_sessions(pr_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_status ON chat_sessions(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_consol ON chat_sessions(consolidation_id);
+
+CREATE TABLE IF NOT EXISTS chat_turns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  text TEXT NOT NULL DEFAULT '',
+  findings_delta TEXT,
+  recommended_action TEXT,
+  recommended_action_rationale TEXT,
+  tool_summary TEXT,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  total_tokens INTEGER,
+  cost_usd REAL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_turns_session ON chat_turns(session_id, id);
         """
     )
 

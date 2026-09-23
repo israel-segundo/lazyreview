@@ -30,6 +30,9 @@ class SettingsBody(BaseModel):
     pr_analysis_prompt: str | None = None
     publish_prompt: str | None = None
     batch_review_defaults: list[BatchReviewDefault] | None = None
+    session_agent: str | None = None
+    session_model: str | None = None
+    session_effort: str | None = None
 
 
 @router.get("/settings")
@@ -59,6 +62,9 @@ def write_settings(body: SettingsBody, request: Request):
             pr_analysis_prompt=body.pr_analysis_prompt,
             publish_prompt=body.publish_prompt,
             batch_review_defaults=batch,
+            session_agent=body.session_agent,
+            session_model=body.session_model,
+            session_effort=body.session_effort,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

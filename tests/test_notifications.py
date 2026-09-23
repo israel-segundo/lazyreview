@@ -72,7 +72,7 @@ def _pr(conn):
 def test_schema_has_notifications(tmp_path: Path):
     conn = _conn(tmp_path)
     ver = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert ver == SCHEMA_VERSION == 22
+    assert ver == SCHEMA_VERSION == 23
     cols = {
         r["name"] for r in conn.execute("PRAGMA table_info(notifications)").fetchall()
     }
@@ -106,7 +106,7 @@ def test_run_finish_creates_unread_notification(tmp_path: Path):
     assert item["status"] == "succeeded"
     assert "claude" in item["title"]
     assert "r#42" in item["body"]
-    assert item["href"] == f"/prs/{pr['id']}?tab=runs"
+    assert item["href"] == f"/prs/{pr['id']}?tab=activity"
     assert count_unread_notifications(conn) == 1
 
     # Second terminal update must not duplicate.

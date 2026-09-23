@@ -7,11 +7,11 @@
 {# JSON in a script tag — never dump large markdown into an HTML attribute (breaks Alpine). #}
 <script type="application/json" id="consolidation-data">{{ consolidation | tojson | replace("</", "<\\/") }}</script>
 
-<div class="lr-consol"
+<div class="lr-pr-page space-y-4"
      x-data="consolidationDetail()"
      x-init="init()">
 
-  {# —— Header —— #}
+  {# —— Header (full width; not squeezed by chat) —— #}
   <div class="lr-consol-head flex flex-wrap items-start justify-between gap-3">
     <div>
       {% if pr %}
@@ -44,6 +44,12 @@
       </p>
     </div>
     <div class="flex flex-wrap items-center gap-2">
+      <button type="button"
+              @click="chatOpen ? (chatOpen = false, persistChatOpen()) : openChat()"
+              class="lr-chat-toggle"
+              :class="{ 'is-open': chatOpen }"
+              :aria-expanded="chatOpen"
+              x-text="chatOpen ? 'Hide chat' : 'Chat'"></button>
       {% if consolidation.gh_comment_url %}
       <a href="{{ consolidation.gh_comment_url }}" target="_blank" rel="noopener"
          class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
@@ -52,6 +58,10 @@
       {% endif %}
     </div>
   </div>
+
+  {# Tabbed card + chat share a row #}
+  <div class="lr-page-with-chat" :class="{ 'lr-page-with-chat--open': chatOpen }">
+  <div class="lr-page-with-chat__main">
 
   {# —— Tabbed card —— #}
   <div class="lr-consol-card">
@@ -281,8 +291,15 @@
         </div>
       </div>
     </div>
-  </div>
-</div>
+  </div>{# /.lr-consol-card #}
+
+  </div>{# /.lr-page-with-chat__main #}
+
+{% include "chat_rail.html" %}
+
+  </div>{# /.lr-page-with-chat #}
+
+</div>{# /.lr-pr-page #}
 
 <script>
 function consolidationDetail() {
@@ -293,7 +310,12 @@ function consolidationDetail() {
   } catch (e) {
     console.warn('failed to parse consolidation JSON', e);
   }
-  return {
+  return Object.assign({}, (window.LR && window.LR.chatRailMixin) ? window.LR.chatRailMixin({
+    mode: 'explore',
+    prId: {{ pr.id if pr else 'null' }},
+    storageKey: 'lazyreview-chat-open-pr-{{ pr.id if pr else consolidation.id }}',
+    defaultOpen: true,
+  }) : {}, {
     c: initial || {},
     publishBody: (initial && initial.publish_body) || '',
     verdict: 'comment',
@@ -306,6 +328,7 @@ function consolidationDetail() {
     _poll: null,
     _edited: false,
     init() {
+      if (typeof this.initChatRail === 'function') this.initChatRail();
       const rec = (this.c && this.c.recommended_action) || 'comment';
       this.verdict = ['approve', 'request_changes', 'comment'].includes(rec) ? rec : 'comment';
       for (const label of ['High', 'Medium', 'Low']) {
@@ -496,7 +519,7 @@ function consolidationDetail() {
         this.posting = false;
       }
     },
-  };
+  });
 }
 </script>
 {% endblock %}

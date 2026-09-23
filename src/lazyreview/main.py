@@ -23,6 +23,7 @@ from lazyreview.api import (
     notifications as notifications_api,
     prs,
     runs,
+    sessions as sessions_api,
     settings as settings_api,
 )
 from lazyreview.config import get_settings
@@ -37,6 +38,7 @@ from lazyreview.services.pr_workspace import WorkspacePruner
 from lazyreview.api import analyses as analyses_api
 from lazyreview.services.pr_sync import PrSyncer
 from lazyreview.services.retention import RetentionSweeper
+from lazyreview.services.session_jobs import SessionRunner
 from lazyreview.web.formatters import format_cost_usd, format_duration_ms
 from lazyreview.agents.names import (
     AgentName,
@@ -88,6 +90,8 @@ def create_app() -> FastAPI:
         runner = JobRunner(settings, conn)  # type: ignore[arg-type]
         consolidation_runner = ConsolidationRunner(settings, conn)  # type: ignore[arg-type]
         analysis_runner = AnalysisRunner(settings, conn)  # type: ignore[arg-type]
+        session_runner = SessionRunner(settings, conn)  # type: ignore[arg-type]
+        session_runner.bind_consolidation_runner(consolidation_runner)
         workspace_pruner = WorkspacePruner(settings, conn)  # type: ignore[arg-type]
         runner.on_run_finished = consolidation_runner.notify_run_finished
         sweeper = RetentionSweeper(
@@ -101,6 +105,7 @@ def create_app() -> FastAPI:
         app.state.jobs = runner
         app.state.consolidations = consolidation_runner
         app.state.analyses = analysis_runner
+        app.state.session_runner = session_runner
         app.state.workspace_pruner = workspace_pruner
         app.state.sweeper = sweeper
         app.state.pr_syncer = pr_syncer
@@ -167,6 +172,7 @@ def create_app() -> FastAPI:
     app.include_router(analyses_api.router, prefix="/api")
     app.include_router(activity_api.router, prefix="/api")
     app.include_router(notifications_api.router, prefix="/api")
+    app.include_router(sessions_api.router, prefix="/api")
 
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
@@ -313,10 +319,11 @@ def create_app() -> FastAPI:
 
     @app.get("/consolidations/{consolidation_id}", response_class=HTMLResponse)
     async def consolidation_detail(request: Request, consolidation_id: int):
+        """Legacy URL — review happens on the PR Findings / Activity tabs."""
+        from fastapi.responses import RedirectResponse
+
         from lazyreview.db import (
             get_consolidation,
-            get_pr,
-            get_run,
             mark_notification_read_for_consolidation,
         )
 
@@ -331,37 +338,12 @@ def create_app() -> FastAPI:
             logger.exception(
                 "failed to mark consolidation %s notifications read", consolidation_id
             )
-        pr = get_pr(request.app.state.db, int(consolidation["pr_id"]))
-        source_runs = []
-        for rid in consolidation.get("source_run_ids") or []:
-            run = get_run(request.app.state.db, int(rid))
-            if run:
-                source_runs.append(run)
-            else:
-                source_runs.append(
-                    {
-                        "id": int(rid),
-                        "status": "",
-                        "agent": "",
-                        "model": "",
-                        "effort": None,
-                        "findings_sev1": 0,
-                        "findings_sev2": 0,
-                        "findings_sev3": 0,
-                        "total_tokens": None,
-                        "cost_usd": None,
-                        "duration_ms": None,
-                    }
-                )
-        return TEMPLATES.TemplateResponse(
-            request,
-            "consolidation_detail.html",
-            {
-                "consolidation": consolidation,
-                "pr": pr,
-                "source_runs": source_runs,
-                "version": __version__,
-            },
+        pr_id = int(consolidation["pr_id"])
+        status = (consolidation.get("status") or "").strip()
+        tab = "findings" if status == "succeeded" else "activity"
+        return RedirectResponse(
+            url=f"/prs/{pr_id}?tab={tab}&consolidation={consolidation_id}",
+            status_code=302,
         )
 
     @app.get("/notifications", response_class=HTMLResponse)

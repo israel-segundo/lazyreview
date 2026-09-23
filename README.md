@@ -87,9 +87,10 @@ flowchart TB
   Daemon -->|feedback_actions| DB
 ```
 
-- **One worktree per PR** — created lazily, held while analysis or review jobs run, reused across agents for the same head.
+- **One worktree per PR** — created lazily, held while analysis, review, or interactive chat sessions run, reused across agents for the same head.
 - **SQLite is the handoff** — consolidate does not re-read the worktree; it loads the brief and findings from the DB into `consolidations/{id}/`.
-- **Human challenges stay local** — edit or regenerate the draft against that consolidation dir + DB until you post.
+- **Interactive chat** — right-rail Explore (PR Q&A) and Challenge (adversarial rounds over consolidation findings). Turns + working findings live in SQLite; Done writes findings/action and re-runs the publish transform. Never auto-posts.
+- **Human challenges stay local** — edit, chat, or regenerate the draft until you post.
 
 ## Prompt chaining
 
@@ -112,8 +113,9 @@ flowchart TD
 1. **Analysis** — orientation brief for the current head (intent, coverage, blast radius).
 2. **Reviews** — independent agentic passes; findings stored per run.
 3. **Consolidate** — dedupe across runs and existing PR comments; emit an internal report plus `meta.json`.
-4. **Publish** — rewrite that report into concise GitHub-facing markdown (still local).
-5. **Submit** — you choose the action (`approve` / `request_changes` / `comment`), edit the draft, and post via `gh`. Never auto-posted.
+4. **Chat (optional)** — Explore the PR worktree, or Challenge findings / recommended action in rounds; Done syncs findings and regenerates the publish draft.
+5. **Publish** — rewrite that report into concise GitHub-facing markdown (still local).
+6. **Submit** — you choose the action (`approve` / `request_changes` / `comment`), edit the draft, and post via `gh`. Never auto-posted.
 
 ## Prerequisites
 
@@ -211,10 +213,11 @@ lazyreview start|stop|restart|status|enable|disable
 - Config: `~/.config/lazyreview/config.toml`
 - DB: `{data_dir}/lazyreview.db` (default under `~/.local/share/lazyreview/`)
 - Runs: `{data_dir}/runs/{id}/` (prompt, logs, findings, report)
+- Chat sessions: `{data_dir}/sessions/{id}/` (round prompts, logs)
 - Clone `repo/` is removed when each run finishes
 
 ## Settings (UI)
 
-`/settings` — default agents/models/effort, editable analysis / consolidator /
-publish prompts, and run retention (default 1 week). Hourly daemon sweep +
-**Purge old runs now**.
+`/settings` — default agents/models/effort (including interactive chat defaults),
+editable analysis / consolidator / publish prompts, and retention for finished runs
+**and** chat sessions (default 1 week). Hourly daemon sweep + **Purge old runs now**.

@@ -11,7 +11,14 @@ from pathlib import Path
 from typing import Any
 
 from lazyreview.config import Settings
-from lazyreview.db import delete_run, get_setting, list_purgeable_runs
+from lazyreview.db import (
+    delete_chat_session,
+    delete_run,
+    get_setting,
+    list_purgeable_chat_sessions,
+    list_purgeable_runs,
+)
+from lazyreview.services.session_jobs import sessions_dir
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +86,41 @@ def purge_old_runs(conn: sqlite3.Connection, settings: Settings) -> dict[str, An
                         shutil.rmtree(child, ignore_errors=True)
                         orphans += 1
 
+    # Interactive chat sessions (same retention window)
+    sessions = list_purgeable_chat_sessions(conn, cutoff)
+    deleted_sessions = 0
+    freed_session_dirs = 0
+    for sess in sessions:
+        workdir = sess.get("workdir_path")
+        delete_chat_session(conn, int(sess["id"]))
+        deleted_sessions += 1
+        if workdir:
+            p = Path(workdir)
+            if p.exists():
+                shutil.rmtree(p, ignore_errors=True)
+                freed_session_dirs += 1
+
+    session_orphans = 0
+    sdir = sessions_dir(settings)
+    if sdir.exists():
+        known_sess = {
+            str(r["id"])
+            for r in conn.execute("SELECT id FROM chat_sessions").fetchall()
+        }
+        for child in sdir.iterdir():
+            if not child.is_dir() or not child.name.isdigit():
+                continue
+            if child.name not in known_sess:
+                shutil.rmtree(child, ignore_errors=True)
+                session_orphans += 1
+
     return {
         "deleted_runs": deleted,
         "removed_dirs": freed_dirs,
         "orphan_dirs": orphans,
+        "deleted_sessions": deleted_sessions,
+        "removed_session_dirs": freed_session_dirs,
+        "orphan_session_dirs": session_orphans,
         "cutoff": cutoff,
         "policy": f"{value} {unit}",
     }

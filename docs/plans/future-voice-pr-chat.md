@@ -1,12 +1,17 @@
-# Future: voice + chat consensus before publish
+# Future: voice I/O on interactive sessions
 
-Design-only roadmap. **Not implemented** in the consolidation/publish Phase 1 work.
+**Status:** The **text + worktree** path is implemented as Interactive PR sessions
+(Explore / Challenge chat in the webapp — see plan “Interactive PR sessions”).
+This file keeps the **voice** extension only.
 
-## Goal
+Voice remains an input/output skin on the same text turns:
 
-Let a human (and later voice) refine analysis + findings + the internal consolidation
-report **before** the publish transform runs, so the GitHub draft reflects a settled
-consensus rather than the first agent pass.
+```text
+mic → SpeechToText.transcribe → POST .../messages (text)
+assistant turn text → TextToSpeech.synthesize → play in browser
+```
+
+Do not add a separate voice agent path. Turns stay plain text in SQLite.
 
 ## Suggested sequence
 

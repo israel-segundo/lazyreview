@@ -73,9 +73,10 @@
         </div>
 
         <div class="lr-settings-card">
-          <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Run retention</h2>
+          <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Run &amp; chat retention</h2>
           <p class="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
-            Finished runs older than this window are deleted automatically. In-flight runs are never purged.
+            Finished review runs and interactive chat sessions older than this window are deleted
+            (DB rows and on-disk session dirs). In-flight runs are never purged.
           </p>
           <div class="mt-4 flex flex-wrap items-end gap-3">
             <div>
@@ -156,6 +157,11 @@
                 :class="agentsTab === 'analysis' && 'lr-settings-tab--active'"
                 :aria-selected="agentsTab === 'analysis'"
                 @click="agentsTab = 'analysis'">PR analysis</button>
+        <button type="button" role="tab"
+                class="lr-settings-tab"
+                :class="agentsTab === 'chat' && 'lr-settings-tab--active'"
+                :aria-selected="agentsTab === 'chat'"
+                @click="agentsTab = 'chat'">Chat</button>
         <button type="button" role="tab"
                 class="lr-settings-tab"
                 :class="agentsTab === 'publish' && 'lr-settings-tab--active'"
@@ -633,6 +639,129 @@
         </div>
       </div>
 
+      {# Chat tab — interactive Explore/Challenge defaults #}
+      <div x-show="agentsTab === 'chat'" x-cloak class="lr-settings-tab-body" role="tabpanel">
+        <div class="lr-settings-card">
+          <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Interactive chat defaults</h2>
+          <p class="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
+            Default agent / model / effort for Explore and Challenge chat (factory default:
+            <strong>claude / opus / high</strong>). Per-conversation dropdowns can override.
+            Chat is sandboxed to the PR worktree and never posts to GitHub.
+          </p>
+          <div class="mt-4 grid gap-3 sm:grid-cols-3">
+            <div class="relative overflow-visible"
+                 :class="sessionOpenCombo === 'agent' ? 'z-30' : 'z-10'"
+                 @click.outside="sessionCloseCombo('agent')" @keydown.escape.stop="sessionCloseCombo('agent')">
+              <label class="block text-xs font-medium text-slate-600 dark:text-slate-300" for="sc-agent">Agent</label>
+              <div class="mt-1 flex w-full items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-950"
+                   :class="sessionOpenCombo === 'agent' && 'ring-2 ring-slate-400/40'">
+                <span class="inline-flex shrink-0 items-center" x-show="sessionAgent" x-cloak aria-hidden="true">
+                  <img x-show="agentKey(sessionAgent) === LR.AgentName.CLAUDE" x-cloak
+                       src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain" />
+                  <img x-show="agentKey(sessionAgent) === LR.AgentName.AGY" x-cloak
+                       src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain" />
+                  <img x-show="agentKey(sessionAgent) === LR.AgentName.CURSOR" x-cloak
+                       src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+                  <img x-show="agentKey(sessionAgent) === LR.AgentName.CURSOR" x-cloak
+                       src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+                </span>
+                <input id="sc-agent" type="text" autocomplete="off" role="combobox"
+                       :aria-expanded="sessionOpenCombo === 'agent'"
+                       x-model="sessionAgentQuery"
+                       @focus="sessionOpenAgentCombo()" @click="sessionOpenAgentCombo()" @input="sessionOnAgentFilter()"
+                       @keydown.arrow-down.prevent="sessionComboMove('agent', 1)"
+                       @keydown.arrow-up.prevent="sessionComboMove('agent', -1)"
+                       @keydown.enter.prevent="sessionComboConfirm('agent')"
+                       placeholder="Filter agents…"
+                       class="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none focus:ring-0 dark:bg-transparent" />
+              </div>
+              <ul x-show="sessionOpenCombo === 'agent'" x-cloak
+                  class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
+                <template x-for="(a, idx) in sessionFilteredAgents()" :key="a.name">
+                  <li :class="sessionComboOptionClass('agent', idx, !a.available)"
+                      @mousedown.prevent="sessionPickAgent(a)"
+                      @mouseenter="sessionComboHighlight = idx">
+                    <span class="inline-flex shrink-0 items-center" aria-hidden="true">
+                      <img x-show="agentKey(a.name) === LR.AgentName.CLAUDE" x-cloak
+                           src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                           class="h-4 w-4 shrink-0 object-contain" />
+                      <img x-show="agentKey(a.name) === LR.AgentName.AGY" x-cloak
+                           src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                           class="h-4 w-4 shrink-0 object-contain" />
+                      <img x-show="agentKey(a.name) === LR.AgentName.CURSOR" x-cloak
+                           src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                           class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+                      <img x-show="agentKey(a.name) === LR.AgentName.CURSOR" x-cloak
+                           src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                           class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+                    </span>
+                    <span x-text="a.display_name + (a.available ? '' : ' (missing)')"></span>
+                  </li>
+                </template>
+              </ul>
+            </div>
+            <div class="relative overflow-visible"
+                 :class="sessionOpenCombo === 'model' ? 'z-30' : 'z-10'"
+                 @click.outside="sessionCloseCombo('model')" @keydown.escape.stop="sessionCloseCombo('model')">
+              <label class="block text-xs font-medium text-slate-600 dark:text-slate-300" for="sc-model">Model</label>
+              <input id="sc-model" type="text" autocomplete="off" role="combobox"
+                     :aria-expanded="sessionOpenCombo === 'model'"
+                     x-model="sessionModelQuery"
+                     @focus="sessionOpenModelCombo()" @click="sessionOpenModelCombo()" @input="sessionOnModelFilter()"
+                     @keydown.arrow-down.prevent="sessionComboMove('model', 1)"
+                     @keydown.arrow-up.prevent="sessionComboMove('model', -1)"
+                     @keydown.enter.prevent="sessionComboConfirm('model')"
+                     placeholder="Filter models…"
+                     class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950" />
+              <ul x-show="sessionOpenCombo === 'model'" x-cloak
+                  class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
+                <template x-for="(m, idx) in sessionFilteredModels()" :key="m.id">
+                  <li :class="sessionComboOptionClass('model', idx, false)"
+                      @mousedown.prevent="sessionPickModel(m)"
+                      @mouseenter="sessionComboHighlight = idx"
+                      x-text="m.label"></li>
+                </template>
+              </ul>
+            </div>
+            <div class="relative overflow-visible"
+                 :class="sessionOpenCombo === 'effort' ? 'z-30' : 'z-10'"
+                 @click.outside="sessionCloseCombo('effort')" @keydown.escape.stop="sessionCloseCombo('effort')">
+              <label class="block text-xs font-medium text-slate-600 dark:text-slate-300" for="sc-effort">Effort</label>
+              <input id="sc-effort" type="text" autocomplete="off" role="combobox"
+                     :aria-expanded="sessionOpenCombo === 'effort'"
+                     x-model="sessionEffortQuery"
+                     :disabled="!sessionEfforts.length"
+                     @focus="sessionOpenEffortCombo()" @click="sessionOpenEffortCombo()" @input="sessionOnEffortFilter()"
+                     @keydown.arrow-down.prevent="sessionComboMove('effort', 1)"
+                     @keydown.arrow-up.prevent="sessionComboMove('effort', -1)"
+                     @keydown.enter.prevent="sessionComboConfirm('effort')"
+                     :placeholder="sessionEfforts.length ? 'Filter effort…' : 'n/a for this model'"
+                     class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50 dark:border-slate-600 dark:bg-slate-950" />
+              <ul x-show="sessionOpenCombo === 'effort' && sessionEfforts.length" x-cloak
+                  class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
+                <template x-for="(e, idx) in sessionFilteredEfforts()" :key="e">
+                  <li :class="sessionComboOptionClass('effort', idx, false)"
+                      @mousedown.prevent="sessionPickEffort(e)"
+                      @mouseenter="sessionComboHighlight = idx"
+                      x-text="e"></li>
+                </template>
+              </ul>
+            </div>
+          </div>
+          <div class="mt-4 flex flex-wrap items-center gap-3">
+            <button type="button" @click="saveSessionDefaults()"
+                    class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+              Save
+            </button>
+            <span class="text-sm text-slate-500 dark:text-slate-400" x-text="sessionMsg"></span>
+          </div>
+        </div>
+      </div>
+
       {# Publish tab #}
       <div x-show="agentsTab === 'publish'" x-cloak class="lr-settings-tab-body lr-settings-tab-body--prompt" role="tabpanel">
         <div class="lr-prompt-shell">
@@ -739,6 +868,17 @@ function settingsPage() {
     defaultConsolidatorPrompt: {{ (settings.consolidator_prompt_default|default(''))|tojson }},
     consolidatorMsg: '',
     analysisAgent: {{ (settings.pr_analysis_agent|default(AgentName.CLAUDE.value))|tojson }},
+    sessionAgent: {{ (settings.session_agent|default(AgentName.CLAUDE.value))|tojson }},
+    sessionModel: {{ (settings.session_model|default(ClaudeModelAlias.OPUS.value))|tojson }},
+    sessionEffort: {{ (settings.session_effort|default(EffortLevel.HIGH.value))|tojson }},
+    sessionMsg: '',
+    sessionModels: [],
+    sessionEfforts: [],
+    sessionOpenCombo: null,
+    sessionAgentQuery: '',
+    sessionModelQuery: '',
+    sessionEffortQuery: '',
+    sessionComboHighlight: -1,
     analysisModel: {{ (settings.pr_analysis_model|default(ClaudeModelAlias.OPUS.value))|tojson }},
     analysisEffort: {{ (settings.pr_analysis_effort|default(EffortLevel.HIGH.value))|tojson }},
     analysisPrompt: {{ (settings.pr_analysis_prompt|default(''))|tojson }},
@@ -788,6 +928,12 @@ function settingsPage() {
       }
       this.analysisOnAgentChange(false);
       this.analysisSyncComboQueries();
+      if (!this.agents.find(a => a.name === this.sessionAgent)) {
+        const firstS = this.agents.find(a => a.available) || this.agents[0];
+        if (firstS) this.sessionAgent = firstS.name;
+      }
+      this.sessionOnAgentChange(false);
+      this.sessionSyncComboQueries();
       this.cfgRows = this._cfgRowsFromDefaults(
         JSON.parse(JSON.stringify(this.batchDefaultsSeed || []))
       );
@@ -1119,6 +1265,169 @@ function settingsPage() {
       this.analysisPrompt = data.pr_analysis_prompt || '';
       this.analysisMsg = 'Saved.';
       setTimeout(() => { this.analysisMsg = ''; }, 2500);
+    },
+
+    async saveSessionDefaults() {
+      this.sessionMsg = 'Saving…';
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          session_agent: this.sessionAgent,
+          session_model: this.sessionModel,
+          session_effort: this.sessionEffort || '',
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) { await lrAlert(data.detail || 'save failed', { title: 'Save failed' }); this.sessionMsg = ''; return; }
+      this.sessionAgent = data.session_agent;
+      this.sessionModel = data.session_model;
+      this.sessionEffort = data.session_effort || '';
+      this.sessionOnAgentChange(false);
+      this.sessionSyncComboQueries();
+      this.sessionMsg = 'Saved.';
+      setTimeout(() => { this.sessionMsg = ''; }, 2500);
+    },
+
+    sessionCloseCombo(which) {
+      if (this.sessionOpenCombo === which) {
+        this.sessionOpenCombo = null;
+        this.sessionComboHighlight = -1;
+        this.sessionSyncComboQueries();
+      }
+    },
+    sessionSyncComboQueries() {
+      if (this.sessionOpenCombo !== 'agent') this.sessionAgentQuery = this.sessionAgentLabel();
+      if (this.sessionOpenCombo !== 'model') this.sessionModelQuery = this.sessionModelLabel();
+      if (this.sessionOpenCombo !== 'effort') this.sessionEffortQuery = this.sessionEffort || '';
+    },
+    sessionAgentLabel() {
+      const a = this.agents.find(x => x.name === this.sessionAgent);
+      if (!a) return this.sessionAgent || '';
+      return a.display_name + (a.available ? '' : ' (missing)');
+    },
+    sessionModelLabel() {
+      const m = this.sessionModels.find(x => x.id === this.sessionModel);
+      return m ? m.label : (this.sessionModel || '');
+    },
+    sessionFilteredAgents() {
+      const q = this.sessionOpenCombo === 'agent' ? this.sessionAgentQuery : '';
+      return this.agents.filter(a =>
+        this._match(a.display_name, q) || this._match(a.name, q)
+      );
+    },
+    sessionFilteredModels() {
+      const q = this.sessionOpenCombo === 'model' ? this.sessionModelQuery : '';
+      return this.sessionModels.filter(m =>
+        this._match(m.label, q) || this._match(m.id, q)
+      );
+    },
+    sessionFilteredEfforts() {
+      const q = this.sessionOpenCombo === 'effort' ? this.sessionEffortQuery : '';
+      return this.sessionEfforts.filter(e => this._match(e, q));
+    },
+    sessionComboOptions(which) {
+      if (which === 'agent') return this.sessionFilteredAgents();
+      if (which === 'model') return this.sessionFilteredModels();
+      return this.sessionFilteredEfforts();
+    },
+    sessionComboOptionClass(which, idx, disabled) {
+      const base = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-sm ';
+      if (disabled) return base + 'cursor-not-allowed text-slate-400 dark:text-slate-500';
+      if (this.sessionOpenCombo === which && this.sessionComboHighlight === idx) {
+        return base + 'bg-blue-50 text-blue-900 dark:bg-blue-950 dark:text-blue-100';
+      }
+      return base + 'text-slate-800 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800';
+    },
+    sessionOpenAgentCombo() { this.sessionOpenCombo = 'agent'; this.sessionAgentQuery = ''; this.sessionComboHighlight = 0; },
+    sessionOpenModelCombo() { this.sessionOpenCombo = 'model'; this.sessionModelQuery = ''; this.sessionComboHighlight = 0; },
+    sessionOpenEffortCombo() { if (!this.sessionEfforts.length) return; this.sessionOpenCombo = 'effort'; this.sessionEffortQuery = ''; this.sessionComboHighlight = 0; },
+    sessionOnAgentFilter() { this.sessionOpenCombo = 'agent'; this.sessionComboHighlight = 0; },
+    sessionOnModelFilter() { this.sessionOpenCombo = 'model'; this.sessionComboHighlight = 0; },
+    sessionOnEffortFilter() { this.sessionOpenCombo = 'effort'; this.sessionComboHighlight = 0; },
+    sessionComboMove(which, delta) {
+      if (this.sessionOpenCombo !== which) {
+        if (which === 'agent') this.sessionOpenAgentCombo();
+        else if (which === 'model') this.sessionOpenModelCombo();
+        else this.sessionOpenEffortCombo();
+      }
+      const opts = this.sessionComboOptions(which);
+      if (!opts.length) { this.sessionComboHighlight = -1; return; }
+      let i = this.sessionComboHighlight;
+      if (i < 0) i = 0;
+      else i = (i + delta + opts.length) % opts.length;
+      this.sessionComboHighlight = i;
+    },
+    sessionComboConfirm(which) {
+      const opts = this.sessionComboOptions(which);
+      const item = opts[this.sessionComboHighlight] || opts[0];
+      if (!item) return;
+      if (which === 'agent') this.sessionPickAgent(item);
+      else if (which === 'model') this.sessionPickModel(item);
+      else this.sessionPickEffort(item);
+    },
+    sessionPickAgent(a) {
+      if (!a || !a.available) return;
+      this.sessionAgent = a.name;
+      this.sessionOpenCombo = null;
+      this.sessionComboHighlight = -1;
+      this.sessionOnAgentChange(true);
+      this.sessionSyncComboQueries();
+    },
+    sessionPickModel(m) {
+      if (!m) return;
+      this.sessionModel = m.id;
+      this.sessionOpenCombo = null;
+      this.sessionComboHighlight = -1;
+      this.sessionOnModelChange();
+      this.sessionSyncComboQueries();
+    },
+    sessionPickEffort(e) {
+      if (e == null) return;
+      this.sessionEffort = e;
+      this.sessionOpenCombo = null;
+      this.sessionComboHighlight = -1;
+      this.sessionSyncComboQueries();
+    },
+    sessionOnAgentChange(resetModel) {
+      const a = this.agents.find(x => x.name === this.sessionAgent);
+      const models = ((a && a.models) || []).slice();
+      models.sort((x, y) =>
+        String(x.label || x.id).localeCompare(String(y.label || y.id), undefined, { sensitivity: 'base' })
+      );
+      this.sessionModels = models;
+      if (resetModel || !this.sessionModels.find(m => m.id === this.sessionModel)) {
+        const preferred = (window.LR && window.LR.ClaudeModelAlias && window.LR.ClaudeModelAlias.OPUS) || 'opus';
+        this.sessionModel = this.sessionModels.find(m => m.id === preferred)
+          ? preferred
+          : (this.sessionModels[0] ? this.sessionModels[0].id : '');
+      }
+      this.sessionSyncEffortsFromModel(resetModel);
+      this.sessionSyncComboQueries();
+    },
+    sessionOnModelChange() {
+      this.sessionSyncEffortsFromModel(true);
+      this.sessionSyncComboQueries();
+    },
+    sessionSyncEffortsFromModel(reset) {
+      const a = this.agents.find(x => x.name === this.sessionAgent);
+      const m = this.sessionModels.find(x => x.id === this.sessionModel);
+      let efforts = [];
+      if (m && Array.isArray(m.efforts) && m.efforts.length) {
+        efforts = m.efforts.slice();
+      } else if (a && Array.isArray(a.efforts) && a.efforts.length) {
+        efforts = a.efforts.slice();
+      }
+      this.sessionEfforts = efforts;
+      if (!efforts.length) {
+        this.sessionEffort = '';
+        return;
+      }
+      if (reset || !efforts.includes(this.sessionEffort)) {
+        this.sessionEffort = efforts.includes('high')
+          ? 'high'
+          : (efforts.includes('medium') ? 'medium' : efforts[0]);
+      }
     },
 
     async savePublish() {

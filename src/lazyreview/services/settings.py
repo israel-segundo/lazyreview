@@ -32,6 +32,7 @@ from lazyreview.services.timezones import (
 ALLOWED_UNITS = {"hours", "days", "weeks"}
 ALLOWED_CONSOLIDATOR_AGENTS = ALL_AGENT_NAMES
 ALLOWED_PR_ANALYSIS_AGENTS = ALL_AGENT_NAMES
+ALLOWED_SESSION_AGENTS = ALL_AGENT_NAMES
 ALLOWED_BATCH_AGENTS = ALL_AGENT_NAMES
 MAX_BATCH_DEFAULTS = 20
 
@@ -41,6 +42,9 @@ _DEFAULT_CONSOLIDATOR_EFFORT = EffortLevel.LOW.value
 _DEFAULT_PR_ANALYSIS_AGENT = AgentName.CLAUDE.value
 _DEFAULT_PR_ANALYSIS_MODEL = ClaudeModelAlias.OPUS.value
 _DEFAULT_PR_ANALYSIS_EFFORT = EffortLevel.HIGH.value
+_DEFAULT_SESSION_AGENT = AgentName.CLAUDE.value
+_DEFAULT_SESSION_MODEL = ClaudeModelAlias.OPUS.value
+_DEFAULT_SESSION_EFFORT = EffortLevel.HIGH.value
 
 
 def normalize_batch_review_defaults(raw: Any) -> list[dict[str, str]]:
@@ -102,7 +106,9 @@ def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
     return {
         "run_retention_value": value,
         "run_retention_unit": unit,
-        "policy_summary": f"keep runs for {value} {unit}, then delete",
+        "policy_summary": (
+            f"keep runs and chat sessions for {value} {unit}, then delete"
+        ),
         "default_summary": "Default is 1 week.",
         "pr_sync_interval_minutes": sync_minutes,
         "pr_sync_interval_default": DEFAULT_SYNC_INTERVAL_MINUTES,
@@ -128,6 +134,9 @@ def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
         "publish_prompt": publish_prompt,
         "publish_prompt_default": _default_publish_prompt() or "",
         "batch_review_defaults": batch_defaults,
+        "session_agent": raw.get("session_agent") or _DEFAULT_SESSION_AGENT,
+        "session_model": raw.get("session_model") or _DEFAULT_SESSION_MODEL,
+        "session_effort": raw.get("session_effort") or _DEFAULT_SESSION_EFFORT,
     }
 
 
@@ -148,6 +157,9 @@ def update_app_settings(
     pr_analysis_prompt: str | None = None,
     publish_prompt: str | None = None,
     batch_review_defaults: list[dict[str, Any]] | None = None,
+    session_agent: str | None = None,
+    session_model: str | None = None,
+    session_effort: str | None = None,
 ) -> dict[str, Any]:
     if run_retention_value is not None:
         if run_retention_value < 1:
@@ -201,6 +213,20 @@ def update_app_settings(
     if batch_review_defaults is not None:
         normalized = normalize_batch_review_defaults(batch_review_defaults)
         set_setting(conn, "batch_review_defaults", json.dumps(normalized))
+    if session_agent is not None:
+        agent = session_agent.strip().lower()
+        if agent not in ALLOWED_SESSION_AGENTS:
+            raise ValueError(
+                f"Session agent must be one of {sorted(ALLOWED_SESSION_AGENTS)}"
+            )
+        set_setting(conn, "session_agent", agent)
+    if session_model is not None:
+        model = session_model.strip()
+        if not model:
+            raise ValueError("Session model is required")
+        set_setting(conn, "session_model", model)
+    if session_effort is not None:
+        set_setting(conn, "session_effort", session_effort.strip())
     conn.commit()
     return get_settings_view(conn)
 

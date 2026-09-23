@@ -183,8 +183,10 @@ function activityPage() {
       if (item.kind === 'analysis') return '/prs/' + item.pr_id + '?tab=overview';
       if (item.kind === 'run') return '/runs/' + item.id;
       if (item.kind === 'consolidation') {
-        if (item.status === 'succeeded') return '/consolidations/' + item.id;
-        return '/prs/' + item.pr_id + '?tab=consolidations';
+        if (item.status === 'succeeded') {
+          return '/prs/' + item.pr_id + '?tab=findings&consolidation=' + item.id;
+        }
+        return '/prs/' + item.pr_id + '?tab=activity';
       }
       return '/prs/' + item.pr_id;
     },

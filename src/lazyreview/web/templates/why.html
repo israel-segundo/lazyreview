@@ -40,6 +40,12 @@
         turns the internal report into a GitHub draft you can edit, then submit yourself.
       </li>
       <li>
+        <strong class="font-medium text-slate-900 dark:text-slate-100">Interactive chat</strong>
+        — Explore a PR (worktree Q&amp;A) or Challenge a consolidation (evolve findings +
+        recommended action). Right-rail chat, sandboxed to that PR only; Done regenerates
+        the publish draft. Never auto-posts to GitHub.
+      </li>
+      <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Head-aware</strong>
         — when the PR moves, stale runs and reports are flagged so you don’t post yesterday’s review.
       </li>
@@ -68,8 +74,9 @@
   r1 --> consol[Consolidate and publish draft]
   r2 --> consol
   r3 --> consol
-  consol &lt;--&gt; challenge[Human challenges]
-  challenge --> github[Post to GitHub]</pre>
+  consol &lt;--&gt; chat[Chat challenge]
+  chat --> publish[Publish draft]
+  publish --> github[Post to GitHub]</pre>
     </figure>
   </section>
 

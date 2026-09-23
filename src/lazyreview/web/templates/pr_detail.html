@@ -5,11 +5,11 @@
 {% block footer_width %}max-w-none w-full{% endblock %}
 {% block content %}
 
-<div class="space-y-4" x-data="reviewForm()">
+<div class="lr-pr-page space-y-4" x-data="reviewForm()">
 
   <a href="/" class="inline-block text-sm text-blue-600 hover:underline dark:text-blue-400">← PRs</a>
 
-  {# Full-width title + New Review #}
+  {# Full-width title + New Review (not squeezed by chat) #}
   <div class="flex flex-wrap items-start justify-between gap-3">
     <h1 class="min-w-0 text-xl font-semibold tracking-tight sm:text-2xl">
       <a class="text-blue-600 hover:underline dark:text-blue-400" href="{{ pr.url }}" target="_blank" rel="noopener">{{ pr.repo }}#{{ pr.number }}</a>
@@ -23,7 +23,7 @@
     </button>
   </div>
 
-  {# Full-width status chips + sidebar toggle #}
+  {# Full-width status chips + toggles #}
   <div class="flex flex-wrap items-center gap-2 text-xs">
     {% set pr_label = 'draft' if pr.is_draft else (pr.state or 'open') %}
     <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
@@ -117,12 +117,16 @@
     </span>
     {% endif %}
     <button type="button"
-            @click="setSidebarOpen(!sidebarOpen)"
-            class="ml-auto rounded-md border border-slate-200 bg-white px-2 py-1 font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-            :aria-expanded="sidebarOpen"
-            aria-controls="pr-sidebar-panels"
-            x-text="sidebarOpen ? 'Hide sidebar' : 'Show sidebar'"></button>
+            @click="chatOpen ? (chatOpen = false, persistChatOpen()) : openChat()"
+            class="lr-chat-toggle ml-auto"
+            :class="{ 'is-open': chatOpen }"
+            :aria-expanded="chatOpen"
+            x-text="chatOpen ? 'Hide chat' : 'Chat'"></button>
   </div>
+
+  {# Tabs share a row with chat; header above stays full width #}
+  <div class="lr-page-with-chat" :class="{ 'lr-page-with-chat--open': chatOpen }">
+  <div class="lr-page-with-chat__main">
 
   <div class="lr-pr-layout">
     {# Main column #}
@@ -251,10 +255,134 @@
         </div>
 
 
-        {# Runs #}
-        <div x-show="tab === 'runs'" x-cloak class="mt-4" id="tab-runs">
+        {# Activity — runs + consolidations #}
+        <div x-show="tab === 'activity'" x-cloak class="mt-4 space-y-6" id="tab-activity">
+
   <section class="space-y-3">
-    <h2 class="sr-only">Runs</h2>
+    <div class="flex items-center justify-between gap-3">
+      <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Consolidations</h2>
+      <span class="text-xs text-slate-500" x-show="pollActive" x-cloak>Updating…</span>
+    </div>
+    <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+      <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
+        <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
+          <tr>
+            <th class="px-3 py-3">ID</th>
+            <th class="px-3 py-3">Status</th>
+            <th class="px-3 py-3">Agent / Model / Effort</th>
+            <th class="px-3 py-3">Source runs</th>
+            <th class="px-3 py-3">Tokens</th>
+            <th class="px-3 py-3">Cost</th>
+            <th class="px-3 py-3">Duration</th>
+            <th class="px-3 py-3">Disposition</th>
+            <th class="px-3 py-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+          <template x-for="c in consolidations" :key="c.id">
+            <tr :class="Number(highlightConsolidationId) === Number(c.id) && 'bg-amber-50 dark:bg-amber-950/30'">
+              <td class="px-3 py-3 font-mono text-xs">
+                <button type="button" class="text-blue-600 hover:underline dark:text-blue-400"
+                        x-show="c.status === 'succeeded'" x-cloak
+                        @click="openFindingsForConsolidation(c)"
+                        x-text="'#' + c.id"></button>
+                <span x-show="c.status !== 'succeeded'" x-text="'#' + c.id"></span>
+              </td>
+              <td class="px-3 py-3">
+                <span class="inline-flex items-center gap-1" :title="consolidationStatusLabel(c.status)">
+                  <span class="lr-status-ball h-2.5 w-2.5"
+                        :class="statusBallClass(c.status, {consolidating: true})"
+                        role="img" :aria-label="consolidationStatusLabel(c.status)"></span>
+                </span>
+              </td>
+              <td class="px-3 py-3">
+                <span class="inline-flex items-center gap-1.5 align-middle">
+                  <img x-show="agentKey(c.agent) === LR.AgentName.CLAUDE" x-cloak
+                       src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain" />
+                  <img x-show="agentKey(c.agent) === LR.AgentName.AGY" x-cloak
+                       src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain" />
+                  <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
+                       src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+                  <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
+                       src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+                  <span x-text="agentTitle(c.agent)"></span>
+                </span>
+                <span class="text-slate-400" aria-hidden="true"> · </span>
+                <span x-text="c.model"></span>
+                <template x-if="c.effort">
+                  <span>
+                    <span class="text-slate-400" aria-hidden="true"> · </span>
+                    <span x-text="c.effort"></span>
+                  </span>
+                </template>
+              </td>
+              <td class="px-3 py-3 font-mono text-xs">
+                <template x-if="(c.source_run_ids || []).length">
+                  <span class="inline-flex flex-wrap gap-x-2 gap-y-1">
+                    <template x-for="rid in (c.source_run_ids || [])" :key="rid">
+                      <button type="button" class="text-blue-600 hover:underline dark:text-blue-400"
+                              @click="openSidebarRun(rid)" x-text="'#' + rid"></button>
+                    </template>
+                  </span>
+                </template>
+                <span x-show="!(c.source_run_ids || []).length">—</span>
+              </td>
+              <td class="px-3 py-3" x-text="c.total_tokens != null ? c.total_tokens : '—'"></td>
+              <td class="px-3 py-3" x-text="formatCost(c.cost_usd)"></td>
+              <td class="px-3 py-3" x-text="formatDuration(c.duration_ms)"></td>
+              <td class="px-3 py-3">
+                <span x-show="dispositionLabel(c)"
+                      class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
+                      :class="dispositionClass(c)" :title="dispositionTitle(c)"
+                      x-text="dispositionLabel(c)"></span>
+                <span x-show="!dispositionLabel(c)" class="text-slate-400">—</span>
+              </td>
+              <td class="px-3 py-3 text-right">
+                <div class="inline-flex items-center justify-end gap-1">
+                  <button type="button" @click="openConsolLogs(c)"
+                          class="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">Logs</button>
+                  <button type="button"
+                          x-show="c.status === 'succeeded' || c.status === 'failed' || c.status === 'cancelled'"
+                          x-cloak @click="askRegenerate(c.id)"
+                          :disabled="!!regenerating[c.id] || !!c.feedback_provided"
+                          :title="c.feedback_provided ? 'Already posted to GitHub' : 'Re-run with current consolidator settings'"
+                          class="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800">Regenerate</button>
+                  <button type="button"
+                          x-show="c.status === 'dormant' || c.status === 'queued' || c.status === 'running'"
+                          @click="cancelConsolidation(c.id)"
+                          class="rounded-lg px-2 py-1 text-xs text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-950/40">Cancel</button>
+                  <span class="text-xs text-slate-500"
+                        x-show="c.status === 'succeeded' && !c.feedback_provided && !c.ready_to_post"
+                        x-cloak>Preparing GitHub draft…</span>
+                  <button type="button"
+                          x-show="c.status === 'succeeded'" x-cloak
+                          @click="openFindingsForConsolidation(c)"
+                          class="rounded-lg px-2 py-1 text-xs font-medium"
+                          :class="c.feedback_provided
+                            ? 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                            : (c.ready_to_post
+                              ? 'bg-blue-600 text-white hover:bg-blue-700'
+                              : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800')"
+                          x-text="c.feedback_provided ? 'View' : (c.ready_to_post ? 'Review & submit' : 'View')"></button>
+                </div>
+              </td>
+            </tr>
+          </template>
+          <tr x-show="!consolidations.length">
+            <td colspan="9" class="px-4 py-8 text-center text-slate-500">No consolidations yet.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <section class="space-y-3">
+    <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Review runs</h2>
     <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
         <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
@@ -373,233 +501,210 @@
 
         </div>
 
-        {# Consolidations #}
-        <div x-show="tab === 'consolidations'" x-cloak class="mt-4" id="tab-consolidations">
-  <section class="space-y-3">
-    <div class="flex items-center justify-between gap-3">
-      <h2 class="sr-only">Consolidations</h2>
-      <span class="text-xs text-slate-500" x-show="pollActive" x-cloak>Updating…</span>
-    </div>
-    <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-      <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
-        <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
-          <tr>
-            <th class="px-3 py-3">ID</th>
-            <th class="px-3 py-3">Status</th>
-            <th class="px-3 py-3">Agent / Model / Effort</th>
-            <th class="px-3 py-3">Source runs</th>
-            <th class="px-3 py-3">Tokens</th>
-            <th class="px-3 py-3">Cost</th>
-            <th class="px-3 py-3">Duration</th>
-            <th class="px-3 py-3">Disposition</th>
-            <th class="px-3 py-3 text-right">Actions</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-          <template x-for="c in consolidations" :key="c.id">
-            <tr>
-              <td class="px-3 py-3 font-mono text-xs">
-                <a x-show="c.status === 'succeeded'"
-                   x-cloak
-                   class="text-blue-600 hover:underline dark:text-blue-400"
-                   :href="'/consolidations/' + c.id"
-                   x-text="'#' + c.id"></a>
-                <span x-show="c.status !== 'succeeded'" x-text="'#' + c.id"></span>
-              </td>
-              <td class="px-3 py-3">
-                <span class="inline-flex items-center gap-1"
-                      :title="consolidationStatusLabel(c.status)">
-                  <span class="lr-status-ball h-2.5 w-2.5"
-                        :class="statusBallClass(c.status, {consolidating: true})"
-                        role="img"
-                        :aria-label="consolidationStatusLabel(c.status)"></span>
-                </span>
-              </td>
-              <td class="px-3 py-3">
-                <span class="inline-flex items-center gap-1.5 align-middle">
-                  <img x-show="agentKey(c.agent) === LR.AgentName.CLAUDE" x-cloak
-                       src="/static/img/agents/claude.webp" alt="" width="16" height="16"
-                       class="h-4 w-4 shrink-0 object-contain" />
-                  <img x-show="agentKey(c.agent) === LR.AgentName.AGY" x-cloak
-                       src="/static/img/agents/agy.png" alt="" width="16" height="16"
-                       class="h-4 w-4 shrink-0 object-contain" />
-                  <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
-                       src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
-                       class="h-4 w-4 shrink-0 object-contain dark:hidden" />
-                  <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
-                       src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
-                       class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
-                  <span x-text="agentTitle(c.agent)"></span>
-                </span>
-                <span class="text-slate-400" aria-hidden="true"> · </span>
-                <span x-text="c.model"></span>
-                <template x-if="c.effort">
-                  <span>
-                    <span class="text-slate-400" aria-hidden="true"> · </span>
-                    <span x-text="c.effort"></span>
-                  </span>
-                </template>
-              </td>
-              <td class="px-3 py-3 font-mono text-xs">
-                <template x-if="(c.source_run_ids || []).length">
-                  <span class="inline-flex flex-wrap gap-x-2 gap-y-1">
-                    <template x-for="rid in (c.source_run_ids || [])" :key="rid">
-                      <button type="button"
-                              class="text-blue-600 hover:underline dark:text-blue-400"
-                              @click="openSidebarRun(rid)"
-                              x-text="'#' + rid"></button>
-                    </template>
-                  </span>
-                </template>
-                <span x-show="!(c.source_run_ids || []).length">—</span>
-              </td>
-              <td class="px-3 py-3" x-text="c.total_tokens != null ? c.total_tokens : '—'"></td>
-              <td class="px-3 py-3" x-text="formatCost(c.cost_usd)"></td>
-              <td class="px-3 py-3" x-text="formatDuration(c.duration_ms)"></td>
-              <td class="px-3 py-3">
-                <span x-show="dispositionLabel(c)"
-                      class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
-                      :class="dispositionClass(c)"
-                      :title="dispositionTitle(c)"
-                      x-text="dispositionLabel(c)"></span>
-                <span x-show="!dispositionLabel(c)" class="text-slate-400">—</span>
-              </td>
-              <td class="px-3 py-3 text-right">
-                <div class="inline-flex items-center justify-end gap-1">
-                  <button type="button" @click="openConsolLogs(c)"
-                          class="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
-                    Logs
-                  </button>
-                  <button type="button"
-                          x-show="c.status === 'succeeded' || c.status === 'failed' || c.status === 'cancelled'"
-                          x-cloak
-                          @click="askRegenerate(c.id)"
-                          :disabled="!!regenerating[c.id] || !!c.feedback_provided"
-                          :title="c.feedback_provided ? 'Already posted to GitHub' : 'Re-run with current consolidator settings'"
-                          class="rounded-lg px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800">
-                    Regenerate
-                  </button>
-                  <button type="button"
-                          x-show="c.status === 'dormant' || c.status === 'queued' || c.status === 'running'"
-                          @click="cancelConsolidation(c.id)"
-                          class="rounded-lg px-2 py-1 text-xs text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-950/40">
-                    Cancel
-                  </button>
-                  <span class="text-xs text-slate-500"
-                        x-show="c.status === 'succeeded' && !c.feedback_provided && !c.ready_to_post"
-                        x-cloak>Preparing GitHub draft…</span>
-                  <a x-show="c.status === 'succeeded'"
-                     x-cloak
-                     :href="'/consolidations/' + c.id"
-                     class="rounded-lg px-2 py-1 text-xs font-medium"
-                     :class="c.feedback_provided
-                       ? 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
-                       : (c.ready_to_post
-                         ? 'bg-blue-600 text-white hover:bg-blue-700'
-                         : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800')"
-                     x-text="c.feedback_provided ? 'View' : (c.ready_to_post ? 'Submit' : 'View')"></a>
-                </div>
-              </td>
-            </tr>
-          </template>
-          <tr x-show="!consolidations.length">
-            <td colspan="9" class="px-4 py-8 text-center text-slate-500">No consolidations yet.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
 
-        </div>
-
-
-        {# Findings — latest consolidation report #}
-        <div x-show="tab === 'findings'" x-cloak class="mt-4 space-y-3" id="tab-findings">
-          <template x-if="latestConsolidation()">
-            <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-              <div class="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
-                <div class="min-w-0">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Latest consolidation report</h2>
-                    <span class="font-mono text-xs text-slate-500" x-text="'#' + latestConsolidation().id"></span>
-                    <span class="lr-status-ball h-2.5 w-2.5"
-                          :class="statusBallClass(latestConsolidation().status, {consolidating: true})"
-                          role="img"
-                          :aria-label="consolidationStatusLabel(latestConsolidation().status)"
-                          :title="consolidationStatusLabel(latestConsolidation().status)"></span>
+        {# Findings — latest consolidation: decide + submit #}
+        <div x-show="tab === 'findings'" x-cloak class="mt-4 space-y-4" id="tab-findings">
+          <template x-if="activeFindingsConsolidation()">
+            <div class="space-y-4">
+              <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                <div class="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+                  <div class="min-w-0">
+                    <button type="button"
+                            class="mb-1.5 inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                            @click="backToActivity()">
+                      <svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" />
+                      </svg>
+                      Activity
+                    </button>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Findings</h2>
+                      <span class="font-mono text-xs text-slate-500" x-text="'#' + activeFindingsConsolidation().id"></span>
+                      <span class="lr-status-ball h-2.5 w-2.5"
+                            :class="statusBallClass(activeFindingsConsolidation().status, {consolidating: true})"
+                            role="img"
+                            :aria-label="consolidationStatusLabel(activeFindingsConsolidation().status)"
+                            :title="consolidationStatusLabel(activeFindingsConsolidation().status)"></span>
+                    </div>
+                    <p class="mt-1 text-xs text-slate-500">
+                      <span x-show="activeFindingsConsolidation().head_sha">
+                        Commit
+                        <a class="font-mono text-blue-600 hover:underline dark:text-blue-400"
+                           :href="'https://github.com/{{ pr.owner }}/{{ pr.repo }}/commit/' + activeFindingsConsolidation().head_sha"
+                           target="_blank" rel="noopener"
+                           x-text="(activeFindingsConsolidation().head_sha || '').slice(0, 12)"></a>
+                      </span>
+                      <span x-show="activeFindingsConsolidation().finished_at || activeFindingsConsolidation().created_at">
+                        ·
+                        <span :title="activeFindingsConsolidation().finished_at || activeFindingsConsolidation().created_at"
+                              x-text="timeAgo(activeFindingsConsolidation().finished_at || activeFindingsConsolidation().created_at)"></span>
+                      </span>
+                    </p>
                   </div>
-                  <p class="mt-1 text-xs text-slate-500">
-                    <span x-show="latestConsolidation().head_sha">
-                      Commit
-                      <a class="font-mono text-blue-600 hover:underline dark:text-blue-400"
-                         :href="'https://github.com/{{ pr.owner }}/{{ pr.repo }}/commit/' + latestConsolidation().head_sha"
-                         target="_blank" rel="noopener"
-                         x-text="(latestConsolidation().head_sha || '').slice(0, 12)"></a>
-                    </span>
-                    <span x-show="latestConsolidation().finished_at || latestConsolidation().created_at">
-                      ·
-                      <span :title="latestConsolidation().finished_at || latestConsolidation().created_at"
-                            x-text="timeAgo(latestConsolidation().finished_at || latestConsolidation().created_at)"></span>
-                    </span>
-                  </p>
+                  <div class="flex flex-wrap items-center gap-2"
+                       x-show="canSubmitFindings()" x-cloak>
+                    <label class="text-xs font-medium uppercase tracking-wide text-slate-500" for="findings-verdict">Verdict</label>
+                    <select id="findings-verdict" x-model="findingsVerdict"
+                            class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+                      <option value="comment">Comment</option>
+                      <option value="approve">Approve</option>
+                      <option value="request_changes">Request changes</option>
+                    </select>
+                    <button type="button" @click="postFindingsFeedback()"
+                            :disabled="findingsPosting || !activeFindingsConsolidation().ready_to_post || !(findingsPublishBody || '').trim()"
+                            class="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                      <span x-text="findingsPosting ? 'Posting…' : 'Submit feedback'"></span>
+                    </button>
+                  </div>
                 </div>
-                <a class="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700"
-                   :href="'/consolidations/' + latestConsolidation().id"
-                   x-show="latestConsolidation().status === 'succeeded'">
-                  Open full view
-                </a>
-              </div>
 
-              <div x-show="findingsAreDeprecated()" x-cloak
-                   class="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
-                <svg class="mt-0.5 h-4 w-4 shrink-0 text-amber-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                  <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
-                </svg>
-                <div>
-                  <p class="font-medium">Report is for a deprecated commit</p>
-                  <p class="text-xs opacity-90">
-                    This consolidation was produced for
-                    <span class="font-mono" x-text="(latestConsolidation().head_sha || '').slice(0, 12)"></span>,
-                    but the PR head is now
-                    <span class="font-mono">{{ (pr.head_sha or '')[:12] }}</span>.
-                    Re-run reviews/consolidation on the current head before posting feedback.
-                  </p>
+                <div x-show="findingsAreDeprecated()" x-cloak
+                     class="flex items-start gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+                  <svg class="mt-0.5 h-4 w-4 shrink-0 text-amber-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+                  </svg>
+                  <div>
+                    <p class="font-medium">Report is for a deprecated commit</p>
+                    <p class="text-xs opacity-90">
+                      This consolidation was produced for
+                      <span class="font-mono" x-text="(activeFindingsConsolidation().head_sha || '').slice(0, 12)"></span>,
+                      but the PR head is now
+                      <span class="font-mono">{{ (pr.head_sha or '')[:12] }}</span>.
+                      Re-run reviews/consolidation on the current head before posting feedback.
+                    </p>
+                  </div>
                 </div>
-              </div>
 
-              <div class="p-4">
-                <template x-if="latestConsolidation().status === 'succeeded' && String(latestConsolidation().body || '').trim()">
-                  <div class="consol-md prose-sm max-w-none text-sm text-slate-800 dark:text-slate-200"
-                       x-html="_renderMarkdown(latestConsolidation().body || '')"></div>
-                </template>
-                <template x-if="consolidationIsActive(latestConsolidation().status)">
-                  <p class="text-sm text-slate-500">
-                    Consolidation
-                    <span x-text="consolidationStatusLabel(latestConsolidation().status).toLowerCase()"></span>…
-                    The report will appear here when it finishes.
-                  </p>
-                </template>
-                <template x-if="latestConsolidation().status === 'failed'">
-                  <p class="text-sm text-red-600 dark:text-red-400"
-                     x-text="latestConsolidation().error_message || 'Consolidation failed.'"></p>
-                </template>
-                <template x-if="latestConsolidation().status === 'succeeded' && !String(latestConsolidation().body || '').trim()">
-                  <p class="text-sm text-slate-500">Consolidation succeeded but the report body is empty.</p>
-                </template>
-                <template x-if="!['succeeded','failed'].includes(latestConsolidation().status) && !consolidationIsActive(latestConsolidation().status)">
-                  <p class="text-sm text-slate-500"
-                     x-text="'Status: ' + consolidationStatusLabel(latestConsolidation().status)"></p>
-                </template>
-              </div>
-            </section>
+                <p class="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
+                   x-show="findingsPostError" x-cloak x-text="findingsPostError"></p>
+
+                <div class="p-4 space-y-4">
+                  <div x-show="consolFindingsCount()" class="space-y-3">
+                    <div class="lr-modal-tabs" role="tablist" aria-label="Finding severity">
+                      <button type="button" role="tab" class="lr-modal-tab"
+                              :class="consolFindingsTab === 'High' && 'is-active'"
+                              @click.prevent="consolFindingsTab = 'High'"
+                              x-text="'High (' + consolFindingsForTab('High').length + ')'"></button>
+                      <button type="button" role="tab" class="lr-modal-tab"
+                              :class="consolFindingsTab === 'Medium' && 'is-active'"
+                              @click.prevent="consolFindingsTab = 'Medium'"
+                              x-text="'Medium (' + consolFindingsForTab('Medium').length + ')'"></button>
+                      <button type="button" role="tab" class="lr-modal-tab"
+                              :class="consolFindingsTab === 'Low' && 'is-active'"
+                              @click.prevent="consolFindingsTab = 'Low'"
+                              x-text="'Low (' + consolFindingsForTab('Low').length + ')'"></button>
+                    </div>
+                    <p class="text-sm text-slate-500"
+                       x-show="!consolFindingsForTab(consolFindingsTab).length"
+                       x-text="'No ' + consolFindingsTab.toLowerCase() + ' findings.'"></p>
+                    <div class="lr-findings" x-show="consolFindingsForTab(consolFindingsTab).length">
+                      <template x-for="(f, idx) in consolFindingsForTab(consolFindingsTab)" :key="(f.external_id || f.id || idx)">
+                        <article class="lr-finding">
+                          <div class="lr-finding-head">
+                            <div class="lr-finding-title">
+                              <span class="lr-finding-id" x-show="f.external_id || f.id"
+                                    x-text="f.external_id || ('#' + f.id)"></span>
+                              <span x-show="f.external_id || f.id"> </span>
+                              <span x-html="renderedFindingTitle(f, idx)"></span>
+                            </div>
+                            <span class="lr-finding-sev" :class="findingSeverityClass(f.severity || f.Severity)"
+                                  x-text="findingSeverityLabel(f.severity || f.Severity)"></span>
+                          </div>
+                          <div class="lr-finding-path"
+                               x-show="f.path || f.file"
+                               x-text="(f.path || f.file || '') + (f.line != null ? (':' + f.line) : '')"></div>
+                          <div class="lr-finding-body" x-html="renderedFindingBody(f)"></div>
+                        </article>
+                      </template>
+                    </div>
+                  </div>
+
+                  <details class="rounded-lg border border-slate-200 dark:border-slate-700"
+                           x-show="String(activeFindingsConsolidation().body || '').trim()" x-cloak>
+                    <summary class="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+                      Internal consolidation report
+                    </summary>
+                    <div class="border-t border-slate-100 p-3 consol-md prose-sm max-w-none text-sm text-slate-800 dark:border-slate-800 dark:text-slate-200"
+                         x-html="_renderMarkdown(activeFindingsConsolidation().body || '')"></div>
+                  </details>
+
+                  <div class="space-y-3"
+                       x-show="activeFindingsConsolidation().status === 'succeeded'" x-cloak>
+                    <div x-show="activeFindingsConsolidation().recommended_action || activeFindingsConsolidation().recommended_action_rationale"
+                         class="rounded-lg border px-3 py-2.5 text-sm"
+                         :class="findingsRecommendationAlertClass()" role="status">
+                      <div class="font-medium" x-text="findingsRecommendationLabel()"></div>
+                      <p class="mt-0.5 opacity-90"
+                         x-show="activeFindingsConsolidation().recommended_action_rationale"
+                         x-text="activeFindingsConsolidation().recommended_action_rationale || ''"></p>
+                    </div>
+
+                    <div class="lr-prompt-editor">
+                      <div class="lr-prompt-toolbar">
+                        <span class="text-sm font-medium text-slate-800 dark:text-slate-200">GitHub draft</span>
+                        <div class="flex flex-wrap items-center gap-2">
+                          <button type="button"
+                                  class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                                  x-show="canRegenerateFindingsPublish()" x-cloak
+                                  @click="regenerateFindingsPublish()"
+                                  :disabled="findingsRegeneratingPublish || findingsPosting || !activeFindingsConsolidation().ready_to_post">
+                            <span x-text="findingsRegeneratingPublish || !activeFindingsConsolidation().ready_to_post ? 'Regenerating…' : 'Regenerate draft'"></span>
+                          </button>
+                          <div class="lr-prompt-mode">
+                            <button type="button" class="lr-prompt-mode-btn"
+                                    :class="findingsDraftMode === 'preview' && 'lr-prompt-mode-btn--active'"
+                                    @click="findingsDraftMode = 'preview'">Preview</button>
+                            <button type="button" class="lr-prompt-mode-btn"
+                                    :class="findingsDraftMode === 'source' && 'lr-prompt-mode-btn--active'"
+                                    @click="findingsDraftMode = 'source'">Markdown</button>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="lr-prompt-canvas">
+                        <div class="lr-prompt-body"
+                             x-show="findingsDraftMode === 'preview'" x-cloak
+                             x-html="_renderMarkdown(findingsPublishBody || '')"></div>
+                        <textarea x-show="findingsDraftMode === 'source'" x-cloak
+                                  x-model="findingsPublishBody"
+                                  @input="_findingsPublishEdited = true"
+                                  :readonly="!canSubmitFindings()"
+                                  spellcheck="false"
+                                  class="lr-prompt-source"
+                                  aria-label="GitHub draft markdown"></textarea>
+                      </div>
+                    </div>
+
+                    <div x-show="!canSubmitFindings() && activeFindingsConsolidation().gh_comment_url" x-cloak>
+                      <a :href="activeFindingsConsolidation().gh_comment_url" target="_blank" rel="noopener"
+                         class="inline-flex rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+                        Open posted feedback on GitHub
+                      </a>
+                    </div>
+                  </div>
+
+                  <template x-if="consolidationIsActive(activeFindingsConsolidation().status)">
+                    <p class="text-sm text-slate-500">
+                      Consolidation
+                      <span x-text="consolidationStatusLabel(activeFindingsConsolidation().status).toLowerCase()"></span>…
+                      Findings will appear here when it finishes.
+                    </p>
+                  </template>
+                  <template x-if="activeFindingsConsolidation().status === 'failed'">
+                    <p class="text-sm text-red-600 dark:text-red-400"
+                       x-text="activeFindingsConsolidation().error_message || 'Consolidation failed.'"></p>
+                  </template>
+                </div>
+              </section>
+            </div>
           </template>
-          <p x-show="!latestConsolidation()" class="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-600 dark:bg-slate-900">
-            No consolidation report yet.
+          <p x-show="!activeFindingsConsolidation()"
+             class="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-600 dark:bg-slate-900">
+            No consolidation report yet. Start reviews from <span class="font-medium">New Review</span>, then consolidate — findings land here.
           </p>
         </div>
 
-        {# Feedback Provided #}
-        <div x-show="tab === 'feedback'" x-cloak class="mt-4 space-y-3" id="tab-feedback">
+        {# Feedback (legacy tab id kept for redirects) #}
+        <div x-show="false" x-cloak class="mt-4 space-y-3" id="tab-feedback">
           <template x-for="f in (feedback || [])" :key="f.id">
             <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
               <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
@@ -635,6 +740,36 @@
 
         {# History #}
         <div x-show="tab === 'history'" x-cloak class="mt-4 space-y-3">
+
+          <section class="space-y-3" x-show="(feedback || []).length" x-cloak>
+            <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Feedback posted</h2>
+            <template x-for="f in (feedback || [])" :key="f.id">
+              <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
+                          :class="feedbackActionClass(f.action)"
+                          x-text="feedbackActionLabel(f.action)"></span>
+                    <span class="text-xs text-slate-500"
+                          :title="f.created_at"
+                          x-text="timeAgo(f.created_at) || f.created_at"></span>
+                  </div>
+                  <a x-show="f.gh_comment_url" x-cloak
+                     :href="f.gh_comment_url" target="_blank" rel="noopener"
+                     class="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400">
+                    View on GitHub
+                  </a>
+                </div>
+                <div class="p-4">
+                  <div class="consol-md prose-sm max-w-none text-sm text-slate-800 dark:text-slate-200"
+                       x-show="String(f.body || '').trim()"
+                       x-html="_renderMarkdown(f.body || '')"></div>
+                  <p x-show="!String(f.body || '').trim()" class="text-sm text-slate-500">No body stored for this feedback.</p>
+                  <p x-show="f.dedup_summary" class="mt-3 text-xs text-slate-500" x-text="f.dedup_summary"></p>
+                </div>
+              </section>
+            </template>
+          </section>
 
           <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
             <h2 class="border-b border-slate-100 px-4 py-3 text-sm font-semibold dark:border-slate-800">Timeline</h2>
@@ -702,174 +837,13 @@
       </div>
     </div>
 
-    {# Right sidebar #}
-    <aside class="lr-pr-sidebar space-y-3" x-show="sidebarOpen" x-cloak id="pr-sidebar-panels">
-      <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <button type="button" class="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold"
-                @click="sidebarAnalysesOpen = !sidebarAnalysesOpen">
-          <span>Analysis runs</span>
-          <svg class="h-4 w-4 text-slate-400 transition-transform" :class="sidebarAnalysesOpen ? '' : '-rotate-90'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
-        </button>
-        <ul x-show="sidebarAnalysesOpen" class="max-h-80 overflow-y-auto border-t border-slate-100 dark:border-slate-800">
-          <template x-for="a in analyses.slice(0, 10)" :key="a.id">
-            <li class="flex items-center gap-1.5 px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800/60">
-              <span class="lr-status-ball h-2.5 w-2.5 shrink-0"
-                    :class="analysisBallClass(a.status)"
-                    :title="analysisStatusLabel(a.status)"
-                    role="img"
-                    :aria-label="analysisStatusLabel(a.status)"></span>
-              <button type="button"
-                      @click="openSidebarAnalysis(a.id)"
-                      class="shrink-0 font-mono text-blue-600 hover:underline dark:text-blue-400"
-                      x-text="'#' + a.id"></button>
-              <button type="button"
-                      @click="openSidebarAnalysis(a.id)"
-                      class="shrink-0 text-slate-400 hover:text-blue-600 hover:underline dark:text-slate-500 dark:hover:text-blue-400"
-                      :title="a.finished_at || a.started_at || a.created_at || ''"
-                      x-text="timeAgo(a.finished_at || a.started_at || a.created_at)"></button>
-              <span class="inline-flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-slate-600 dark:text-slate-300"
-                    :title="[a.agent, a.model, a.effort].filter(Boolean).join(' · ')">
-                <img x-show="agentKey(a.agent) === LR.AgentName.CLAUDE" x-cloak
-                     src="/static/img/agents/claude.webp" alt="" width="14" height="14"
-                     class="h-3.5 w-3.5 shrink-0 object-contain" />
-                <img x-show="agentKey(a.agent) === LR.AgentName.AGY" x-cloak
-                     src="/static/img/agents/agy.png" alt="" width="14" height="14"
-                     class="h-3.5 w-3.5 shrink-0 object-contain" />
-                <img x-show="agentKey(a.agent) === LR.AgentName.CURSOR" x-cloak
-                     src="/static/img/agents/cursor-light.png" alt="" width="14" height="14"
-                     class="h-3.5 w-3.5 shrink-0 object-contain dark:hidden" />
-                <img x-show="agentKey(a.agent) === LR.AgentName.CURSOR" x-cloak
-                     src="/static/img/agents/cursor-dark.png" alt="" width="14" height="14"
-                     class="h-3.5 w-3.5 shrink-0 object-contain hidden dark:inline" />
-                <span class="shrink-0" x-text="agentTitle(a.agent)"></span>
-                <template x-if="a.model">
-                  <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
-                    <span class="shrink-0 text-slate-400" aria-hidden="true">·</span>
-                    <span class="min-w-0 truncate" x-text="a.model"></span>
-                  </span>
-                </template>
-                <template x-if="a.effort">
-                  <span class="lr-sidebar-effort inline-flex shrink-0 items-center gap-1">
-                    <span class="text-slate-400" aria-hidden="true">·</span>
-                    <span x-text="a.effort"></span>
-                  </span>
-                </template>
-              </span>
-              <span class="ml-auto shrink-0 tabular-nums text-slate-500"
-                    x-show="a.duration_ms != null"
-                    x-text="formatDuration(a.duration_ms)"></span>
-            </li>
-          </template>
-          <li x-show="!analyses.length" class="px-3 py-3 text-xs text-slate-500">No analysis runs</li>
-        </ul>
-      </section>
+  </div>{# /.lr-pr-layout #}
 
-      <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <button type="button" class="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold"
-                @click="sidebarRunsOpen = !sidebarRunsOpen">
-          <span>Agentic Code Reviews</span>
-          <svg class="h-4 w-4 text-slate-400 transition-transform" :class="sidebarRunsOpen ? '' : '-rotate-90'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
-        </button>
-        <ul x-show="sidebarRunsOpen" class="max-h-80 overflow-y-auto border-t border-slate-100 dark:border-slate-800">
-          {% for run in runs[:10] %}
-          {% set h = run.findings_sev1 or 0 %}
-          {% set m = run.findings_sev2 or 0 %}
-          {% set when = run.finished_at or run.started_at or run.created_at or '' %}
-          <li class="flex items-center gap-1.5 px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800/60">
-            {{ run_status_balls(run) }}
-            <button type="button"
-                    @click="openSidebarRun({{ run.id }})"
-                    class="shrink-0 font-mono text-blue-600 hover:underline dark:text-blue-400">#{{ run.id }}</button>
-            <a href="/runs/{{ run.id }}"
-               class="shrink-0 text-slate-400 hover:text-blue-600 hover:underline dark:text-slate-500 dark:hover:text-blue-400"
-               title="{{ when }}"
-               x-text='timeAgo({{ when|tojson }})'></a>
-            <span class="inline-flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-slate-600 dark:text-slate-300"
-                  title="{{ run.agent }} · {{ run.model }}{% if run.effort %} · {{ run.effort }}{% endif %}">
-              {{ agent_icon(run.agent, size='h-3.5 w-3.5') }}
-              <span class="shrink-0">{{ run.agent|title }}</span>
-              {% if run.model %}
-              <span class="shrink-0 text-slate-400" aria-hidden="true">·</span>
-              <span class="min-w-0 truncate">{{ run.model }}</span>
-              {% endif %}
-              {% if run.effort %}
-              <span class="lr-sidebar-effort shrink-0 text-slate-400" aria-hidden="true">·</span>
-              <span class="lr-sidebar-effort shrink-0">{{ run.effort }}</span>
-              {% endif %}
-            </span>
-            {% if h or m %}
-            <span class="ml-auto shrink-0 font-mono text-slate-500" title="Findings: high {{ h }}, medium {{ m }}">H{{ h }},M{{ m }}</span>
-            {% endif %}
-          </li>
-          {% else %}
-          <li class="px-3 py-3 text-xs text-slate-500">No reviews</li>
-          {% endfor %}
-        </ul>
-      </section>
+  </div>{# /.lr-page-with-chat__main #}
 
-      <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-        <button type="button" class="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-semibold"
-                @click="sidebarConsolOpen = !sidebarConsolOpen">
-          <span>Finding Consolidations</span>
-          <svg class="h-4 w-4 text-slate-400 transition-transform" :class="sidebarConsolOpen ? '' : '-rotate-90'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" /></svg>
-        </button>
-        <ul x-show="sidebarConsolOpen" class="max-h-80 overflow-y-auto border-t border-slate-100 dark:border-slate-800">
-          <template x-for="c in consolidations.slice(0, 10)" :key="c.id">
-            <li class="flex items-center gap-1.5 px-3 py-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800/60">
-              <span class="lr-status-ball h-2.5 w-2.5 shrink-0"
-                    :class="statusBallClass(c.status, {consolidating: true})"
-                    :title="consolidationStatusLabel(c.status)"
-                    role="img"
-                    :aria-label="consolidationStatusLabel(c.status)"></span>
-              <button type="button"
-                      @click="openSidebarConsolidation(c.id)"
-                      class="shrink-0 font-mono text-blue-600 hover:underline dark:text-blue-400"
-                      x-text="'#' + c.id"></button>
-                <button type="button"
-                        @click="openSidebarConsolidation(c.id)"
-                        class="shrink-0 text-slate-400 hover:text-blue-600 hover:underline dark:text-slate-500 dark:hover:text-blue-400"
-                        :title="c.finished_at || c.started_at || c.created_at || ''"
-                        x-text="timeAgo(c.finished_at || c.started_at || c.created_at)"></button>
-              <span class="inline-flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-slate-600 dark:text-slate-300"
-                    :title="[c.agent, c.model, c.effort].filter(Boolean).join(' · ')">
-                <img x-show="agentKey(c.agent) === LR.AgentName.CLAUDE" x-cloak
-                     src="/static/img/agents/claude.webp" alt="" width="14" height="14"
-                     class="h-3.5 w-3.5 shrink-0 object-contain" />
-                <img x-show="agentKey(c.agent) === LR.AgentName.AGY" x-cloak
-                     src="/static/img/agents/agy.png" alt="" width="14" height="14"
-                     class="h-3.5 w-3.5 shrink-0 object-contain" />
-                <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
-                     src="/static/img/agents/cursor-light.png" alt="" width="14" height="14"
-                     class="h-3.5 w-3.5 shrink-0 object-contain dark:hidden" />
-                <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
-                     src="/static/img/agents/cursor-dark.png" alt="" width="14" height="14"
-                     class="h-3.5 w-3.5 shrink-0 object-contain hidden dark:inline" />
-                <span class="shrink-0" x-text="agentTitle(c.agent)"></span>
-                <template x-if="c.model">
-                  <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
-                    <span class="shrink-0 text-slate-400" aria-hidden="true">·</span>
-                    <span class="min-w-0 truncate" x-text="c.model"></span>
-                  </span>
-                </template>
-                <template x-if="c.effort">
-                  <span class="lr-sidebar-effort inline-flex shrink-0 items-center gap-1">
-                    <span class="text-slate-400" aria-hidden="true">·</span>
-                    <span x-text="c.effort"></span>
-                  </span>
-                </template>
-              </span>
-              <span class="ml-auto shrink-0 font-mono text-slate-500"
-                    x-show="consolidationFindingsSummary(c)"
-                    x-text="consolidationFindingsSummary(c)"
-                    :title="'Findings: ' + consolidationFindingsSummary(c)"></span>
-            </li>
-          </template>
-          <li x-show="!consolidations.length" class="px-3 py-3 text-xs text-slate-500">No consolidations</li>
-        </ul>
-      </section>
-    </aside>
-  </div>
+{% include "chat_rail.html" %}
 
+  </div>{# /.lr-page-with-chat #}
 
 
   <!-- Consolidation logs modal -->
@@ -1113,11 +1087,15 @@
     <span x-text="toast"></span>
   </div>
 
-</div>
+</div>{# /.lr-pr-page #}
 
 <script>
 function reviewForm() {
-  return {
+  return Object.assign({}, (window.LR && window.LR.chatRailMixin) ? window.LR.chatRailMixin({
+    mode: 'explore',
+    prId: {{ pr.id }},
+    storageKey: 'lazyreview-chat-open-pr-{{ pr.id }}',
+  }) : {}, {
     agents: [],
     consolidatingIds: {{ consolidating_ids | tojson }},
     lockedIds: {{ locked_run_ids | tojson }},
@@ -1128,6 +1106,17 @@ function reviewForm() {
     pollActive: false,
     _pollTimer: null,
     regenerating: {},
+    highlightRunId: null,
+    highlightConsolidationId: null,
+    consolFindingsTab: 'High',
+    findingsVerdict: 'comment',
+    findingsPublishBody: '',
+    findingsDraftMode: 'preview',
+    findingsPosting: false,
+    findingsPostError: '',
+    findingsRegeneratingPublish: false,
+    _findingsPublishEdited: false,
+    _findingsPublishPoll: null,
     logsOpen: false,
     logsTarget: null,
     logsText: '',
@@ -1436,36 +1425,29 @@ function reviewForm() {
       this.tickAnalysis();
       this.analysisPollTimer = setInterval(() => this.tickAnalysis(), 2000);
     },
-    sidebarOpen: false,
-    sidebarAnalysesOpen: true,
-    sidebarRunsOpen: true,
-    sidebarConsolOpen: true,
-    highlightRunId: null,
     runsForHistory: {{ runs | tojson }},
     cancelling: {},
     deleting: {},
     rerunning: {},
     async init() {
+      if (typeof this.initChatRail === 'function') this.initChatRail();
       try {
         const params = new URLSearchParams(window.location.search);
-        const tab = params.get('tab');
-        if (tab && ['overview','runs','consolidations','findings','feedback','history'].includes(tab)) {
+        const rawTab = params.get('tab');
+        const tabAliases = {
+          runs: 'activity',
+          consolidations: 'activity',
+          feedback: 'history',
+        };
+        const tab = tabAliases[rawTab] || rawTab;
+        if (tab && ['overview', 'findings', 'activity', 'history'].includes(tab)) {
           this.tab = tab;
         }
+        const cid = params.get('consolidation');
+        if (cid) this.highlightConsolidationId = Number(cid) || null;
       } catch (_) { /* ignore */ }
       this.$nextTick(() => this.ensureTabVisible());
       this.markTabNotificationsRead();
-      try {
-        const isDesktop = window.matchMedia('(min-width: 1024px)').matches;
-        // Sidebars stay closed on mobile; restore desktop preference only.
-        if (isDesktop) {
-          const saved = localStorage.getItem('lazyreview-pr-sidebar-open');
-          if (saved === '1') this.sidebarOpen = true;
-          else if (saved === '0') this.sidebarOpen = false;
-        } else {
-          this.sidebarOpen = false;
-        }
-      } catch (_) { /* ignore */ }
       const toast = sessionStorage.getItem('lazyreview-toast');
       if (toast) {
         sessionStorage.removeItem('lazyreview-toast');
@@ -1488,21 +1470,39 @@ function reviewForm() {
       }
       this.maybeStartPoll();
       this.pollAnalysis();
+      this.syncFindingsPublishFromConsolidation();
     },
     setTab(id) {
       this.tab = id;
       this.markTabNotificationsRead();
+      if (id === 'activity') {
+        this.highlightConsolidationId = null;
+      }
       try {
         const url = new URL(window.location.href);
         if (id && id !== 'overview') url.searchParams.set('tab', id);
         else url.searchParams.delete('tab');
+        if (id === 'findings' && this.highlightConsolidationId) {
+          url.searchParams.set('consolidation', String(this.highlightConsolidationId));
+        } else {
+          url.searchParams.delete('consolidation');
+        }
         history.replaceState(null, '', url.pathname + url.search + url.hash);
       } catch (_) { /* ignore */ }
+      if (id === 'findings') this.syncFindingsPublishFromConsolidation();
+    },
+    backToActivity() {
+      this.highlightConsolidationId = null;
+      this.setTab('activity');
+      this.$nextTick(() => {
+        const el = document.getElementById('tab-activity');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     },
     notificationKindForTab(tab) {
       if (tab === 'overview') return 'analysis_finished';
-      if (tab === 'runs') return 'run_finished';
-      if (tab === 'consolidations' || tab === 'findings') return 'consolidation_finished';
+      if (tab === 'activity') return 'run_finished';
+      if (tab === 'findings') return 'consolidation_finished';
       return null;
     },
     markTabNotificationsRead() {
@@ -1518,41 +1518,23 @@ function reviewForm() {
         }).catch(() => {});
       }
     },
-    setSidebarOpen(open) {
-      this.sidebarOpen = !!open;
-      try {
-        // Only persist preference on desktop widths.
-        if (window.matchMedia('(min-width: 1024px)').matches) {
-          localStorage.setItem('lazyreview-pr-sidebar-open', this.sidebarOpen ? '1' : '0');
-        }
-      } catch (_) { /* ignore */ }
-    },
     tabItems() {
       const nRuns = (this.runsForHistory || []).length;
       const nConsol = (this.consolidations || []).length;
-      const nFeedback = (this.feedback || []).length;
+      const nActivity = nRuns + nConsol;
       const items = [
         { id: 'overview', label: 'Overview' },
-        { id: 'runs', label: nRuns ? ('Runs (' + nRuns + ')') : 'Runs' },
-      ];
-      if (nConsol) {
-        items.push({
+        {
           id: 'findings',
           label: 'Findings',
           warn: this.findingsAreDeprecated(),
-        });
-      }
-      items.push({
-        id: 'consolidations',
-        label: nConsol ? ('Consolidations (' + nConsol + ')') : 'Consolidations',
-      });
-      if (nFeedback) {
-        items.push({
-          id: 'feedback',
-          label: nFeedback > 1 ? ('Feedback Provided (' + nFeedback + ')') : 'Feedback Provided',
-        });
-      }
-      items.push({ id: 'history', label: 'History' });
+        },
+        {
+          id: 'activity',
+          label: nActivity ? ('Activity (' + nActivity + ')') : 'Activity',
+        },
+        { id: 'history', label: 'History' },
+      ];
       return items;
     },
     latestConsolidation() {
@@ -1860,7 +1842,7 @@ function reviewForm() {
       return s || 'unknown';
     },
     openSidebarRun(id) {
-      this.setTab('runs');
+      this.setTab('activity');
       this.highlightRunId = Number(id);
       this.$nextTick(() => {
         const el = document.getElementById('run-' + id);
@@ -1871,12 +1853,188 @@ function reviewForm() {
     openSidebarConsolidation(id) {
       const c = (this.consolidations || []).find(x => Number(x.id) === Number(id));
       if (c && c.status === 'succeeded') {
-        window.location.href = '/consolidations/' + c.id;
+        this.openFindingsForConsolidation(c);
         return;
       }
-      this.setTab('consolidations');
+      this.setTab('activity');
+      this.highlightConsolidationId = Number(id) || null;
+      this.$nextTick(() => {
+        setTimeout(() => {
+          if (this.highlightConsolidationId === Number(id)) this.highlightConsolidationId = null;
+        }, 2500);
+      });
+    },
+    openFindingsForConsolidation(c) {
       if (!c) return;
-      this.$nextTick(() => this.openConsolLogs(c));
+      this.highlightConsolidationId = Number(c.id) || null;
+      this.setTab('findings');
+      this.syncFindingsPublishFromConsolidation(c);
+      this.$nextTick(() => {
+        const el = document.getElementById('tab-findings');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    },
+    activeFindingsConsolidation() {
+      const want = Number(this.highlightConsolidationId);
+      if (want) {
+        const match = (this.consolidations || []).find(c => Number(c.id) === want);
+        if (match) return match;
+      }
+      return this.latestConsolidation();
+    },
+    syncFindingsPublishFromConsolidation(c) {
+      const cons = c || this.activeFindingsConsolidation();
+      if (!cons) {
+        this.findingsPublishBody = '';
+        return;
+      }
+      const rec = cons.recommended_action || 'comment';
+      if (['approve', 'request_changes', 'comment'].includes(rec)) this.findingsVerdict = rec;
+      if (!this._findingsPublishEdited || !this.findingsPublishBody) {
+        this.findingsPublishBody = cons.publish_body || '';
+      }
+      for (const label of ['High', 'Medium', 'Low']) {
+        if (this.consolFindingsForTab(label).length) {
+          this.consolFindingsTab = label;
+          break;
+        }
+      }
+      if (this.canSubmitFindings() && !cons.ready_to_post) {
+        this._startFindingsPublishPoll();
+      }
+    },
+    consolFindingsList() {
+      const c = this.activeFindingsConsolidation();
+      return (c && c.findings) || [];
+    },
+    consolFindingsCount() {
+      return this.consolFindingsList().length;
+    },
+    consolFindingsForTab(tab) {
+      return this.consolFindingsList().filter(
+        f => this.findingSeverityLabel(f.severity || f.Severity) === tab
+      );
+    },
+    canSubmitFindings() {
+      const c = this.activeFindingsConsolidation();
+      return !!(c && c.status === 'succeeded' && !c.feedback_provided);
+    },
+    canRegenerateFindingsPublish() {
+      const c = this.activeFindingsConsolidation();
+      return !!(
+        c
+        && !c.feedback_provided
+        && String(c.body || '').trim()
+        && (c.status === 'succeeded' || c.status === 'failed')
+      );
+    },
+    findingsRecommendationLabel() {
+      const a = (this.activeFindingsConsolidation() || {}).recommended_action || '';
+      if (a === 'approve') return 'Recommendation: Approve';
+      if (a === 'request_changes') return 'Recommendation: Request changes';
+      if (a === 'comment') return 'Recommendation: Comment';
+      return 'Recommendation';
+    },
+    findingsRecommendationAlertClass() {
+      const a = (this.activeFindingsConsolidation() || {}).recommended_action || '';
+      if (a === 'approve') {
+        return 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-100';
+      }
+      if (a === 'request_changes') {
+        return 'border-red-200 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950/50 dark:text-red-100';
+      }
+      return 'border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-100';
+    },
+    _startFindingsPublishPoll() {
+      if (this._findingsPublishPoll) return;
+      this._findingsPublishPoll = setInterval(() => this.refreshFindingsConsolidation(), 2500);
+    },
+    async refreshFindingsConsolidation() {
+      const c = this.activeFindingsConsolidation();
+      if (!c) return;
+      try {
+        const res = await fetch('/api/consolidations/' + c.id);
+        if (!res.ok) return;
+        const data = await res.json();
+        const idx = (this.consolidations || []).findIndex(x => Number(x.id) === Number(c.id));
+        if (idx >= 0) {
+          const next = this.consolidations.slice();
+          next[idx] = { ...next[idx], ...data };
+          this.consolidations = next;
+        }
+        if (data.ready_to_post && this._findingsPublishPoll) {
+          clearInterval(this._findingsPublishPoll);
+          this._findingsPublishPoll = null;
+          this.findingsRegeneratingPublish = false;
+        }
+        if (data.publish_body && !this._findingsPublishEdited) {
+          this.findingsPublishBody = data.publish_body;
+        }
+      } catch (e) {}
+    },
+    async regenerateFindingsPublish() {
+      const c = this.activeFindingsConsolidation();
+      if (!c || !this.canRegenerateFindingsPublish() || this.findingsRegeneratingPublish) return;
+      const ok = await lrConfirm({
+        title: 'Regenerate GitHub draft?',
+        message: 'Re-run the publish transform for consolidation #' + c.id + '. The internal report is left unchanged.',
+        confirmLabel: 'Regenerate',
+      });
+      if (!ok) return;
+      this.findingsRegeneratingPublish = true;
+      this.findingsPostError = '';
+      this._findingsPublishEdited = false;
+      try {
+        const res = await fetch('/api/consolidations/' + c.id + '/regenerate-publish', { method: 'POST' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          this.findingsPostError = (typeof data.detail === 'string') ? data.detail : 'Regenerate failed';
+          this.findingsRegeneratingPublish = false;
+          return;
+        }
+        const idx = (this.consolidations || []).findIndex(x => Number(x.id) === Number(c.id));
+        if (idx >= 0) {
+          const next = this.consolidations.slice();
+          next[idx] = { ...next[idx], ...data, ready_to_post: 0 };
+          this.consolidations = next;
+        }
+        this._startFindingsPublishPoll();
+      } catch (e) {
+        this.findingsPostError = String(e.message || e);
+        this.findingsRegeneratingPublish = false;
+      }
+    },
+    async postFindingsFeedback() {
+      const c = this.activeFindingsConsolidation();
+      if (!c) return;
+      this.findingsPostError = '';
+      const action = this.findingsVerdict || 'comment';
+      const labels = { comment: 'comment', approve: 'approve', request_changes: 'request changes' };
+      const ok = await lrConfirm({
+        title: 'Submit feedback?',
+        message: 'Post as “' + (labels[action] || action) + '” to GitHub for consolidation #' + c.id + '?',
+        confirmLabel: 'Submit',
+      });
+      if (!ok) return;
+      this.findingsPosting = true;
+      try {
+        const res = await fetch('/api/consolidations/' + c.id + '/post', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action, body: this.findingsPublishBody }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          this.findingsPostError = (typeof data.detail === 'string') ? data.detail : 'Post failed';
+          return;
+        }
+        sessionStorage.setItem('lazyreview-toast', 'Feedback posted to GitHub');
+        window.location.href = '/prs/{{ pr.id }}?tab=history';
+      } catch (e) {
+        this.findingsPostError = String(e.message || e);
+      } finally {
+        this.findingsPosting = false;
+      }
     },
     openBatchModal() {
       if (!this.analysisReady) {
@@ -2285,8 +2443,10 @@ function reviewForm() {
       }
     },
     openSubmit(c) {
-      if (!c) return;
-      window.location.href = '/consolidations/' + c.id;
+      this.openFindingsForConsolidation(c);
+    },
+    openView(c) {
+      this.openFindingsForConsolidation(c);
     },
     runById(id) {
       const n = Number(id);
@@ -2309,18 +2469,6 @@ function reviewForm() {
         l += Number(run.findings_sev3 || 0);
       }
       return { h, m, l };
-    },
-
-
-
-
-
-
-
-
-    openView(c) {
-      if (!c) return;
-      window.location.href = '/consolidations/' + c.id;
     },
 
     closeLogs() {
@@ -2448,7 +2596,7 @@ function reviewForm() {
       if (data.body) parts.push('=== body.md ===\n' + data.body);
       this.logsText = parts.join('\n\n') || '(no logs yet)';
     }
-  }
+  });
 }
 </script>
 <style>

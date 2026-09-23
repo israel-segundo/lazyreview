@@ -175,6 +175,7 @@ class Settings:
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.runs_dir.mkdir(parents=True, exist_ok=True)
+        (self.data_dir / "sessions").mkdir(parents=True, exist_ok=True)
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
 
     @property

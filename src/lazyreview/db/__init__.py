@@ -2168,12 +2168,12 @@ def notification_href(row: dict[str, Any]) -> str:
     if kind == NOTIFICATION_KIND_ANALYSIS:
         return f"/prs/{pr_id}?tab=overview"
     if kind == NOTIFICATION_KIND_RUN:
-        return f"/prs/{pr_id}?tab=runs"
+        return f"/prs/{pr_id}?tab=activity"
     if kind == NOTIFICATION_KIND_CONSOLIDATION:
         cid = row.get("consolidation_id")
         if cid and (row.get("status") or "") == "succeeded":
-            return f"/consolidations/{int(cid)}"
-        return f"/prs/{pr_id}?tab=consolidations"
+            return f"/prs/{pr_id}?tab=findings&consolidation={int(cid)}"
+        return f"/prs/{pr_id}?tab=activity"
     return f"/prs/{pr_id}"
 
 
@@ -2541,3 +2541,240 @@ def mark_all_notifications_read(conn: sqlite3.Connection) -> int:
     )
     conn.commit()
     return int(cur.rowcount or 0)
+
+
+# --- Interactive chat sessions -------------------------------------------------
+
+
+def _normalize_chat_session(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    out = dict(row)
+    raw = out.get("working_findings_json")
+    if raw:
+        try:
+            out["working_findings"] = json.loads(raw)
+        except json.JSONDecodeError:
+            out["working_findings"] = []
+    else:
+        out["working_findings"] = []
+    return out
+
+
+def create_chat_session(
+    conn: sqlite3.Connection,
+    *,
+    pr_id: int,
+    head_sha: str,
+    mode: str,
+    agent: str,
+    model: str,
+    effort: str | None = None,
+    consolidation_id: int | None = None,
+    working_findings_json: str | None = None,
+    working_recommended_action: str | None = None,
+    working_recommended_action_rationale: str | None = None,
+    workdir_path: str | None = None,
+) -> dict[str, Any]:
+    now = utcnow()
+    cur = conn.execute(
+        """
+        INSERT INTO chat_sessions (
+          pr_id, head_sha, mode, consolidation_id, agent, model, effort,
+          working_findings_json, working_recommended_action,
+          working_recommended_action_rationale, status, workdir_path,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
+        """,
+        (
+            int(pr_id),
+            head_sha or "",
+            mode,
+            consolidation_id,
+            agent,
+            model,
+            effort,
+            working_findings_json,
+            working_recommended_action,
+            working_recommended_action_rationale,
+            workdir_path,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    sid = int(cur.lastrowid)
+    row = get_chat_session(conn, sid)
+    assert row is not None
+    return row
+
+
+def get_chat_session(conn: sqlite3.Connection, session_id: int) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT * FROM chat_sessions WHERE id = ?", (int(session_id),)
+    ).fetchone()
+    return _normalize_chat_session(row_to_dict(row))
+
+
+def list_chat_sessions_for_pr(
+    conn: sqlite3.Connection, pr_id: int, *, mode: str | None = None, limit: int = 20
+) -> list[dict[str, Any]]:
+    if mode:
+        rows = conn.execute(
+            """
+            SELECT * FROM chat_sessions
+            WHERE pr_id = ? AND mode = ?
+            ORDER BY id DESC LIMIT ?
+            """,
+            (int(pr_id), mode, int(limit)),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT * FROM chat_sessions
+            WHERE pr_id = ?
+            ORDER BY id DESC LIMIT ?
+            """,
+            (int(pr_id), int(limit)),
+        ).fetchall()
+    return [_normalize_chat_session(dict(r)) for r in rows]  # type: ignore[misc]
+
+
+def get_open_chat_session(
+    conn: sqlite3.Connection,
+    *,
+    pr_id: int,
+    mode: str,
+    consolidation_id: int | None = None,
+    head_sha: str | None = None,
+) -> dict[str, Any] | None:
+    if consolidation_id is not None:
+        row = conn.execute(
+            """
+            SELECT * FROM chat_sessions
+            WHERE pr_id = ? AND mode = ? AND consolidation_id = ? AND status = 'open'
+            ORDER BY id DESC LIMIT 1
+            """,
+            (int(pr_id), mode, int(consolidation_id)),
+        ).fetchone()
+    elif head_sha:
+        row = conn.execute(
+            """
+            SELECT * FROM chat_sessions
+            WHERE pr_id = ? AND mode = ? AND head_sha = ? AND status = 'open'
+              AND consolidation_id IS NULL
+            ORDER BY id DESC LIMIT 1
+            """,
+            (int(pr_id), mode, head_sha),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT * FROM chat_sessions
+            WHERE pr_id = ? AND mode = ? AND status = 'open'
+            ORDER BY id DESC LIMIT 1
+            """,
+            (int(pr_id), mode),
+        ).fetchone()
+    return _normalize_chat_session(row_to_dict(row))
+
+
+def update_chat_session(
+    conn: sqlite3.Connection, session_id: int, **fields: Any
+) -> dict[str, Any] | None:
+    if not fields:
+        return get_chat_session(conn, session_id)
+    fields = dict(fields)
+    fields.setdefault("updated_at", utcnow())
+    cols = ", ".join(f"{k} = ?" for k in fields)
+    conn.execute(
+        f"UPDATE chat_sessions SET {cols} WHERE id = ?",
+        (*fields.values(), int(session_id)),
+    )
+    conn.commit()
+    return get_chat_session(conn, session_id)
+
+
+def add_chat_turn(
+    conn: sqlite3.Connection,
+    *,
+    session_id: int,
+    role: str,
+    text: str,
+    findings_delta: str | None = None,
+    recommended_action: str | None = None,
+    recommended_action_rationale: str | None = None,
+    tool_summary: str | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    total_tokens: int | None = None,
+    cost_usd: float | None = None,
+) -> dict[str, Any]:
+    cur = conn.execute(
+        """
+        INSERT INTO chat_turns (
+          session_id, role, text, findings_delta, recommended_action,
+          recommended_action_rationale, tool_summary,
+          input_tokens, output_tokens, total_tokens, cost_usd
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            int(session_id),
+            role,
+            text or "",
+            findings_delta,
+            recommended_action,
+            recommended_action_rationale,
+            tool_summary,
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            cost_usd,
+        ),
+    )
+    conn.execute(
+        "UPDATE chat_sessions SET updated_at = ? WHERE id = ?",
+        (utcnow(), int(session_id)),
+    )
+    conn.commit()
+    tid = int(cur.lastrowid)
+    row = conn.execute("SELECT * FROM chat_turns WHERE id = ?", (tid,)).fetchone()
+    assert row is not None
+    return dict(row)
+
+
+def list_chat_turns(
+    conn: sqlite3.Connection, session_id: int, *, after_id: int = 0
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT * FROM chat_turns
+        WHERE session_id = ? AND id > ?
+        ORDER BY id ASC
+        """,
+        (int(session_id), int(after_id)),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_purgeable_chat_sessions(
+    conn: sqlite3.Connection, cutoff_iso: str
+) -> list[dict[str, Any]]:
+    """Sessions finished/idle before cutoff (open with stale updated_at, or done)."""
+    rows = conn.execute(
+        """
+        SELECT * FROM chat_sessions
+        WHERE (
+          (status = 'done' AND COALESCE(finished_at, updated_at) < ?)
+          OR (status = 'open' AND updated_at < ?)
+        )
+        ORDER BY id ASC
+        """,
+        (cutoff_iso, cutoff_iso),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_chat_session(conn: sqlite3.Connection, session_id: int) -> None:
+    conn.execute("DELETE FROM chat_sessions WHERE id = ?", (int(session_id),))
+    conn.commit()
