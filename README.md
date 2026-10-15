@@ -45,11 +45,11 @@ flowchart TB
   You[You]
   GH[GitHub]
 
-  subgraph Local["Local machine"]
+  subgraph Local["Docker container - lazyreview"]
     direction TB
     Daemon["lazyreview daemon - UI, API, sync, job runners"]
 
-    subgraph Stores["Data stores"]
+    subgraph Stores["lazyreview-data volume - /data"]
       direction LR
       DB[("SQLite lazyreview.db")]
       Mirror["Bare mirror workspaces/mirrors"]
@@ -62,7 +62,7 @@ flowchart TB
     Agents["Agent CLIs - claude, agent, agy, codex"]
   end
 
-  You <-->|browser| Daemon
+  You <-->|browser - 127.0.0.1:3334| Daemon
   Daemon <-->|gh sync and post| GH
   Daemon <-->|PRs, briefs, findings, drafts, feedback| DB
 

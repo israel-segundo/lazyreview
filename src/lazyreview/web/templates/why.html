@@ -100,11 +100,11 @@
   You[You]
   GH[GitHub]
 
-  subgraph Local["Local machine"]
+  subgraph Local["Docker container - lazyreview"]
     direction TB
     Daemon["lazyreview daemon - UI, API, sync, job runners"]
 
-    subgraph Stores["Data stores"]
+    subgraph Stores["lazyreview-data volume - /data"]
       direction LR
       DB[("SQLite lazyreview.db")]
       Mirror["Bare mirror workspaces/mirrors"]
@@ -117,7 +117,7 @@
     Agents["Agent CLIs - claude, agent, agy, codex"]
   end
 
-  You &lt;--&gt;|browser| Daemon
+  You &lt;--&gt;|browser - 127.0.0.1:3334| Daemon
   Daemon &lt;--&gt;|gh sync and post| GH
   Daemon &lt;--&gt;|PRs, briefs, findings, drafts, feedback| DB
 
