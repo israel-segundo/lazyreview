@@ -36,7 +36,7 @@ def _xdg_data_home() -> Path:
 
 DEFAULT_CONFIG_TOML = """\
 # lazyreview configuration
-# Docs: edit and restart the daemon (`lazyreview restart`) for server/path changes.
+# Restart the daemon after changes (Docker: `docker compose restart`).
 
 [server]
 host = "127.0.0.1"
@@ -55,9 +55,6 @@ retention_sweep_seconds = 3600
 max_concurrent_jobs = 10
 # How many PR analyses may run at once (rest stay queued).
 max_concurrent_analyses = 2
-
-[service]
-unit_name = "lazyreview.service"
 """
 
 
@@ -114,8 +111,6 @@ class Settings:
     job_timeout_seconds: int
     retention_sweep_seconds: int
     max_concurrent_jobs: int
-    service_name: str
-    unit_name: str
     max_concurrent_analyses: int = 2
 
     @classmethod
@@ -128,7 +123,6 @@ class Settings:
         server = _section(data, "server")
         paths = _section(data, "paths")
         worker = _section(data, "worker")
-        service = _section(data, "service")
 
         host = str(server.get("host") or "127.0.0.1")
         port = int(server.get("port") or 3334)
@@ -146,7 +140,6 @@ class Settings:
         sweep = int(worker.get("retention_sweep_seconds") or 3600)
         concurrency = int(worker.get("max_concurrent_jobs") or 1)
         analysis_concurrency = int(worker.get("max_concurrent_analyses") or 2)
-        unit_name = str(service.get("unit_name") or "lazyreview.service")
 
         # Env overrides (optional, for one-off / install scripts)
         host = os.environ.get("LAZYREVIEW_HOST", host)
@@ -167,8 +160,6 @@ class Settings:
             job_timeout_seconds=job_timeout,
             retention_sweep_seconds=sweep,
             max_concurrent_jobs=max(1, concurrency),
-            service_name="lazyreview",
-            unit_name=unit_name,
             max_concurrent_analyses=max(1, analysis_concurrency),
         )
 
@@ -195,7 +186,6 @@ class Settings:
             "retention_sweep_seconds": self.retention_sweep_seconds,
             "max_concurrent_jobs": self.max_concurrent_jobs,
             "max_concurrent_analyses": self.max_concurrent_analyses,
-            "unit_name": self.unit_name,
         }
 
 

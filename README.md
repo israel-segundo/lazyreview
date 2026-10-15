@@ -119,11 +119,71 @@ flowchart TD
 
 ## Prerequisites
 
-- Python 3.12+
-- `gh` authenticated (`gh auth login`)
-- At least one agent CLI: `agent` (Cursor), `claude`, or `agy`
-- Ubuntu with systemd user services (for install/autostart)
-- Node/npm (for Tailwind CSS build during install)
+- Docker with Compose v2
+- A GitHub token (`gh auth token` prints yours)
+- Credentials for at least one agent: Claude, Cursor, or Agy (see below)
+
+The image ships `git`, `gh`, `claude`, `agent` (Cursor), and `agy`; nothing
+else needs to be installed on the host.
+
+## Run with Docker
+
+```bash
+cp .env.example .env        # fill in GH_TOKEN and agent credentials
+docker compose up -d --build
+```
+
+Open http://127.0.0.1:3334. The in-app
+[Why lazyreview?](http://127.0.0.1:3334/why) page mirrors this overview.
+
+```bash
+docker compose down          # stop (data is kept in volumes)
+docker compose up -d         # start again
+docker compose restart       # after editing config.toml
+docker compose logs -f       # follow daemon logs
+```
+
+The UI has no auth and can post to GitHub, so it is published on
+`127.0.0.1` only. Set `LAZYREVIEW_HOST_PORT` in `.env` to use another host
+port, or `LAZYREVIEW_BIND=0.0.0.0` to expose it on your network.
+
+The Claude and Cursor CLI versions are pinned as build args in the
+`Dockerfile`, because lazyreview parses their output. To upgrade one, bump it
+and run the tests, e.g.
+`docker compose build --build-arg CLAUDE_VERSION=2.1.301`. The `agy` installer
+only serves its latest release, so `docker compose build --pull` picks up a new one.
+
+### Credentials
+
+Put them in `.env` (gitignored); compose passes them to the container:
+
+| Variable | Used by |
+| --- | --- |
+| `GH_TOKEN` | `gh` and HTTPS `git` (sync, clones, posting) |
+| `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY` | `claude` |
+| `CURSOR_API_KEY` | `agent` |
+| `GEMINI_API_KEY` | `agy` |
+
+### Review skill
+
+Review runs copy the `pr-code-review-batch` skill into each worktree. It ships
+in `src/lazyreview/skills/`, so edit it there and rebuild the image. Outside
+Docker, a skill of the same name under `~/.cursor/skills`, `~/.agents/skills`,
+or `~/.claude/skills` takes precedence over the bundled copy.
+
+### Volumes
+
+- `lazyreview-data` → `/data`: `config.toml`, `lazyreview.db`, runs,
+  sessions, analyses, consolidations, workspaces. Paths stored in the DB point
+  under `/data`, so keep this mount path.
+- `lazyreview-home` → `/home/app`: agent CLI state and any interactive logins.
+
+`docker compose down -v` deletes both.
+
+Coming from the old systemd install? Start with fresh volumes: the old
+`~/.local/share/lazyreview/lazyreview.db` stores absolute host paths for logs
+and worktrees, so copying it into `/data` leaves those links broken. Past runs
+stay readable on the host.
 
 ## PR analysis & shared workspaces
 
@@ -139,13 +199,9 @@ worktree is queued for deletion.
 
 ## Configuration
 
-All daemon settings live in a TOML file:
-
-```
-~/.config/lazyreview/config.toml
-```
-
-Override the path with `LAZYREVIEW_CONFIG=/path/to/config.toml`.
+All daemon settings live in a TOML file: `/data/config.toml` in the container
+(created on first start), `~/.config/lazyreview/config.toml` when running
+outside Docker. Override the path with `LAZYREVIEW_CONFIG=/path/to/config.toml`.
 
 ```toml
 [server]
@@ -160,58 +216,38 @@ runs_dir = ""   # empty → {data_dir}/runs
 job_timeout_seconds = 3600
 retention_sweep_seconds = 3600
 max_concurrent_jobs = 10  # global parallel reviews (not per-PR)
-
-[service]
-unit_name = "lazyreview.service"
+max_concurrent_analyses = 2
 ```
+
+Under Docker, `host`, `port`, and `data_dir` are fixed by the image
+(`LAZYREVIEW_HOST`, `LAZYREVIEW_PORT`, `LAZYREVIEW_DATA_DIR` env overrides);
+only the `[worker]` settings are worth editing there:
 
 ```bash
-lazyreview config          # show effective settings
-lazyreview config --init   # write default config if missing
+docker compose exec lazyreview lazyreview config   # show effective settings
+docker compose cp lazyreview:/data/config.toml ./config.toml
+# edit ./config.toml, then:
+docker compose cp ./config.toml lazyreview:/data/config.toml
+docker compose restart
 ```
 
-Optional env overrides (for one-offs): `LAZYREVIEW_HOST`, `LAZYREVIEW_PORT`, `LAZYREVIEW_DATA_DIR`.
+## Quick start (dev, without Docker)
 
-After changing `host`/`port`, re-run `./scripts/install.sh` (or edit the systemd unit bind) then `lazyreview restart`.
-
-## Quick start (dev)
+Needs Python 3.12+, Node/npm, `gh`, and an agent CLI on your `PATH`.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e '.[dev]'
 npm install && npm run build:css
 lazyreview config --init
 lazyreview serve
 ```
 
-Open http://127.0.0.1:3334 (or whatever `[server]` says). The in-app
-[Why lazyreview?](http://127.0.0.1:3334/why) page mirrors this overview.
-
-## Install (Ubuntu, autostart)
-
-```bash
-./scripts/install.sh
-lazyreview status
-```
-
-Uninstall:
-
-```bash
-./scripts/uninstall.sh          # keeps DB/runs + config
-./scripts/uninstall.sh --purge  # deletes data + config
-```
-
-Service control:
-
-```bash
-lazyreview start|stop|restart|status|enable|disable
-```
-
 ## Data layout
 
-- Config: `~/.config/lazyreview/config.toml`
-- DB: `{data_dir}/lazyreview.db` (default under `~/.local/share/lazyreview/`)
+- Config: `/data/config.toml` under Docker, else `~/.config/lazyreview/config.toml`
+- DB: `{data_dir}/lazyreview.db` (`/data` under Docker, else `~/.local/share/lazyreview/`)
 - Runs: `{data_dir}/runs/{id}/` (prompt, logs, findings, report)
 - Chat sessions: `{data_dir}/sessions/{id}/` (round prompts, logs)
 - Clone `repo/` is removed when each run finishes

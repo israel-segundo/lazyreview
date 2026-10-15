@@ -14,6 +14,10 @@ node_modules/
 *.db
 .lazyreview/
 
+# Docker credentials / config copied out of the container
+.env
+/config.toml
+
 # IDE
 .idea/
 .vscode/

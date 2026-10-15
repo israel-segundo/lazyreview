@@ -30,8 +30,6 @@ lazyreview = "lazyreview.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/lazyreview"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/lazyreview/prompts" = "lazyreview/prompts"
 [tool.ruff]
 line-length = 100
 target-version = "py312"

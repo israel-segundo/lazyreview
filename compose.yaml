@@ -1,0 +1,34 @@
+name: lazyreview
+
+services:
+  lazyreview:
+    build:
+      context: .
+      args:
+        UID: ${LAZYREVIEW_UID:-1000}
+        GID: ${LAZYREVIEW_GID:-1000}
+    image: lazyreview:local
+    init: true
+    restart: "no"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      LAZYREVIEW_HOST: 0.0.0.0
+      LAZYREVIEW_PORT: "3334"
+    ports:
+      # The UI has no auth and can post to GitHub; keep it on loopback unless you mean it.
+      - "${LAZYREVIEW_BIND:-127.0.0.1}:${LAZYREVIEW_HOST_PORT:-3334}:3334"
+    volumes:
+      - lazyreview-data:/data
+      - lazyreview-home:/home/app
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3334/api/health"]
+      interval: 30s
+      timeout: 15s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  lazyreview-data:
+  lazyreview-home:

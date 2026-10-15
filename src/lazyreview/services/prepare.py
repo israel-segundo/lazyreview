@@ -24,6 +24,9 @@ HOST_SKILL_ROOTS = (
     Path.home() / ".claude" / "skills",
 )
 
+# Shipped with the package; used when no host root has the skill (e.g. in Docker).
+BUNDLED_SKILLS_ROOT = Path(__file__).resolve().parent.parent / "skills"
+
 
 @dataclass
 class PreparedWorkspace:
@@ -45,7 +48,7 @@ def _copy_skill(src: Path, dest: Path) -> None:
 
 
 def _install_host_skills(repo_dir: Path, skill: str) -> list[str]:
-    """Copy host skills into repo-local locations agents discover."""
+    """Copy host (else bundled) skills into repo-local locations agents discover."""
     names = []
     for name in (skill, *DEFAULT_SKILL_NAMES):
         if name and name not in names:
@@ -57,7 +60,7 @@ def _install_host_skills(repo_dir: Path, skill: str) -> list[str]:
 
     for name in names:
         src: Path | None = None
-        for root in HOST_SKILL_ROOTS:
+        for root in (*HOST_SKILL_ROOTS, BUNDLED_SKILLS_ROOT):
             candidate = root / name
             if candidate.is_dir() and (candidate / "SKILL.md").exists():
                 src = candidate

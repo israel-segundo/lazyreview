@@ -23,8 +23,6 @@ def _settings(tmp_path: Path, max_jobs: int) -> Settings:
         job_timeout_seconds=60,
         retention_sweep_seconds=3600,
         max_concurrent_jobs=max_jobs,
-        service_name="lazyreview",
-        unit_name="lazyreview.service",
     )
 
 

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PR Review — <!-- PR_NUMBER --> <!-- PR_TITLE_SHORT --></title>
+  <style>
+    :root {
+      --bg: #f8f9fb;
+      --fg: #1a1a1a;
+      --muted: #5c6370;
+      --border: #d8dde6;
+      --card: #fff;
+      --high: #c62828;
+      --high-bg: #ffebee;
+      --med: #e65100;
+      --med-bg: #fff3e0;
+      --low: #546e7a;
+      --low-bg: #eceff1;
+      --link: #1565c0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #121418;
+        --fg: #e8eaed;
+        --muted: #9aa0a6;
+        --border: #3c4043;
+        --card: #1e2126;
+        --high: #ef9a9a;
+        --high-bg: #3e2723;
+        --med: #ffcc80;
+        --med-bg: #4e342e;
+        --low: #b0bec5;
+        --low-bg: #263238;
+        --link: #8ab4f8;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 1.5rem;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      font-size: 15px;
+      line-height: 1.45;
+      background: var(--bg);
+      color: var(--fg);
+    }
+    main { max-width: 1100px; margin: 0 auto; }
+    h1 { font-size: 1.35rem; margin: 0 0 0.25rem; }
+    .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.25rem; }
+    .meta a { color: var(--link); }
+    section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.1rem;
+      margin-bottom: 1rem;
+    }
+    section h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 0.6rem; }
+    .claim { font-size: 1.05rem; font-weight: 600; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    col.col-id { width: 3rem; }
+    col.col-sev { width: 6.5rem; }
+    col.col-disp { width: 22%; }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.55rem 0.65rem;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    th { background: var(--bg); text-align: left; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); }
+    .chip {
+      display: inline-block;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .chip-high { background: var(--high-bg); color: var(--high); }
+    .chip-med { background: var(--med-bg); color: var(--med); }
+    .chip-low { background: var(--low-bg); color: var(--low); }
+    .finding-lead { font-weight: 600; margin-bottom: 0.35rem; }
+    ul { margin: 0.35rem 0 0 1.1rem; padding: 0; }
+    .empty { color: var(--muted); font-style: italic; }
+    .counts { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.5rem; }
+    code { font-size: 0.88em; }
+    footer { margin-top: 1.5rem; font-size: 0.85rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>PR Review — #<!-- PR_NUMBER --> <!-- PR_TITLE --></h1>
+    <p class="meta">
+      <!-- MODEL --> · <!-- DATE --> ·
+      <a href="<!-- PR_URL -->"><!-- PR_URL --></a> ·
+      <!-- HEAD_REF --> → <!-- BASE_REF -->
+    </p>
+
+    <section>
+      <h2>Central claim</h2>
+      <p class="claim"><!-- CENTRAL_CLAIM_TYPE --> — <!-- CENTRAL_CLAIM_TEXT --></p>
+    </section>
+
+    <section>
+      <h2>Verified while reviewing (initial pass)</h2>
+      <!-- VERIFICATION_HTML: ul of checks run, CI state, limits -->
+    </section>
+
+    <section>
+      <h2>Existing reviews (Step 1 scan — may be stale)</h2>
+      <!-- EXISTING_REVIEWS_HTML -->
+    </section>
+
+    <section>
+      <h2>Findings</h2>
+      <p class="counts"><!-- COUNTS_STR e.g. 0 High · 2 Medium · 1 Low --></p>
+      <table>
+        <colgroup>
+          <col class="col-id" />
+          <col />
+          <col class="col-sev" />
+          <col class="col-disp" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Finding</th>
+            <th>Severity</th>
+            <th>Disposition</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- FINDING_ROWS — one <tr> per finding; if none: -->
+          <!--
+          <tr>
+            <td>—</td>
+            <td class="empty">No findings yet — initial pass clean, or still in progress.</td>
+            <td>—</td>
+            <td>—</td>
+          </tr>
+          -->
+          <!-- Example row:
+          <tr>
+            <td>F1</td>
+            <td>
+              <div class="finding-lead">One-line claim in bold prose.</div>
+              <div>Evidence: <code>path:line</code>. Failure mode and cheapest fix in plain language.</div>
+            </td>
+            <td><span class="chip chip-med">Medium</span></td>
+            <td>Fast-follow</td>
+          </tr>
+          -->
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Raised by others, missed by me</h2>
+      <!-- MISSED_HTML — ul or p.empty "Nothing others found that I didn't." -->
+    </section>
+
+    <footer>
+      Unattended batch findings report — final artifact for this HEAD. No challenge loop.
+    </footer>
+  </main>
+</body>
+</html>

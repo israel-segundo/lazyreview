@@ -43,6 +43,24 @@ def test_prepare_installs_skill_and_artifact_paths(tmp_path: Path, monkeypatch):
     assert (run_dir / "findings.md").read_text(encoding="utf-8").startswith("## F1")
 
 
+def test_prepare_falls_back_to_bundled_skill(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("lazyreview.services.prepare.HOST_SKILL_ROOTS", ())
+
+    repo = tmp_path / "repo"
+    (repo / ".git" / "info").mkdir(parents=True)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    prepared = prepare_review_workspace(
+        repo_dir=repo, run_dir=run_dir, skill="pr-code-review-batch"
+    )
+    for agent_dir in (".cursor", ".claude"):
+        skill_dir = repo / agent_dir / "skills" / "pr-code-review-batch"
+        assert (skill_dir / "SKILL.md").exists()
+        assert (skill_dir / "references" / "findings-report-template.html").exists()
+    assert ".cursor/skills/pr-code-review-batch" in prepared.skills_installed
+
+
 def test_prepare_exclude_resolves_worktree_gitdir_file(tmp_path: Path, monkeypatch):
     """Shared PR worktrees use a `.git` *file* pointing at the real gitdir."""
     monkeypatch.setattr("lazyreview.services.prepare.HOST_SKILL_ROOTS", ())
