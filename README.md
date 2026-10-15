@@ -145,7 +145,10 @@ docker compose logs -f       # follow daemon logs
 
 The UI has no auth and can post to GitHub, so it is published on
 `127.0.0.1` only. Set `LAZYREVIEW_HOST_PORT` in `.env` to use another host
-port, or `LAZYREVIEW_BIND=0.0.0.0` to expose it on your network.
+port, or `LAZYREVIEW_BIND=0.0.0.0` to expose it on your network. The server
+also rejects requests whose `Host` header isn't `localhost` or `127.0.0.1`
+(this blocks DNS-rebinding pages), so when you expose it, list the names you'll
+use in `LAZYREVIEW_ALLOWED_HOSTS` (comma-separated).
 
 The Claude and Cursor CLI versions are pinned as build args in the
 `Dockerfile`, because lazyreview parses their output. To upgrade one, bump it
@@ -155,14 +158,26 @@ only serves its latest release, so `docker compose build --pull` picks up a new 
 
 ### Credentials
 
-Put them in `.env` (gitignored); compose passes them to the container:
+Set them in **Settings → Credentials**, or in `.env` (gitignored). A key saved
+in Settings overrides the `.env` value and takes effect for the next run
+without a restart; it is stored in `/data/credentials.json` (mode 600) and
+never sent back to the browser. The same page checks whether each CLI is
+authenticated and offers a browser login for GitHub, Cursor, and Agy (Agy asks
+you to paste back the code Google shows). Claude has no browser login there:
+run `claude setup-token` anywhere and paste the token.
+
+The `.env` variables:
 
 | Variable | Used by |
 | --- | --- |
 | `GH_TOKEN` | `gh` and HTTPS `git` (sync, clones, posting) |
 | `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY` | `claude` |
 | `CURSOR_API_KEY` | `agent` |
-| `GEMINI_API_KEY` | `agy` |
+| `GEMINI_API_KEY` | `agy` (lazyreview sets `modelProvider: "gemini"` for it while the key is set) |
+
+Browser logins are stored by each CLI under `/home/app` and persist in the
+`lazyreview-home` volume. A key, when set, takes priority over a browser login
+for that CLI. Each agent run gets `GH_TOKEN` plus only its own provider's keys.
 
 ### Review skill
 

@@ -8,6 +8,9 @@
 [server]
 host = "127.0.0.1"
 port = 3334
+# Extra Host names the UI may be reached by (localhost and 127.0.0.1 always work),
+# e.g. ["myhost.lan", "192.168.1.20"]. Also settable as LAZYREVIEW_ALLOWED_HOSTS.
+allowed_hosts = []
 
 [paths]
 # Empty = ~/.local/share/lazyreview (XDG data home)

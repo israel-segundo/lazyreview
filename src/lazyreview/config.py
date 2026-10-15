@@ -2,6 +2,7 @@
 
 Precedence (highest wins):
 1. Explicit env overrides: LAZYREVIEW_HOST, LAZYREVIEW_PORT, LAZYREVIEW_DATA_DIR
+   (LAZYREVIEW_ALLOWED_HOSTS adds to [server] allowed_hosts instead of replacing it)
 2. Values in the TOML config file
 3. Built-in defaults
 
@@ -41,6 +42,8 @@ DEFAULT_CONFIG_TOML = """\
 [server]
 host = "127.0.0.1"
 port = 3334
+# Extra Host names the UI may be reached by (localhost and 127.0.0.1 always work).
+allowed_hosts = []
 
 [paths]
 # Empty = ~/.local/share/lazyreview (XDG data home)
@@ -112,6 +115,8 @@ class Settings:
     retention_sweep_seconds: int
     max_concurrent_jobs: int
     max_concurrent_analyses: int = 2
+    # Host headers the server answers to; anything else gets 400 (DNS rebinding).
+    allowed_hosts: tuple[str, ...] = ("*",)
 
     @classmethod
     def load(cls, *, create_if_missing: bool = True) -> Settings:
@@ -142,6 +147,17 @@ class Settings:
         analysis_concurrency = int(worker.get("max_concurrent_analyses") or 2)
 
         # Env overrides (optional, for one-off / install scripts)
+        extra_hosts = server.get("allowed_hosts") or []
+        if not isinstance(extra_hosts, list):
+            extra_hosts = [extra_hosts]
+        env_hosts = os.environ.get("LAZYREVIEW_ALLOWED_HOSTS", "")
+        extra_hosts = [*extra_hosts, *env_hosts.split(",")]
+        allowed_hosts = tuple(
+            dict.fromkeys(
+                ["localhost", "127.0.0.1", *(str(h).strip() for h in extra_hosts if str(h).strip())]
+            )
+        )
+
         host = os.environ.get("LAZYREVIEW_HOST", host)
         if os.environ.get("LAZYREVIEW_PORT"):
             port = int(os.environ["LAZYREVIEW_PORT"])
@@ -161,6 +177,7 @@ class Settings:
             retention_sweep_seconds=sweep,
             max_concurrent_jobs=max(1, concurrency),
             max_concurrent_analyses=max(1, analysis_concurrency),
+            allowed_hosts=allowed_hosts,
         )
 
     def ensure_dirs(self) -> None:
@@ -186,6 +203,7 @@ class Settings:
             "retention_sweep_seconds": self.retention_sweep_seconds,
             "max_concurrent_jobs": self.max_concurrent_jobs,
             "max_concurrent_analyses": self.max_concurrent_analyses,
+            "allowed_hosts": list(self.allowed_hosts),
         }
 
 

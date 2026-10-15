@@ -25,8 +25,9 @@ from lazyreview.db import (
 )
 from lazyreview.db.schema import connect
 from lazyreview.services.clone import clone_pr_head, remove_repo_dir
-from lazyreview.services.pr_workspace import hold_worktree
+from lazyreview.services.credentials import subprocess_env
 from lazyreview.services.findings_parse import load_findings_from_workdir, severity_counts
+from lazyreview.services.pr_workspace import hold_worktree
 from lazyreview.services.prepare import collect_review_artifacts, prepare_review_workspace
 
 logger = logging.getLogger(__name__)
@@ -514,6 +515,7 @@ class JobRunner:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            env=subprocess_env(cmd),
         )
         with self._lock:
             self._procs[run_id] = proc

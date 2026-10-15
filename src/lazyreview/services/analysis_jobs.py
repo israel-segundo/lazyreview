@@ -26,6 +26,7 @@ from lazyreview.db import (
 )
 from lazyreview.db.schema import connect
 from lazyreview.services.consolidation_jobs import build_consolidate_command
+from lazyreview.services.credentials import subprocess_env
 from lazyreview.services.pr_workspace import hold_worktree
 from lazyreview.services.settings import get_pr_analysis_config
 
@@ -487,6 +488,7 @@ class AnalysisRunner:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            env=subprocess_env(cmd),
         )
         with self._lock:
             self._procs[analysis_id] = proc

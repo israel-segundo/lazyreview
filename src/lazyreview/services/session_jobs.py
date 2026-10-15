@@ -30,6 +30,7 @@ from lazyreview.db import (
     update_consolidation,
     utcnow,
 )
+from lazyreview.services.credentials import subprocess_env
 from lazyreview.services.pr_workspace import hold_worktree
 from lazyreview.services.session_safety import (
     SESSION_ALLOWED_TOOLS,
@@ -636,6 +637,7 @@ class SessionRunner:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            env=subprocess_env(cmd),
         )
         with self._lock:
             self._procs[session_id] = proc

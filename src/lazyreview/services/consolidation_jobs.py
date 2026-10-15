@@ -31,6 +31,7 @@ from lazyreview.db import (
     utcnow,
 )
 from lazyreview.db.schema import connect
+from lazyreview.services.credentials import subprocess_env
 from lazyreview.services.gh import GhError, list_pr_comments
 from lazyreview.services.settings import get_consolidator_config, get_publish_config
 
@@ -1121,6 +1122,7 @@ class ConsolidationRunner:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            env=subprocess_env(cmd),
         )
         with self._lock:
             self._procs[consolidation_id] = proc

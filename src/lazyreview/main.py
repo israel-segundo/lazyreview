@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from lazyreview import __version__
 from lazyreview.api import (
@@ -18,6 +19,7 @@ from lazyreview.api import (
     agents,
     analytics,
     consolidations,
+    credentials as credentials_api,
     feedback,
     health,
     notifications as notifications_api,
@@ -32,6 +34,8 @@ from lazyreview.services.consolidation_jobs import ConsolidationRunner
 from lazyreview.services.jobs import JobRunner
 from lazyreview.services.analysis_jobs import AnalysisRunner
 from lazyreview.services import lifecycle
+from lazyreview.services.cli_login import LoginManager
+from lazyreview.services.credentials import apply_stored_credentials
 from lazyreview.services.settings import get_display_timezone
 from lazyreview.services.timezones import DEFAULT_DISPLAY_TIMEZONE
 from lazyreview.services.pr_workspace import WorkspacePruner
@@ -80,6 +84,8 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        apply_stored_credentials(settings)
+        logins = LoginManager()
         # Bootstrap schema once, then hand out per-thread connections.
         bootstrap = connect(settings.db_path)
         try:
@@ -109,6 +115,7 @@ def create_app() -> FastAPI:
         app.state.workspace_pruner = workspace_pruner
         app.state.sweeper = sweeper
         app.state.pr_syncer = pr_syncer
+        app.state.logins = logins
         runner.start()
         consolidation_runner.start()
         lifecycle.bind(
@@ -129,6 +136,7 @@ def create_app() -> FastAPI:
             settings.data_dir,
         )
         yield
+        logins.shutdown()
         pr_syncer.stop()
         sweeper.stop()
         workspace_pruner.stop()
@@ -139,6 +147,7 @@ def create_app() -> FastAPI:
         conn.close()
 
     app = FastAPI(title="lazyreview", version=__version__, lifespan=lifespan)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.allowed_hosts))
 
     @app.middleware("http")
     async def display_timezone_middleware(request: Request, call_next):
@@ -169,6 +178,7 @@ def create_app() -> FastAPI:
     app.include_router(consolidations.router, prefix="/api")
     app.include_router(analytics.router, prefix="/api")
     app.include_router(settings_api.router, prefix="/api")
+    app.include_router(credentials_api.router, prefix="/api")
     app.include_router(analyses_api.router, prefix="/api")
     app.include_router(activity_api.router, prefix="/api")
     app.include_router(notifications_api.router, prefix="/api")
