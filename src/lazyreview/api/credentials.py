@@ -19,6 +19,7 @@ PROVIDERS = (
     {"id": "claude", "label": "Claude"},
     {"id": "cursor", "label": "Cursor"},
     {"id": "agy", "label": "Agy"},
+    {"id": "codex", "label": "Codex"},
 )
 
 

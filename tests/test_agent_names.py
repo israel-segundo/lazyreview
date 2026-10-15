@@ -13,7 +13,7 @@ from lazyreview.agents.names import (
 
 
 def test_agent_name_values():
-    assert set(ALL_AGENT_NAMES) == {"claude", "cursor", "agy"}
+    assert set(ALL_AGENT_NAMES) == {"claude", "cursor", "agy", "codex"}
     assert AgentName.CLAUDE == "claude"
     assert AgentName.CURSOR.value == "cursor"
 

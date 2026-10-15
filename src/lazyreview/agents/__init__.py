@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from lazyreview.agents.agy import AgyAdapter
 from lazyreview.agents.claude import ClaudeAdapter
+from lazyreview.agents.codex import CodexAdapter
 from lazyreview.agents.cursor import CursorAdapter
 from lazyreview.agents.names import (
-    ALL_AGENT_NAMES,
     AGENT_COLORS,
+    ALL_AGENT_NAMES,
     AgentName,
     ClaudeModelAlias,
     EffortLevel,
@@ -19,6 +20,7 @@ _ADAPTERS: dict[str, object] = {
     AgentName.CURSOR.value: CursorAdapter(),
     AgentName.CLAUDE.value: ClaudeAdapter(),
     AgentName.AGY.value: AgyAdapter(),
+    AgentName.CODEX.value: CodexAdapter(),
 }
 
 
@@ -36,8 +38,8 @@ def list_adapters():
 
 
 __all__ = [
-    "ALL_AGENT_NAMES",
     "AGENT_COLORS",
+    "ALL_AGENT_NAMES",
     "AgentName",
     "ClaudeModelAlias",
     "EffortLevel",

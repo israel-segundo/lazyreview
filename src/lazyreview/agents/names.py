@@ -14,6 +14,7 @@ class AgentName(StrEnum):
     CLAUDE = "claude"
     CURSOR = "cursor"
     AGY = "agy"
+    CODEX = "codex"
 
 
 # CLI / legacy names that should canonicalize to an AgentName for UI keys.
@@ -51,6 +52,7 @@ AGENT_COLORS: dict[AgentName, str] = {
     AgentName.CLAUDE: "#be123c",
     AgentName.CURSOR: "#0369a1",
     AgentName.AGY: "#15803d",
+    AgentName.CODEX: "#6d28d9",
 }
 
 

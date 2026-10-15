@@ -177,6 +177,25 @@ def test_login_parses_gh_device_code_and_cancels(monkeypatch):
     assert _wait(session, lambda v: v["exit_code"] is not None)["status"] == "cancelled"
 
 
+def test_login_parses_codex_device_code(monkeypatch):
+    script = (
+        "import time\n"
+        "print('1. Open this link in your browser and sign in to your account', flush=True)\n"
+        "print('   https://auth.openai.com/codex/device', flush=True)\n"
+        "print('2. Enter this one-time code (expires in 15 minutes)', flush=True)\n"
+        "print('   XOL9-HZZS1', flush=True)\n"
+        "time.sleep(30)\n"
+    )
+    monkeypatch.setitem(cli_login.LOGIN_PROVIDERS, "fake", _fake_provider(script))
+    manager = LoginManager()
+    session = manager.start("fake")
+
+    view = _wait(session, lambda v: v["user_code"] and v["url"])
+    assert view["user_code"] == "XOL9-HZZS1"
+    assert view["url"] == "https://auth.openai.com/codex/device"
+    manager.cancel(session.id)
+
+
 def test_subprocess_env_keeps_only_own_provider_keys(monkeypatch):
     for key in credentials.CREDENTIAL_KEYS:
         monkeypatch.setenv(key, f"value-{key}")
@@ -191,8 +210,9 @@ def test_subprocess_env_keeps_only_own_provider_keys(monkeypatch):
         "ANTHROPIC_API_KEY",
     }
     assert kept(["/usr/local/bin/agent"]) == {"GH_TOKEN", "CURSOR_API_KEY"}
+    assert kept(["/usr/local/bin/codex", "exec"]) == {"GH_TOKEN", "CODEX_API_KEY"}
     assert kept(["/usr/bin/gh", "pr", "review"]) == {"GH_TOKEN"}
-    assert credentials.subprocess_env(["claude"])["PATH"] == "/usr/bin"
+    assert credentials.subprocess_env(["codex"])["PATH"] == "/usr/bin"
 
 
 def test_untrusted_host_header_is_rejected(tmp_path: Path):
@@ -221,7 +241,13 @@ def test_credentials_api_never_returns_values(tmp_path: Path):
             assert row == {**row, "source": "settings", "hint": "…9999"}
 
             providers = {p["id"]: p["login"] for p in res.json()["providers"]}
-            assert providers == {"github": True, "claude": False, "cursor": True, "agy": True}
+            assert providers == {
+                "github": True,
+                "claude": False,
+                "cursor": True,
+                "agy": True,
+                "codex": True,
+            }
 
             assert client.put("/api/credentials/PATH", json={"value": "x"}).status_code == 404
             res = client.delete("/api/credentials/ANTHROPIC_API_KEY")

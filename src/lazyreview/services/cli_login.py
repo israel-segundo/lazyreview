@@ -28,7 +28,8 @@ _OUTPUT_LIMIT = 20_000
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07")
 _URL_RE = re.compile(r"https://[^\s\"'<>]+")
-_GH_CODE_RE = re.compile(r"one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})")
+# gh: "one-time code: AB12-CD34"; codex: "one-time code (expires in 15 minutes)\n   AB12-CD345"
+_DEVICE_CODE_RE = re.compile(r"one-time code\b.{0,80}?\b([A-Z0-9]{4,}-[A-Z0-9]{4,})\b", re.DOTALL)
 _AGY_PASTE_RE = re.compile(r"paste the authorization code", re.IGNORECASE)
 
 
@@ -70,6 +71,13 @@ LOGIN_PROVIDERS: dict[str, LoginProvider] = {
         accepts_code=True,
         stdin_tty=True,
     ),
+    "codex": LoginProvider(
+        id="codex",
+        label="Codex",
+        binary="codex",
+        # The default flow waits on a localhost callback the host browser can't reach.
+        argv=("codex", "login", "--device-auth"),
+    ),
 }
 
 
@@ -89,7 +97,7 @@ class LoginSession:
         for match in _URL_RE.finditer(self.output):
             url = match.group(0).rstrip(".,)")
             break
-        code_match = _GH_CODE_RE.search(self.output)
+        code_match = _DEVICE_CODE_RE.search(self.output)
         provider = LOGIN_PROVIDERS[self.provider]
         return {
             "id": self.id,
@@ -273,4 +281,10 @@ def check_provider(provider: str) -> dict[str, Any]:
         rc, text = _run_status(["agy", "models"])
         ok = rc == 0 and "sign in" not in text.lower()
         return {"ok": ok, "detail": text if not ok else "models available"}
+    if provider == "codex":
+        rc, text = _run_status(["codex", "login", "status"])
+        ok = rc == 0 and "not logged in" not in text.lower()
+        if not ok and os.environ.get("CODEX_API_KEY"):
+            return {"ok": True, "detail": "CODEX_API_KEY is set (used by codex exec)"}
+        return {"ok": ok, "detail": text}
     raise ValueError(f"unknown provider {provider}")

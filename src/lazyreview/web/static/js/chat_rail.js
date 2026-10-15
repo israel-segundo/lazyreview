@@ -484,7 +484,7 @@
             )
           );
         }
-        return Object.values(window.LR.AgentName || { CLAUDE: 'claude', CURSOR: 'cursor', AGY: 'agy' }).map(
+        return Object.values(window.LR.AgentName || { CLAUDE: 'claude', CURSOR: 'cursor', AGY: 'agy', CODEX: 'codex' }).map(
           (name) => ({ name: name, display_name: name, available: true })
         );
       },

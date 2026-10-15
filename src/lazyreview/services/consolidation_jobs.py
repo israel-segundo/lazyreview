@@ -17,6 +17,7 @@ from typing import Any
 
 from lazyreview.agents import get_adapter
 from lazyreview.agents.base import BuiltCommand, which_binary
+from lazyreview.agents.codex import codex_exec_argv
 from lazyreview.agents.names import AgentName
 from lazyreview.config import Settings
 from lazyreview.db import (
@@ -222,6 +223,11 @@ def build_consolidate_command(
                 *model_args,
                 prompt,
             ]
+        )
+    if agent == AgentName.CODEX.value:
+        return BuiltCommand(
+            argv=codex_exec_argv(path, cwd=work_dir, add_dirs=[], model_args=model_args),
+            stdin_text=prompt,
         )
     raise RuntimeError(f"Unsupported consolidator agent: {agent}")
 

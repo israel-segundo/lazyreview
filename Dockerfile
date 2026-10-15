@@ -31,8 +31,10 @@ RUN apt-get update \
 # the latest release.
 ARG CLAUDE_VERSION=2.1.300
 ARG CURSOR_AGENT_VERSION=2026.10.14-941492e
+ARG CODEX_VERSION=0.162.1
 LABEL lazyreview.claude-version="${CLAUDE_VERSION}" \
-      lazyreview.cursor-agent-version="${CURSOR_AGENT_VERSION}"
+      lazyreview.cursor-agent-version="${CURSOR_AGENT_VERSION}" \
+      lazyreview.codex-version="${CODEX_VERSION}"
 RUN HOME=/opt/claude bash -c 'curl -fsSL https://claude.ai/install.sh | bash -s "$0"' "${CLAUDE_VERSION}" \
  && ln -s "$(readlink -f /opt/claude/.local/bin/claude)" /usr/local/bin/claude \
  && chmod -R a+rX /opt/claude \
@@ -47,11 +49,15 @@ RUN case "$(uname -m)" in x86_64) arch=x64 ;; aarch64) arch=arm64 ;; *) echo "un
 RUN HOME=/opt/agy bash -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin' \
  && rm -rf /opt/agy \
  && agy --version
+RUN HOME=/opt/codex sh -c 'curl -fsSL https://chatgpt.com/codex/install.sh | sh -s -- --release "$0"' "${CODEX_VERSION}" \
+ && ln -s "$(readlink -f /opt/codex/.local/bin/codex)" /usr/local/bin/codex \
+ && chmod -R a+rX /opt/codex \
+ && codex --version | grep -F "${CODEX_VERSION}"
 
 RUN groupadd -g "${GID}" app \
  && useradd -m -u "${UID}" -g "${GID}" -s /bin/bash app \
  && install -d -o app -g app /data \
-      /home/app/.claude /home/app/.cursor \
+      /home/app/.claude /home/app/.codex /home/app/.cursor \
       /home/app/.gemini /home/app/.gemini/antigravity-cli
 
 WORKDIR /app

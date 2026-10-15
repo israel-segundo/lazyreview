@@ -15,6 +15,7 @@ from typing import Any
 
 from lazyreview.agents import get_adapter
 from lazyreview.agents.base import which_binary
+from lazyreview.agents.codex import codex_exec_argv, last_agent_message
 from lazyreview.agents.names import AgentName, ClaudeModelAlias, EffortLevel
 from lazyreview.config import Settings
 from lazyreview.db import (
@@ -127,6 +128,13 @@ def findings_to_body_md(
     return "\n".join(lines).rstrip() + "\n"
 
 
+CODEX_CHAT_NOTE = (
+    "\n## Tool access\n"
+    "You have no shell or file access in this chat. Answer from the context above; "
+    "if you need code that isn't here, name the file and ask the user to paste it.\n"
+)
+
+
 def _extract_cli_session_id(stdout: str) -> str | None:
     for line in (stdout or "").splitlines():
         line = line.strip()
@@ -187,7 +195,10 @@ def _extract_assistant_text(stdout: str) -> str:
     if last_result.strip():
         return last_result.strip()
     joined = "\n\n".join(t for t in texts if t.strip())
-    return joined.strip()
+    if joined.strip():
+        return joined.strip()
+    # Codex JSONL has no result event; its last agent message is the reply.
+    return last_agent_message(stdout).strip()
 
 
 class SessionRunner:
@@ -560,6 +571,19 @@ class SessionRunner:
         prompt: str,
         cli_session_id: str | None,
     ) -> tuple[list[str], str | None]:
+        if agent == AgentName.CODEX.value:
+            adapter = get_adapter(agent)
+            bin_path = which_binary(adapter.binary)
+            if not bin_path:
+                raise RuntimeError("codex not found on PATH")
+            argv = codex_exec_argv(
+                bin_path,
+                cwd=worktree,
+                add_dirs=[workdir],
+                model_args=adapter.resolve_model_args(model, effort or None),
+                read_only=True,
+            )
+            return argv, prompt + CODEX_CHAT_NOTE
         if agent != AgentName.CLAUDE.value:
             # Fallback: pack as a single print-mode prompt via adapter when possible.
             adapter = get_adapter(agent)

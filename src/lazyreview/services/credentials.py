@@ -61,11 +61,17 @@ CREDENTIALS: tuple[CredentialSpec, ...] = (
         provider="agy",
         help="From Google AI Studio. While set, agy uses the Gemini API instead of an account login.",
     ),
+    CredentialSpec(
+        key="CODEX_API_KEY",
+        label="OpenAI API key",
+        provider="codex",
+        help="Billed per token through the OpenAI API. Use the browser login for your ChatGPT plan.",
+    ),
 )
 
 CREDENTIAL_KEYS = frozenset(spec.key for spec in CREDENTIALS)
 
-_BINARY_PROVIDER = {"claude": "claude", "agent": "cursor", "agy": "agy"}
+_BINARY_PROVIDER = {"claude": "claude", "agent": "cursor", "agy": "agy", "codex": "codex"}
 
 _lock = threading.Lock()
 # Environment values before any stored credential was applied, so clearing a

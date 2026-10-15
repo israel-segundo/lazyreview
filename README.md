@@ -3,7 +3,7 @@
 A local, human-in-the-loop desk for agentic pull-request review.
 
 It finds PRs waiting on you, orients with an analysis brief, lets you run one or
-more review agents (Cursor / Claude / Agy), consolidates them into one consensus
+more review agents (Cursor / Claude / Agy / Codex), consolidates them into one consensus
 with a GitHub-facing draft — and stops. Nothing posts until you say so.
 
 History, costs, and feedback live in SQLite. Worktrees and run logs stay on your
@@ -23,9 +23,11 @@ flowchart TD
   order --> r1[Claude review]
   order --> r2[Cursor review]
   order --> r3[Agy review]
+  order --> r4[Codex review]
   r1 --> consol[Consolidate and publish draft]
   r2 --> consol
   r3 --> consol
+  r4 --> consol
   consol <--> challenge[Human challenges]
   challenge --> github[Post to GitHub]
 ```
@@ -57,7 +59,7 @@ flowchart TB
       CDir["consolidations/"]
     end
 
-    Agents["Agent CLIs - claude, agent, agy"]
+    Agents["Agent CLIs - claude, agent, agy, codex"]
   end
 
   You <-->|browser| Daemon
@@ -121,9 +123,9 @@ flowchart TD
 
 - Docker with Compose v2
 - A GitHub token (`gh auth token` prints yours)
-- Credentials for at least one agent: Claude, Cursor, or Agy (see below)
+- Credentials for at least one agent: Claude, Cursor, Agy, or Codex (see below)
 
-The image ships `git`, `gh`, `claude`, `agent` (Cursor), and `agy`; nothing
+The image ships `git`, `gh`, `claude`, `agent` (Cursor), `agy`, and `codex`; nothing
 else needs to be installed on the host.
 
 ## Run with Docker
@@ -150,10 +152,10 @@ also rejects requests whose `Host` header isn't `localhost` or `127.0.0.1`
 (this blocks DNS-rebinding pages), so when you expose it, list the names you'll
 use in `LAZYREVIEW_ALLOWED_HOSTS` (comma-separated).
 
-The Claude and Cursor CLI versions are pinned as build args in the
+The Claude, Cursor, and Codex CLI versions are pinned as build args in the
 `Dockerfile`, because lazyreview parses their output. To upgrade one, bump it
 and run the tests, e.g.
-`docker compose build --build-arg CLAUDE_VERSION=2.1.301`. The `agy` installer
+`docker compose build --build-arg CODEX_VERSION=0.163.0`. The `agy` installer
 only serves its latest release, so `docker compose build --pull` picks up a new one.
 
 ### Credentials
@@ -162,8 +164,9 @@ Set them in **Settings → Credentials**, or in `.env` (gitignored). A key saved
 in Settings overrides the `.env` value and takes effect for the next run
 without a restart; it is stored in `/data/credentials.json` (mode 600) and
 never sent back to the browser. The same page checks whether each CLI is
-authenticated and offers a browser login for GitHub, Cursor, and Agy (Agy asks
-you to paste back the code Google shows). Claude has no browser login there:
+authenticated and offers a browser login for GitHub, Cursor, Agy, and Codex
+(GitHub and Codex show a device code; Agy asks you to paste back the code
+Google shows). Claude has no browser login there:
 run `claude setup-token` anywhere and paste the token.
 
 The `.env` variables:
@@ -174,10 +177,17 @@ The `.env` variables:
 | `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY` | `claude` |
 | `CURSOR_API_KEY` | `agent` |
 | `GEMINI_API_KEY` | `agy` (lazyreview sets `modelProvider: "gemini"` for it while the key is set) |
+| `CODEX_API_KEY` | `codex` (OpenAI API billing; the browser login uses a ChatGPT plan instead) |
 
 Browser logins are stored by each CLI under `/home/app` and persist in the
 `lazyreview-home` volume. A key, when set, takes priority over a browser login
 for that CLI. Each agent run gets `GH_TOKEN` plus only its own provider's keys.
+
+Codex's own sandbox can't start inside Docker, so Codex chat runs with its
+shell tools turned off: it answers from the analysis brief, findings, and
+conversation, but can't open files the way Claude chat can. Codex reviews,
+analyses, and consolidations run unrestricted inside the container, like the
+other agents.
 
 ### Review skill
 
