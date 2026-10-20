@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -133,4 +134,44 @@ def test_worktree_create_refresh_and_delete(tmp_path: Path, monkeypatch):
     assert not worktree_path(settings, 1).exists()
     row = dict(conn.execute("SELECT workspace_status FROM prs WHERE id = 1").fetchone())
     assert row["workspace_status"] == "deleted"
+    conn.close()
+
+
+def test_worktree_recovered_when_gitdir_missing(tmp_path: Path, monkeypatch):
+    """Orphan PR dirs (`.git` file but no mirror worktree metadata) are recreated."""
+    settings = _settings(tmp_path)
+    conn = connect(settings.db_path)
+    init_db(conn)
+
+    source = tmp_path / "source"
+    sha_a, _sha_b = _git_repo(source)
+    monkeypatch.setattr(
+        "lazyreview.services.pr_workspace.clone_url",
+        lambda owner, repo: str(source),
+    )
+
+    conn.execute(
+        """
+        INSERT INTO prs (owner, repo, number, url, title, base_ref, head_ref, head_sha, state)
+        VALUES ('acme', 'demo', 2, 'https://example/pr/2', 't', 'main', 'feat', ?, 'open')
+        """,
+        (sha_a,),
+    )
+    conn.commit()
+    pr = dict(conn.execute("SELECT * FROM prs WHERE id = 1").fetchone())
+
+    wt = ensure_pr_worktree(settings, pr, sha_a, conn=conn)
+    gitdir = (wt / ".git").read_text(encoding="utf-8").split(":", 1)[1].strip()
+    shutil.rmtree(gitdir, ignore_errors=True)
+
+    wt2 = ensure_pr_worktree(settings, pr, sha_a, conn=conn)
+    assert wt2 == wt
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=wt2,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert head == sha_a
     conn.close()

@@ -97,11 +97,55 @@ def ensure_mirror(settings: Settings, owner: str, repo: str) -> Path:
     return dest
 
 
-def _checkout_sha(worktree: Path, head_sha: str) -> None:
+def _worktree_is_valid(worktree: Path) -> bool:
+    """True when ``worktree`` is a linked git worktree with a live gitdir."""
+    if not worktree.is_dir() or not (worktree / ".git").exists():
+        return False
+    proc = _run_git(["rev-parse", "--is-inside-work-tree"], cwd=worktree)
+    return proc.returncode == 0 and proc.stdout.strip() == "true"
+
+
+def _destroy_worktree_dir(dest: Path, mirror: Path) -> None:
+    """Remove a PR checkout directory and drop stale mirror worktree metadata."""
+    if not dest.exists():
+        return
+    if mirror.exists():
+        removed = _run_git(["worktree", "remove", "--force", str(dest)], cwd=mirror)
+        if removed.returncode != 0:
+            shutil.rmtree(dest, ignore_errors=True)
+            _run_git(["worktree", "prune"], cwd=mirror)
+    else:
+        shutil.rmtree(dest, ignore_errors=True)
+
+
+def _add_pr_worktree(mirror: Path, dest: Path, head_sha: str) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    _run_git(["fetch", "origin", head_sha], cwd=mirror)
+    add = _run_git(
+        ["worktree", "add", "--force", "--detach", str(dest), head_sha],
+        cwd=mirror,
+    )
+    if add.returncode != 0:
+        _run_git(["fetch", "origin", "--tags", "--force"], cwd=mirror)
+        add = _run_git(
+            ["worktree", "add", "--force", "--detach", str(dest), head_sha],
+            cwd=mirror,
+        )
+    if add.returncode != 0:
+        raise GhError(
+            f"git worktree add failed: {(add.stderr or add.stdout).strip()}"
+        )
+
+
+def _checkout_sha(worktree: Path, head_sha: str, *, mirror: Path | None = None) -> None:
     fetch = _run_git(["fetch", "origin", head_sha], cwd=worktree)
     if fetch.returncode != 0:
         _run_git(["fetch", "origin", "--tags", "--force"], cwd=worktree)
     checkout = _run_git(["checkout", "--force", head_sha], cwd=worktree)
+    if checkout.returncode != 0 and mirror is not None:
+        _run_git(["fetch", "origin", head_sha], cwd=mirror)
+        _run_git(["fetch", "origin", "--tags", "--force"], cwd=mirror)
+        checkout = _run_git(["checkout", "--force", head_sha], cwd=worktree)
     if checkout.returncode != 0:
         raise GhError(
             f"git checkout {head_sha} failed: "
@@ -126,28 +170,17 @@ def ensure_pr_worktree(
     with _pr_lock(pr_id):
         mirror = ensure_mirror(settings, owner, repo)
         dest = worktree_path(settings, pr_id)
-        if dest.exists() and (dest / ".git").exists():
-            _checkout_sha(dest, head_sha)
+        if _worktree_is_valid(dest):
+            try:
+                _checkout_sha(dest, head_sha, mirror=mirror)
+            except GhError:
+                _destroy_worktree_dir(dest, mirror)
+                _add_pr_worktree(mirror, dest, head_sha)
+                _checkout_sha(dest, head_sha, mirror=mirror)
         else:
-            if dest.exists():
-                shutil.rmtree(dest, ignore_errors=True)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            add = _run_git(
-                ["worktree", "add", "--force", "--detach", str(dest), head_sha],
-                cwd=mirror,
-            )
-            if add.returncode != 0:
-                # Fetch sha into mirror then retry.
-                _run_git(["fetch", "origin", head_sha], cwd=mirror)
-                add = _run_git(
-                    ["worktree", "add", "--force", "--detach", str(dest), head_sha],
-                    cwd=mirror,
-                )
-            if add.returncode != 0:
-                raise GhError(
-                    f"git worktree add failed: {(add.stderr or add.stdout).strip()}"
-                )
-            _checkout_sha(dest, head_sha)
+            _destroy_worktree_dir(dest, mirror)
+            _add_pr_worktree(mirror, dest, head_sha)
+            _checkout_sha(dest, head_sha, mirror=mirror)
 
         if conn is not None:
             conn.execute(

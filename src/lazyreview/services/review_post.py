@@ -64,8 +64,13 @@ def recommended_action_from_findings(findings: list[dict[str, Any]]) -> str:
     return "approve"
 
 
+def finding_path(finding: dict[str, Any]) -> str:
+    """Repo-relative path for an inline anchor (``path`` or legacy ``file``)."""
+    return str(finding.get("path") or finding.get("file") or "").strip()
+
+
 def finding_has_inline_anchor(finding: dict[str, Any]) -> bool:
-    path = str(finding.get("path") or "").strip()
+    path = finding_path(finding)
     line = finding.get("line")
     if not path or line is None or line == "":
         return False
@@ -113,12 +118,55 @@ def inline_comment_body(finding: dict[str, Any]) -> str:
     return f"**{fid}** — {detail}"
 
 
+def filter_comments_for_changed_paths(
+    comments: list[dict[str, Any]],
+    changed_paths: set[str] | frozenset[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Drop review comments whose ``path`` is not in the PR diff file list."""
+    if not changed_paths:
+        return list(comments), []
+    kept: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for c in comments:
+        path = str(c.get("path") or "").strip()
+        if path and path in changed_paths:
+            kept.append(c)
+        else:
+            skipped.append(c)
+    return kept, skipped
+
+
+def count_inline_post_plan(
+    findings: list[dict[str, Any]],
+    changed_paths: set[str] | frozenset[str] | None = None,
+) -> dict[str, int]:
+    """Counts for UI: inline on diff, summary-only, and off-diff anchors."""
+    inline, summary, off_diff = 0, 0, 0
+    use_diff = bool(changed_paths)
+    for f in findings:
+        if not finding_has_inline_anchor(f):
+            summary += 1
+            continue
+        path = finding_path(f)
+        if use_diff and path not in changed_paths:
+            off_diff += 1
+            summary += 1
+            continue
+        inline += 1
+    return {
+        "inline": inline,
+        "summary": summary,
+        "off_diff": off_diff,
+        "total": len(findings),
+    }
+
+
 def build_review_comments(
     inline_findings: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     comments: list[dict[str, Any]] = []
     for f in inline_findings:
-        path = str(f.get("path") or "").strip()
+        path = finding_path(f)
         try:
             line = int(f.get("line"))
         except (TypeError, ValueError):

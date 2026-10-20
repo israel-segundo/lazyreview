@@ -316,6 +316,25 @@ def list_pr_comments(owner: str, repo: str, number: int) -> list[dict[str, Any]]
     return comments
 
 
+def list_pr_changed_paths(owner: str, repo: str, number: int) -> frozenset[str]:
+    """Paths touched by the PR (for inline review comment anchoring)."""
+    raw = run_gh(
+        [
+            "api",
+            f"repos/{owner}/{repo}/pulls/{number}/files",
+            "--paginate",
+            "--jq",
+            ".[].filename",
+        ]
+    )
+    paths: set[str] = set()
+    for line in (raw or "").splitlines():
+        name = line.strip().strip('"')
+        if name:
+            paths.add(name)
+    return frozenset(paths)
+
+
 def post_pr_comment(owner: str, repo: str, number: int, body: str) -> dict[str, Any]:
     out = run_gh(
         [
@@ -340,38 +359,68 @@ def submit_pr_review(
     *,
     commit_id: str | None = None,
     comments: list[dict[str, Any]] | None = None,
+    changed_paths: set[str] | frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """event: APPROVE | REQUEST_CHANGES | COMMENT.
 
     When ``comments`` is non-empty, ``commit_id`` (PR head SHA) is required by GitHub.
-    On 422 from a bad inline anchor, drop offending comments and retry once; if still
-    failing, retry with summary body only.
+    ``changed_paths`` (PR diff filenames) pre-filters comments GitHub would reject as
+    "Path could not be resolved". On 422 for the remaining batch, posts the summary
+    review then attaches each inline comment individually.
     """
     cleaned = _normalize_review_comments(comments or [])
+    skipped_off_diff: list[dict[str, Any]] = []
+    if cleaned and changed_paths is not None:
+        kept: list[dict[str, Any]] = []
+        for c in cleaned:
+            if c["path"] in changed_paths:
+                kept.append(c)
+            else:
+                skipped_off_diff.append(c)
+        if skipped_off_diff:
+            logger.info(
+                "Skipping %s inline comment(s) on paths outside PR diff",
+                len(skipped_off_diff),
+            )
+        cleaned = kept
+
+    sha = (commit_id or "").strip()
     payload_obj: dict[str, Any] = {"body": body, "event": event}
     if cleaned:
-        if not (commit_id or "").strip():
+        if not sha:
             raise GhError("commit_id is required when posting inline review comments")
-        payload_obj["commit_id"] = commit_id.strip()
+        payload_obj["commit_id"] = sha
         payload_obj["comments"] = cleaned
 
     try:
         result = _post_review(owner, repo, number, json.dumps(payload_obj))
-        result["dropped_comments"] = []
+        result["dropped_comments"] = list(skipped_off_diff)
+        result["posted_inline_count"] = len(cleaned)
+        result["skipped_off_diff_count"] = len(skipped_off_diff)
         return result
     except GhError as e:
         if not cleaned or not _is_unprocessable(e):
             raise
-        # Retry without comments that GitHub rejected (line not in diff, etc.).
-        dropped = list(cleaned)
-        payload_retry = {"body": body, "event": event}
         logger.warning(
-            "PR review with %s inline comment(s) rejected (%s); retrying without comments",
+            "PR review with %s inline comment(s) rejected (%s); "
+            "posting summary then attaching comments individually",
             len(cleaned),
             e,
         )
+        payload_retry = {"body": body, "event": event}
         result = _post_review(owner, repo, number, json.dumps(payload_retry))
-        result["dropped_comments"] = dropped
+        posted, attach_dropped = _attach_review_comments(
+            owner,
+            repo,
+            number,
+            review_id=str(result.get("id") or ""),
+            commit_id=sha,
+            comments=cleaned,
+        )
+        all_dropped = list(skipped_off_diff) + attach_dropped
+        result["dropped_comments"] = all_dropped
+        result["posted_inline_count"] = len(posted)
+        result["skipped_off_diff_count"] = len(skipped_off_diff)
         return result
 
 
@@ -411,6 +460,82 @@ def _normalize_review_comments(comments: list[dict[str, Any]]) -> list[dict[str,
 def _is_unprocessable(err: GhError) -> bool:
     msg = str(err).lower()
     return "422" in msg or "unprocessable" in msg or "must be part of the diff" in msg
+
+
+def _attach_review_comments(
+    owner: str,
+    repo: str,
+    number: int,
+    *,
+    review_id: str,
+    commit_id: str,
+    comments: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Attach inline comments to an existing review; return (posted, dropped)."""
+    posted: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    for c in comments:
+        try:
+            _post_pull_review_comment(
+                owner,
+                repo,
+                number,
+                commit_id=commit_id,
+                comment=c,
+                pull_request_review_id=review_id or None,
+            )
+            posted.append(c)
+        except GhError as err:
+            logger.warning(
+                "Inline comment on %s:%s rejected (%s)",
+                c.get("path"),
+                c.get("line"),
+                err,
+            )
+            dropped.append(c)
+    return posted, dropped
+
+
+def _post_pull_review_comment(
+    owner: str,
+    repo: str,
+    number: int,
+    *,
+    commit_id: str,
+    comment: dict[str, Any],
+    pull_request_review_id: str | None = None,
+) -> dict[str, Any]:
+    payload_obj: dict[str, Any] = {
+        "body": comment["body"],
+        "commit_id": commit_id,
+        "path": comment["path"],
+        "line": comment["line"],
+        "side": comment.get("side") or "RIGHT",
+    }
+    if pull_request_review_id:
+        try:
+            payload_obj["pull_request_review_id"] = int(pull_request_review_id)
+        except (TypeError, ValueError):
+            pass
+    gh = _require_gh()
+    proc = subprocess.run(
+        [
+            gh,
+            "api",
+            f"repos/{owner}/{repo}/pulls/{number}/comments",
+            "-X",
+            "POST",
+            "--input",
+            "-",
+        ],
+        input=json.dumps(payload_obj),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise GhError((proc.stderr or proc.stdout or "").strip())
+    return json.loads(proc.stdout or "{}")
 
 
 def _post_review(owner: str, repo: str, number: int, payload: str) -> dict[str, Any]:

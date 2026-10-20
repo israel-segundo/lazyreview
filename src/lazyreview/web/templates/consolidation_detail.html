@@ -331,6 +331,16 @@ function consolidationDetail() {
     regeneratingPublish: false,
     _poll: null,
     _edited: false,
+    diffPaths: [],
+    async loadDiffPaths() {
+      const prId = {{ pr.id if pr else 'null' }};
+      if (!prId || !window.LR || !LR.fetchPrDiffPaths) return;
+      try {
+        this.diffPaths = await LR.fetchPrDiffPaths(prId);
+      } catch (e) {
+        this.diffPaths = [];
+      }
+    },
     init() {
       if (typeof this.initChatRail === 'function') this.initChatRail();
       const rec = (this.c && this.c.recommended_action) || 'comment';
@@ -347,6 +357,7 @@ function consolidationDetail() {
       if (this.canSubmit() && !this.c.ready_to_post) {
         this._startPublishPoll();
       }
+      if (this.canSubmit()) this.loadDiffPaths();
     },
     onChatFindingsUpdated(session) {
       if (!session || !this.c) return;
@@ -524,23 +535,16 @@ function consolidationDetail() {
     },
     postCounts() {
       const list = (this.c && Array.isArray(this.c.findings)) ? this.c.findings : [];
-      let inline = 0;
-      let summary = 0;
-      for (const f of list) {
-        const path = (f.path || f.file || '').toString().trim();
-        const line = f.line;
-        if (path && line != null && line !== '' && !Number.isNaN(Number(line))) inline += 1;
-        else summary += 1;
+      if (window.LR && LR.countInlinePostPlan) {
+        return LR.countInlinePostPlan(list, this.diffPaths || []);
       }
-      return { inline, summary, total: list.length };
+      return { inline: 0, summary: list.length, offDiff: 0, total: list.length };
     },
     postAnchorSummary() {
-      const { inline, summary, total } = this.postCounts();
-      if (!total) return '';
-      const parts = [];
-      if (inline) parts.push(inline + ' inline on the diff');
-      if (summary) parts.push(summary + ' in the summary body');
-      return parts.length ? ('Will post: ' + parts.join(', ') + '.') : '';
+      if (window.LR && LR.formatInlinePostPlan) {
+        return LR.formatInlinePostPlan(this.postCounts());
+      }
+      return '';
     },
     async post() {
       this.postError = '';

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from lazyreview.services.analysis_gate import require_succeeded_analysis
-
-
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -23,14 +21,22 @@ from lazyreview.db import (
     mark_consolidation_feedback_provided,
     run_is_selectable,
 )
+from lazyreview.services.analysis_gate import require_succeeded_analysis
 from lazyreview.services.consolidation_jobs import consolidations_dir
-from lazyreview.services.gh import GhError, post_pr_comment, submit_pr_review
+from lazyreview.services.gh import (
+    GhError,
+    list_pr_changed_paths,
+    post_pr_comment,
+    submit_pr_review,
+)
 from lazyreview.services.review_post import (
     build_review_comments,
     parse_findings_list,
     split_findings_for_post,
 )
 from lazyreview.services.settings import get_consolidator_config
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["consolidations"])
 
@@ -347,6 +353,16 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
     gh_url = None
     gh_review_id = None
     dropped: list = []
+    skipped_off_diff = 0
+    posted_inline = 0
+    changed_paths: frozenset[str] | None = None
+    try:
+        changed_paths = list_pr_changed_paths(
+            pr["owner"], pr["repo"], int(pr["number"])
+        )
+    except GhError as e:
+        logger.warning("Could not list PR changed paths for inline filter: %s", e)
+
     try:
         event = _ACTION_TO_EVENT.get(body.action)
         if event is None:
@@ -364,18 +380,24 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
                 event,
                 commit_id=head_sha or None,
                 comments=review_comments or None,
+                changed_paths=changed_paths,
             )
             gh_url = res.get("html_url")
             gh_review_id = res.get("id")
             dropped = list(res.get("dropped_comments") or [])
+            skipped_off_diff = int(res.get("skipped_off_diff_count") or 0)
+            posted_inline = int(res.get("posted_inline_count") or 0)
     except GhError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     dedup = row.get("dedup_summary") or ""
     if review_comments:
-        note = f"Posted {len(review_comments) - len(dropped)} inline comment(s)"
-        if dropped:
-            note += f"; dropped {len(dropped)} bad anchor(s)"
+        note = f"Posted {posted_inline} inline comment(s)"
+        if skipped_off_diff:
+            note += f"; skipped {skipped_off_diff} off-diff path(s)"
+        attach_dropped = len(dropped) - skipped_off_diff
+        if attach_dropped > 0:
+            note += f"; dropped {attach_dropped} bad line anchor(s)"
         dedup = f"{dedup}; {note}".strip("; ")
 
     updated = mark_consolidation_feedback_provided(
@@ -398,6 +420,7 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
     return {
         "consolidation": updated,
         "action": action,
-        "inline_comments": len(review_comments),
+        "inline_comments": posted_inline,
         "dropped_inline_comments": len(dropped),
+        "skipped_off_diff_comments": skipped_off_diff,
     }

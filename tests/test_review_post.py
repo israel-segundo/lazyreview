@@ -19,6 +19,8 @@ from lazyreview.db.schema import connect, init_db
 from lazyreview.services.gh import GhError, submit_pr_review
 from lazyreview.services.review_post import (
     build_review_comments,
+    count_inline_post_plan,
+    filter_comments_for_changed_paths,
     finding_is_blocking,
     inline_comment_body,
     parse_findings_list,
@@ -53,6 +55,34 @@ def test_recommended_action_from_findings():
         == "request_changes"
     )
     assert recommended_action_from_findings([]) == "approve"
+
+
+def test_filter_comments_for_changed_paths():
+    comments = [
+        {"path": "in.py", "line": 1, "body": "a"},
+        {"path": "out.py", "line": 2, "body": "b"},
+    ]
+    kept, skipped = filter_comments_for_changed_paths(comments, {"in.py"})
+    assert len(kept) == 1 and kept[0]["path"] == "in.py"
+    assert len(skipped) == 1 and skipped[0]["path"] == "out.py"
+
+
+def test_count_inline_post_plan_off_diff():
+    findings = [
+        {"id": "C1", "path": "a.py", "line": 1},
+        {"id": "C2", "path": "other.py", "line": 2},
+        {"id": "C3", "title": "no anchor"},
+    ]
+    plan = count_inline_post_plan(findings, {"a.py"})
+    assert plan == {"inline": 1, "summary": 2, "off_diff": 1, "total": 3}
+
+
+def test_split_findings_uses_file_alias():
+    inline, summary = split_findings_for_post(
+        [{"id": "C1", "file": "a.py", "line": 3, "title": "x"}]
+    )
+    assert [f["id"] for f in inline] == ["C1"]
+    assert summary == []
 
 
 def test_split_and_inline_bodies():
@@ -125,15 +155,47 @@ def test_submit_pr_review_requires_commit_id_with_comments():
         )
 
 
-def test_submit_pr_review_422_retries_without_comments():
-    calls: list[str] = []
+def test_submit_pr_review_422_attaches_comments_individually():
+    review_calls: list[str] = []
+    attach_calls: list[dict] = []
 
     def _fake_post(owner, repo, number, payload):
-        calls.append(payload)
+        review_calls.append(payload)
         data = json.loads(payload)
         if data.get("comments"):
             raise GhError("HTTP 422: Line must be part of the diff")
         return {"ok": True, "id": "9", "html_url": "https://example.com/r/9"}
+
+    def _fake_attach(owner, repo, number, *, review_id, commit_id, comments):
+        attach_calls.extend(comments)
+        return list(comments), []
+
+    with (
+        patch("lazyreview.services.gh._post_review", side_effect=_fake_post),
+        patch("lazyreview.services.gh._attach_review_comments", side_effect=_fake_attach),
+    ):
+        res = submit_pr_review(
+            "o",
+            "r",
+            1,
+            "Summary",
+            "APPROVE",
+            commit_id="deadbeef",
+            comments=[{"path": "a.py", "line": 99, "body": "**C1** — ok"}],
+        )
+    assert len(review_calls) == 2
+    assert "comments" not in json.loads(review_calls[1])
+    assert len(attach_calls) == 1
+    assert res["posted_inline_count"] == 1
+    assert res["dropped_comments"] == []
+
+
+def test_submit_pr_review_prefilters_off_diff_paths():
+    captured: list[str] = []
+
+    def _fake_post(owner, repo, number, payload):
+        captured.append(payload)
+        return {"ok": True, "id": "1", "html_url": "u"}
 
     with patch("lazyreview.services.gh._post_review", side_effect=_fake_post):
         res = submit_pr_review(
@@ -142,13 +204,19 @@ def test_submit_pr_review_422_retries_without_comments():
             1,
             "Summary",
             "APPROVE",
-            commit_id="deadbeef",
-            comments=[{"path": "a.py", "line": 99, "body": "**C1** — gone"}],
+            commit_id="abc",
+            changed_paths=frozenset({"in.py"}),
+            comments=[
+                {"path": "in.py", "line": 1, "body": "keep"},
+                {"path": "out.py", "line": 2, "body": "skip"},
+            ],
         )
-    assert len(calls) == 2
-    assert "comments" not in json.loads(calls[1])
+    data = json.loads(captured[0])
+    assert len(data["comments"]) == 1
+    assert data["comments"][0]["path"] == "in.py"
     assert len(res["dropped_comments"]) == 1
-    assert res["id"] == "9"
+    assert res["skipped_off_diff_count"] == 1
+    assert res["posted_inline_count"] == 1
 
 
 def test_submit_pr_review_body_only_when_no_comments():
@@ -270,7 +338,17 @@ def test_post_sends_inline_comments(tmp_path: Path):
 
     captured: dict = {}
 
-    def _fake_submit(owner, repo, number, body, event, *, commit_id=None, comments=None):
+    def _fake_submit(
+        owner,
+        repo,
+        number,
+        body,
+        event,
+        *,
+        commit_id=None,
+        comments=None,
+        changed_paths=None,
+    ):
         captured["args"] = {
             "owner": owner,
             "repo": repo,
@@ -279,16 +357,23 @@ def test_post_sends_inline_comments(tmp_path: Path):
             "event": event,
             "commit_id": commit_id,
             "comments": comments,
+            "changed_paths": changed_paths,
         }
         return {
             "ok": True,
             "id": "99",
             "html_url": "https://example.com/review/99",
             "dropped_comments": [],
+            "posted_inline_count": len(comments or []),
+            "skipped_off_diff_count": 0,
         }
 
     with (
         patch("lazyreview.main.get_settings", return_value=settings),
+        patch(
+            "lazyreview.api.consolidations.list_pr_changed_paths",
+            return_value=frozenset({"src/a.py"}),
+        ),
         patch(
             "lazyreview.api.consolidations.submit_pr_review",
             side_effect=_fake_submit,
