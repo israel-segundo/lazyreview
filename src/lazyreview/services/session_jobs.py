@@ -36,6 +36,8 @@ from lazyreview.services.pr_workspace import hold_worktree
 from lazyreview.services.session_safety import (
     SESSION_ALLOWED_TOOLS,
     preflight_user_message,
+    redact_session_reply,
+    session_allow_path_prefixes,
 )
 
 logger = logging.getLogger(__name__)
@@ -393,7 +395,9 @@ class SessionRunner:
         model = session.get("model") or ClaudeModelAlias.OPUS.value
         effort = session.get("effort") or EffortLevel.HIGH.value
 
+        allow_paths = session_allow_path_prefixes(workdir)
         with hold_worktree(self.settings, pr, head, conn=conn) as worktree:
+            allow_paths = session_allow_path_prefixes(workdir, worktree)
             argv, stdin_text = self._build_command(
                 agent=agent,
                 model=model,
@@ -436,6 +440,17 @@ class SessionRunner:
             )
 
         reply_body, structured = parse_structured_trailer(assistant)
+        reply_body = redact_session_reply(
+            reply_body, allow_path_prefixes=allow_paths
+        )
+        if structured and isinstance(structured.get("working_body_md"), str):
+            structured["working_body_md"] = redact_session_reply(
+                structured["working_body_md"], allow_path_prefixes=allow_paths
+            )
+        if structured and isinstance(structured.get("publish_guidance"), str):
+            structured["publish_guidance"] = redact_session_reply(
+                structured["publish_guidance"], allow_path_prefixes=allow_paths
+            )
         findings_delta = None
         action = None
         rationale = None

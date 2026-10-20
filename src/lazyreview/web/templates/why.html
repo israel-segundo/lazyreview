@@ -48,9 +48,16 @@
       </li>
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Interactive chat</strong>
-        — Explore a PR (worktree Q&amp;A) or Challenge a consolidation (evolve findings +
-        recommended action). Right-rail chat, sandboxed to that PR only; Done regenerates
-        the publish draft. Never auto-posts to GitHub.
+        — Explore a PR (worktree Q&amp;A) or Challenge a consolidation (evolve findings,
+        recommended action, report tone, and publish guidance). Right-rail chat, sandboxed
+        to that PR only; Done regenerates the publish draft. Never auto-posts to GitHub.
+      </li>
+      <li>
+        <strong class="font-medium text-slate-900 dark:text-slate-100">Chat safety</strong>
+        — hard preflight blocks host recon, secret/env extraction, jailbreaks, and clear
+        off-topic asks before an agent runs; prompts use an allowlist + refuse template;
+        tools stay in the PR worktree; replies redact credential-shaped tokens and foreign
+        home paths. Defense in depth for trusted local use — not multi-tenant ACLs.
       </li>
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Head-aware</strong>
@@ -156,9 +163,33 @@
       </li>
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Human challenges stay local</strong>
-        — edit or regenerate the draft against that consolidation dir + DB until you post.
+        — edit, chat, or regenerate the draft against that consolidation dir + DB until you post.
+      </li>
+      <li>
+        <strong class="font-medium text-slate-900 dark:text-slate-100">Chat stays on the PR</strong>
+        — messages that ask for host paths, secrets, system prompts, jailbreaks, or clear
+        off-topic questions are refused in the UI without spawning an agent; allowed rounds
+        run in the shared worktree with tool allowlists and reply redaction.
       </li>
     </ul>
+    <figure class="lr-mermaid lr-mermaid--fit">
+      <div class="lr-mermaid-toolbar">
+        <span class="lr-mermaid-label">Chat safety layers</span>
+        <button type="button" class="lr-mermaid-expand" data-lr-mermaid-expand>Expand</button>
+      </div>
+      <pre class="lr-mermaid-src" hidden>flowchart LR
+  msg[Chat message]
+  pre[Hard preflight]
+  refuse[Refuse in UI]
+  agent[Agent in worktree]
+  redact[Reply redaction]
+  store[SQLite turn]
+  msg --> pre
+  pre -->|block| refuse
+  pre -->|allow| agent
+  agent --> redact --> store</pre>
+      <div class="lr-mermaid-host" aria-busy="true">Rendering…</div>
+    </figure>
   </section>
 
   <section class="space-y-4">
@@ -195,7 +226,7 @@
       <li><strong class="font-medium text-slate-900 dark:text-slate-100">Consolidate</strong> — dedupe across runs and existing PR comments; emit an internal report plus <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">meta.json</code>.</li>
       <li><strong class="font-medium text-slate-900 dark:text-slate-100">Verify</strong> — reproduce or refute each consensus finding in the shared PR worktree; drop false alarms; recompute <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">recommended_action</code>.</li>
       <li><strong class="font-medium text-slate-900 dark:text-slate-100">Publish</strong> — rewrite the verified report into concise GitHub-facing markdown (still local).</li>
-      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Chat (optional)</strong> — Explore the PR worktree, or Challenge findings / recommended action; Done regenerates the publish draft.</li>
+      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Chat (optional)</strong> — Explore the PR worktree, or Challenge findings / recommended action / draft tone (hard preflight + sandbox + reply redaction); Done regenerates the publish draft.</li>
       <li><strong class="font-medium text-slate-900 dark:text-slate-100">Submit</strong> — you choose the action, edit the draft, and post. Never auto-posted.</li>
     </ol>
   </section>

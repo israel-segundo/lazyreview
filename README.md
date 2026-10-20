@@ -73,8 +73,23 @@ flowchart TB
 - **One worktree per PR** — created lazily, held while analysis, review, verify, or interactive chat sessions run, reused across agents for the same head.
 - **SQLite is the handoff into consolidate** — brief and per-run findings are staged into `consolidations/{id}/` (no worktree for that merge pass).
 - **Verify uses the worktree** — after consolidate, a separate agent pass holds the shared PR worktree, reproduces or refutes each consensus finding, drops false alarms, and rewrites `body.md` / `findings.json` / `meta.json` before publish.
-- **Interactive chat** — right-rail Explore (PR Q&A) and Challenge (adversarial rounds over consolidation findings). Turns + working findings live in SQLite; Done writes findings/action and re-runs the publish transform. Never auto-posts.
+- **Interactive chat** — right-rail Explore (PR Q&A) and Challenge (adversarial rounds over consolidation findings, report tone, and publish guidance). Turns + working findings live in SQLite; Done writes findings/action/body and re-runs the publish transform. Never auto-posts.
+- **Chat safety (defense in depth)** — scoped to one PR; hard preflight blocks host recon, secret/env extraction, jailbreaks, and clear off-topic asks before any agent runs; prompts state an allowlist and refuse template; tools stay in the worktree allowlist; replies redact credential-shaped tokens and foreign `/home/…` paths. Not a multi-tenant ACL — for trusted local use.
 - **Human challenges stay local** — edit, chat, or regenerate the draft until you post.
+
+```mermaid
+flowchart LR
+  msg[Chat message]
+  pre[Hard preflight]
+  refuse[Refuse in UI]
+  agent[Agent in worktree]
+  redact[Reply redaction]
+  store[SQLite turn]
+  msg --> pre
+  pre -->|block| refuse
+  pre -->|allow| agent
+  agent --> redact --> store
+```
 
 ## Prompt chaining
 
@@ -100,7 +115,7 @@ flowchart TD
 3. **Consolidate** — dedupe across runs and existing PR comments; emit an internal report plus `meta.json`.
 4. **Verify** — reproduce or refute each consensus finding in the shared PR worktree; drop false alarms; recompute `recommended_action`.
 5. **Publish** — rewrite the verified report into concise GitHub-facing markdown (still local).
-6. **Chat (optional)** — Explore the PR worktree, or Challenge findings / recommended action in rounds; Done syncs findings and regenerates the publish draft.
+6. **Chat (optional)** — Explore the PR worktree, or Challenge findings / recommended action / draft tone in rounds (hard preflight + sandbox + reply redaction). Done syncs findings and regenerates the publish draft.
 7. **Submit** — you choose the action (`approve` / `request_changes` / `comment`), edit the draft, and post via `gh`. Never auto-posted.
 
 ## Prerequisites
