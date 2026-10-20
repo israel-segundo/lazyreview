@@ -163,7 +163,6 @@ def test_submit_pr_review_requires_commit_id_with_comments():
 
 def test_submit_pr_review_422_attaches_comments_individually():
     review_calls: list[str] = []
-    attach_calls: list[dict] = []
 
     def _fake_post(owner, repo, number, payload):
         review_calls.append(payload)
@@ -172,15 +171,12 @@ def test_submit_pr_review_422_attaches_comments_individually():
             raise GhError("HTTP 422: Line must be part of the diff")
         return {"ok": True, "id": "9", "html_url": "https://example.com/r/9"}
 
-    attach_n = {"n": 0}
-
-    def _fake_single(*a, **k):
-        attach_n["n"] += 1
-        return {"ok": True}
+    def _fake_single(owner, repo, number, *, commit_id, comments, review_body=""):
+        return list(comments), []
 
     with (
         patch("lazyreview.services.gh._post_review", side_effect=_fake_post),
-        patch("lazyreview.services.gh._post_single_inline_via_review", side_effect=_fake_single),
+        patch("lazyreview.services.gh._post_inline_comments_one_review", side_effect=_fake_single),
     ):
         res = submit_pr_review(
             "o",
@@ -193,7 +189,6 @@ def test_submit_pr_review_422_attaches_comments_individually():
         )
     assert len(review_calls) == 2
     assert "comments" not in json.loads(review_calls[1])
-    assert attach_n["n"] == 1
     assert res["posted_inline_count"] == 1
     assert res["dropped_comments"] == []
 

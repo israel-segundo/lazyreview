@@ -355,8 +355,8 @@ def submit_pr_review(
     When ``comments`` is non-empty, ``commit_id`` (PR head SHA) is required by GitHub.
     ``changed_paths`` / ``commentable_lines`` pre-filter anchors GitHub rejects
     ("Path could not be resolved", "Line could not be resolved"). On 422 for the
-    remaining batch, posts the summary review then attaches each inline via the
-    pull **review** API (one comment per request).
+    remaining batch, posts the summary review then attaches all inlines in one
+    COMMENT follow-up review.
     """
     cleaned = _normalize_review_comments(comments or [])
     skipped_off_diff: list[dict[str, Any]] = []
@@ -412,7 +412,7 @@ def submit_pr_review(
         )
         payload_retry = {"body": body, "event": event}
         result = _post_review(owner, repo, number, json.dumps(payload_retry))
-        posted, attach_dropped = _attach_review_comments(
+        posted, attach_dropped = _post_inline_comments_one_review(
             owner,
             repo,
             number,
@@ -465,57 +465,52 @@ def _is_unprocessable(err: GhError) -> bool:
     return "422" in msg or "unprocessable" in msg or "must be part of the diff" in msg
 
 
-def _attach_review_comments(
+_INLINE_FOLLOWUP_BODY = (
+    "Inline review comments for the review above (posted as one follow-up)."
+)
+
+
+def _post_inline_comments_one_review(
     owner: str,
     repo: str,
     number: int,
     *,
     commit_id: str,
     comments: list[dict[str, Any]],
+    review_body: str = _INLINE_FOLLOWUP_BODY,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Post each inline via the pull review API (gh no longer accepts line+path on /comments)."""
-    posted: list[dict[str, Any]] = []
-    dropped: list[dict[str, Any]] = []
-    for c in comments:
-        try:
-            _post_single_inline_via_review(
-                owner, repo, number, commit_id=commit_id, comment=c
-            )
-            posted.append(c)
-        except GhError as err:
-            logger.warning(
-                "Inline comment on %s:%s rejected (%s)",
-                c.get("path"),
-                c.get("line"),
-                err,
-            )
-            dropped.append(c)
-    return posted, dropped
-
-
-def _post_single_inline_via_review(
-    owner: str,
-    repo: str,
-    number: int,
-    *,
-    commit_id: str,
-    comment: dict[str, Any],
-) -> dict[str, Any]:
-    """One inline comment bundled in a COMMENT review (works with current GitHub API)."""
+    """Attach all inlines under a single COMMENT review (never one review per inline)."""
+    if not comments:
+        return [], []
     payload_obj: dict[str, Any] = {
-        "body": "Inline review comment.",
+        "body": review_body,
         "event": "COMMENT",
         "commit_id": commit_id,
-        "comments": [
-            {
-                "path": comment["path"],
-                "line": comment["line"],
-                "side": comment.get("side") or "RIGHT",
-                "body": comment["body"],
-            }
-        ],
+        "comments": comments,
     }
-    return _post_review(owner, repo, number, json.dumps(payload_obj))
+    try:
+        _post_review(owner, repo, number, json.dumps(payload_obj))
+        return list(comments), []
+    except GhError as err:
+        if not _is_unprocessable(err) or len(comments) <= 1:
+            logger.warning("Inline follow-up review failed (%s)", err)
+            return [], list(comments)
+    # Drop one comment at a time until GitHub accepts the batch (small N).
+    posted: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    remaining = list(comments)
+    while remaining:
+        payload_obj["comments"] = remaining
+        try:
+            _post_review(owner, repo, number, json.dumps(payload_obj))
+            posted.extend(remaining)
+            return posted, dropped
+        except GhError as err:
+            if not _is_unprocessable(err):
+                dropped.extend(remaining)
+                return posted, dropped
+            dropped.append(remaining.pop())
+    return posted, dropped
 
 
 def _post_review(owner: str, repo: str, number: int, payload: str) -> dict[str, Any]:
