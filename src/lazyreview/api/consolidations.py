@@ -29,6 +29,7 @@ from lazyreview.services.gh import (
     post_pr_comment,
     submit_pr_review,
 )
+from lazyreview.services.pr_diff import commentable_lines_by_path, list_pr_file_patches
 from lazyreview.services.review_post import (
     build_review_comments,
     parse_findings_list,
@@ -354,14 +355,16 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
     gh_review_id = None
     dropped: list = []
     skipped_off_diff = 0
+    skipped_bad_line = 0
     posted_inline = 0
     changed_paths: frozenset[str] | None = None
+    commentable_lines: dict[str, frozenset[int]] | None = None
     try:
-        changed_paths = list_pr_changed_paths(
-            pr["owner"], pr["repo"], int(pr["number"])
-        )
+        patches = list_pr_file_patches(pr["owner"], pr["repo"], int(pr["number"]))
+        changed_paths = frozenset(patches.keys())
+        commentable_lines = commentable_lines_by_path(patches)
     except GhError as e:
-        logger.warning("Could not list PR changed paths for inline filter: %s", e)
+        logger.warning("Could not list PR diff for inline filter: %s", e)
 
     try:
         event = _ACTION_TO_EVENT.get(body.action)
@@ -381,11 +384,13 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
                 commit_id=head_sha or None,
                 comments=review_comments or None,
                 changed_paths=changed_paths,
+                commentable_lines=commentable_lines,
             )
             gh_url = res.get("html_url")
             gh_review_id = res.get("id")
             dropped = list(res.get("dropped_comments") or [])
             skipped_off_diff = int(res.get("skipped_off_diff_count") or 0)
+            skipped_bad_line = int(res.get("skipped_bad_line_count") or 0)
             posted_inline = int(res.get("posted_inline_count") or 0)
     except GhError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -395,7 +400,9 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
         note = f"Posted {posted_inline} inline comment(s)"
         if skipped_off_diff:
             note += f"; skipped {skipped_off_diff} off-diff path(s)"
-        attach_dropped = len(dropped) - skipped_off_diff
+        if skipped_bad_line:
+            note += f"; skipped {skipped_bad_line} non-diff line(s)"
+        attach_dropped = len(dropped) - skipped_off_diff - skipped_bad_line
         if attach_dropped > 0:
             note += f"; dropped {attach_dropped} bad line anchor(s)"
         dedup = f"{dedup}; {note}".strip("; ")
@@ -423,4 +430,5 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
         "inline_comments": posted_inline,
         "dropped_inline_comments": len(dropped),
         "skipped_off_diff_comments": skipped_off_diff,
+        "skipped_bad_line_comments": skipped_bad_line,
     }

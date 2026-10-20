@@ -331,14 +331,14 @@ function consolidationDetail() {
     regeneratingPublish: false,
     _poll: null,
     _edited: false,
-    diffPaths: [],
+    diffMeta: { paths: [], commentable_lines: {} },
     async loadDiffPaths() {
       const prId = {{ pr.id if pr else 'null' }};
       if (!prId || !window.LR || !LR.fetchPrDiffPaths) return;
       try {
-        this.diffPaths = await LR.fetchPrDiffPaths(prId);
+        this.diffMeta = await LR.fetchPrDiffPaths(prId);
       } catch (e) {
-        this.diffPaths = [];
+        this.diffMeta = { paths: [], commentable_lines: {} };
       }
     },
     init() {
@@ -536,7 +536,7 @@ function consolidationDetail() {
     postCounts() {
       const list = (this.c && Array.isArray(this.c.findings)) ? this.c.findings : [];
       if (window.LR && LR.countInlinePostPlan) {
-        return LR.countInlinePostPlan(list, this.diffPaths || []);
+        return LR.countInlinePostPlan(list, this.diffMeta || {});
       }
       return { inline: 0, summary: list.length, offDiff: 0, total: list.length };
     },

@@ -318,21 +318,9 @@ def list_pr_comments(owner: str, repo: str, number: int) -> list[dict[str, Any]]
 
 def list_pr_changed_paths(owner: str, repo: str, number: int) -> frozenset[str]:
     """Paths touched by the PR (for inline review comment anchoring)."""
-    raw = run_gh(
-        [
-            "api",
-            f"repos/{owner}/{repo}/pulls/{number}/files",
-            "--paginate",
-            "--jq",
-            ".[].filename",
-        ]
-    )
-    paths: set[str] = set()
-    for line in (raw or "").splitlines():
-        name = line.strip().strip('"')
-        if name:
-            paths.add(name)
-    return frozenset(paths)
+    from lazyreview.services.pr_diff import list_pr_file_patches
+
+    return frozenset(list_pr_file_patches(owner, repo, number).keys())
 
 
 def post_pr_comment(owner: str, repo: str, number: int, body: str) -> dict[str, Any]:
@@ -360,16 +348,19 @@ def submit_pr_review(
     commit_id: str | None = None,
     comments: list[dict[str, Any]] | None = None,
     changed_paths: set[str] | frozenset[str] | None = None,
+    commentable_lines: dict[str, frozenset[int]] | None = None,
 ) -> dict[str, Any]:
     """event: APPROVE | REQUEST_CHANGES | COMMENT.
 
     When ``comments`` is non-empty, ``commit_id`` (PR head SHA) is required by GitHub.
-    ``changed_paths`` (PR diff filenames) pre-filters comments GitHub would reject as
-    "Path could not be resolved". On 422 for the remaining batch, posts the summary
-    review then attaches each inline comment individually.
+    ``changed_paths`` / ``commentable_lines`` pre-filter anchors GitHub rejects
+    ("Path could not be resolved", "Line could not be resolved"). On 422 for the
+    remaining batch, posts the summary review then attaches each inline via the
+    pull **review** API (one comment per request).
     """
     cleaned = _normalize_review_comments(comments or [])
     skipped_off_diff: list[dict[str, Any]] = []
+    skipped_bad_line: list[dict[str, Any]] = []
     if cleaned and changed_paths is not None:
         kept: list[dict[str, Any]] = []
         for c in cleaned:
@@ -383,6 +374,17 @@ def submit_pr_review(
                 len(skipped_off_diff),
             )
         cleaned = kept
+    if cleaned and commentable_lines is not None:
+        from lazyreview.services.pr_diff import filter_comments_for_diff_lines
+
+        cleaned, skipped_bad_line = filter_comments_for_diff_lines(
+            cleaned, commentable_lines, snap=True
+        )
+        if skipped_bad_line:
+            logger.info(
+                "Skipping %s inline comment(s) on non-commentable diff lines",
+                len(skipped_bad_line),
+            )
 
     sha = (commit_id or "").strip()
     payload_obj: dict[str, Any] = {"body": body, "event": event}
@@ -394,9 +396,10 @@ def submit_pr_review(
 
     try:
         result = _post_review(owner, repo, number, json.dumps(payload_obj))
-        result["dropped_comments"] = list(skipped_off_diff)
+        result["dropped_comments"] = list(skipped_off_diff) + list(skipped_bad_line)
         result["posted_inline_count"] = len(cleaned)
         result["skipped_off_diff_count"] = len(skipped_off_diff)
+        result["skipped_bad_line_count"] = len(skipped_bad_line)
         return result
     except GhError as e:
         if not cleaned or not _is_unprocessable(e):
@@ -413,14 +416,14 @@ def submit_pr_review(
             owner,
             repo,
             number,
-            review_id=str(result.get("id") or ""),
             commit_id=sha,
             comments=cleaned,
         )
-        all_dropped = list(skipped_off_diff) + attach_dropped
+        all_dropped = list(skipped_off_diff) + list(skipped_bad_line) + attach_dropped
         result["dropped_comments"] = all_dropped
         result["posted_inline_count"] = len(posted)
         result["skipped_off_diff_count"] = len(skipped_off_diff)
+        result["skipped_bad_line_count"] = len(skipped_bad_line)
         return result
 
 
@@ -467,22 +470,16 @@ def _attach_review_comments(
     repo: str,
     number: int,
     *,
-    review_id: str,
     commit_id: str,
     comments: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Attach inline comments to an existing review; return (posted, dropped)."""
+    """Post each inline via the pull review API (gh no longer accepts line+path on /comments)."""
     posted: list[dict[str, Any]] = []
     dropped: list[dict[str, Any]] = []
     for c in comments:
         try:
-            _post_pull_review_comment(
-                owner,
-                repo,
-                number,
-                commit_id=commit_id,
-                comment=c,
-                pull_request_review_id=review_id or None,
+            _post_single_inline_via_review(
+                owner, repo, number, commit_id=commit_id, comment=c
             )
             posted.append(c)
         except GhError as err:
@@ -496,46 +493,29 @@ def _attach_review_comments(
     return posted, dropped
 
 
-def _post_pull_review_comment(
+def _post_single_inline_via_review(
     owner: str,
     repo: str,
     number: int,
     *,
     commit_id: str,
     comment: dict[str, Any],
-    pull_request_review_id: str | None = None,
 ) -> dict[str, Any]:
+    """One inline comment bundled in a COMMENT review (works with current GitHub API)."""
     payload_obj: dict[str, Any] = {
-        "body": comment["body"],
+        "body": "Inline review comment.",
+        "event": "COMMENT",
         "commit_id": commit_id,
-        "path": comment["path"],
-        "line": comment["line"],
-        "side": comment.get("side") or "RIGHT",
-    }
-    if pull_request_review_id:
-        try:
-            payload_obj["pull_request_review_id"] = int(pull_request_review_id)
-        except (TypeError, ValueError):
-            pass
-    gh = _require_gh()
-    proc = subprocess.run(
-        [
-            gh,
-            "api",
-            f"repos/{owner}/{repo}/pulls/{number}/comments",
-            "-X",
-            "POST",
-            "--input",
-            "-",
+        "comments": [
+            {
+                "path": comment["path"],
+                "line": comment["line"],
+                "side": comment.get("side") or "RIGHT",
+                "body": comment["body"],
+            }
         ],
-        input=json.dumps(payload_obj),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        raise GhError((proc.stderr or proc.stdout or "").strip())
-    return json.loads(proc.stdout or "{}")
+    }
+    return _post_review(owner, repo, number, json.dumps(payload_obj))
 
 
 def _post_review(owner: str, repo: str, number: int, payload: str) -> dict[str, Any]:

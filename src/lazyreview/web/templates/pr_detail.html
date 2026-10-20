@@ -1443,13 +1443,13 @@ function reviewForm() {
     cancelling: {},
     deleting: {},
     rerunning: {},
-    diffPaths: [],
+    diffMeta: { paths: [], commentable_lines: {} },
     async loadDiffPaths() {
       if (!window.LR || !LR.fetchPrDiffPaths) return;
       try {
-        this.diffPaths = await LR.fetchPrDiffPaths({{ pr.id }});
+        this.diffMeta = await LR.fetchPrDiffPaths({{ pr.id }});
       } catch (e) {
-        this.diffPaths = [];
+        this.diffMeta = { paths: [], commentable_lines: {} };
       }
     },
     async init() {
@@ -2134,7 +2134,7 @@ function reviewForm() {
       const c = this.activeFindingsConsolidation();
       const list = (c && Array.isArray(c.findings)) ? c.findings : [];
       if (window.LR && LR.countInlinePostPlan) {
-        return LR.countInlinePostPlan(list, this.diffPaths || []);
+        return LR.countInlinePostPlan(list, this.diffMeta || {});
       }
       return { inline: 0, summary: list.length, offDiff: 0, total: list.length };
     },

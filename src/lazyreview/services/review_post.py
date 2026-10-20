@@ -139,24 +139,44 @@ def filter_comments_for_changed_paths(
 def count_inline_post_plan(
     findings: list[dict[str, Any]],
     changed_paths: set[str] | frozenset[str] | None = None,
+    commentable_lines: dict[str, frozenset[int]] | None = None,
 ) -> dict[str, int]:
-    """Counts for UI: inline on diff, summary-only, and off-diff anchors."""
-    inline, summary, off_diff = 0, 0, 0
-    use_diff = bool(changed_paths)
+    """Counts for UI: inline on diff, summary-only, and off-diff / bad-line anchors."""
+    inline, summary, off_diff, bad_line = 0, 0, 0, 0
+    use_paths = bool(changed_paths)
+    use_lines = bool(commentable_lines)
     for f in findings:
         if not finding_has_inline_anchor(f):
             summary += 1
             continue
         path = finding_path(f)
-        if use_diff and path not in changed_paths:
+        try:
+            line = int(f.get("line"))
+        except (TypeError, ValueError):
+            summary += 1
+            continue
+        if use_paths and path not in (changed_paths or ()):
             off_diff += 1
             summary += 1
             continue
+        if use_lines:
+            from lazyreview.services.pr_diff import snap_line_to_patch
+
+            available = (commentable_lines or {}).get(path)
+            if available is None:
+                off_diff += 1
+                summary += 1
+                continue
+            if line not in available and snap_line_to_patch(line, available) is None:
+                bad_line += 1
+                summary += 1
+                continue
         inline += 1
     return {
         "inline": inline,
         "summary": summary,
         "off_diff": off_diff,
+        "bad_line": bad_line,
         "total": len(findings),
     }
 

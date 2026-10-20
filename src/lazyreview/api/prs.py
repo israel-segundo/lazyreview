@@ -4,7 +4,8 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from lazyreview.db import get_pr, list_prs, list_runs_for_pr, upsert_pr
-from lazyreview.services.gh import GhError, list_pr_changed_paths, view_pr
+from lazyreview.services.gh import GhError, view_pr
+from lazyreview.services.pr_diff import commentable_lines_by_path, list_pr_file_patches
 from lazyreview.services.pr_sync import sync_pending_review_prs
 
 router = APIRouter(tags=["prs"])
@@ -71,9 +72,11 @@ def pr_diff_paths(pr_id: int, request: Request):
     if not pr:
         raise HTTPException(status_code=404, detail="PR not found")
     try:
-        paths = sorted(
-            list_pr_changed_paths(pr["owner"], pr["repo"], int(pr["number"]))
-        )
+        patches = list_pr_file_patches(pr["owner"], pr["repo"], int(pr["number"]))
     except GhError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return {"paths": paths}
+    lines = commentable_lines_by_path(patches)
+    return {
+        "paths": sorted(patches.keys()),
+        "commentable_lines": {p: sorted(lines[p]) for p in sorted(lines)},
+    }

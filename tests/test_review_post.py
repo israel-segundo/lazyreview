@@ -74,7 +74,13 @@ def test_count_inline_post_plan_off_diff():
         {"id": "C3", "title": "no anchor"},
     ]
     plan = count_inline_post_plan(findings, {"a.py"})
-    assert plan == {"inline": 1, "summary": 2, "off_diff": 1, "total": 3}
+    assert plan == {
+        "inline": 1,
+        "summary": 2,
+        "off_diff": 1,
+        "bad_line": 0,
+        "total": 3,
+    }
 
 
 def test_split_findings_uses_file_alias():
@@ -166,13 +172,15 @@ def test_submit_pr_review_422_attaches_comments_individually():
             raise GhError("HTTP 422: Line must be part of the diff")
         return {"ok": True, "id": "9", "html_url": "https://example.com/r/9"}
 
-    def _fake_attach(owner, repo, number, *, review_id, commit_id, comments):
-        attach_calls.extend(comments)
-        return list(comments), []
+    attach_n = {"n": 0}
+
+    def _fake_single(*a, **k):
+        attach_n["n"] += 1
+        return {"ok": True}
 
     with (
         patch("lazyreview.services.gh._post_review", side_effect=_fake_post),
-        patch("lazyreview.services.gh._attach_review_comments", side_effect=_fake_attach),
+        patch("lazyreview.services.gh._post_single_inline_via_review", side_effect=_fake_single),
     ):
         res = submit_pr_review(
             "o",
@@ -185,7 +193,7 @@ def test_submit_pr_review_422_attaches_comments_individually():
         )
     assert len(review_calls) == 2
     assert "comments" not in json.loads(review_calls[1])
-    assert len(attach_calls) == 1
+    assert attach_n["n"] == 1
     assert res["posted_inline_count"] == 1
     assert res["dropped_comments"] == []
 
@@ -371,8 +379,8 @@ def test_post_sends_inline_comments(tmp_path: Path):
     with (
         patch("lazyreview.main.get_settings", return_value=settings),
         patch(
-            "lazyreview.api.consolidations.list_pr_changed_paths",
-            return_value=frozenset({"src/a.py"}),
+            "lazyreview.api.consolidations.list_pr_file_patches",
+            return_value={"src/a.py": "@@ -1 +1,2 @@\n line\n+add\n"},
         ),
         patch(
             "lazyreview.api.consolidations.submit_pr_review",
