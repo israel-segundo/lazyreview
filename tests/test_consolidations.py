@@ -109,7 +109,7 @@ def _pr_and_run(conn, tmp_path: Path, *, status="succeeded", head="abc"):
 def test_schema_consolidations_and_settings(tmp_path: Path):
     conn = _conn(tmp_path)
     ver = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert ver == SCHEMA_VERSION == 24
+    assert ver == SCHEMA_VERSION == 25
     cols = {
         r["name"]
         for r in conn.execute("PRAGMA table_info(consolidations)").fetchall()
@@ -183,10 +183,14 @@ def test_prompt_seed_contains_posted_comment_rules():
     assert "Approved with comments" in pub
     assert "Requesting changes" in pub
     assert "wrap up" in pub
-    assert "per-agent coverage table" in pub
-    assert "Total after deduping" in pub or "dedup" in pub.lower()
+    assert "inline" in pub.lower()
+    assert "pathless" in pub.lower() or "path" in pub.lower()
+    assert "Details on the diff" in pub
     # Must tell the model to omit agent/dedup tables from the GitHub body.
-    assert "Do **not** include the per-agent coverage table" in pub
+    assert "per-agent coverage table" in pub.lower() or "Omit agent" in pub
+
+    assert "Fix before merge" in text or "blocker" in text.lower()
+    assert "severity alone" in text.lower() or "not** by severity" in text.lower()
 
     verify = _default_verify_prompt()
     assert "{findings_json_path}" in verify
@@ -196,6 +200,8 @@ def test_prompt_seed_contains_posted_comment_rules():
     assert "false_alarm" in verify
     assert "worktree" in verify.lower()
     assert "Do not invent findings" in verify or "Do not invent" in verify
+    assert "blocker" in verify.lower()
+    assert "severity alone" in verify.lower()
 
 
 def test_selectable_unchanged_for_consolidated_obsolete(tmp_path: Path):

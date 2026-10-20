@@ -112,6 +112,9 @@
           <a href="/prs/{{ pr.id }}?tab=consolidations"
              class="rounded-lg px-2.5 py-1.5 text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">Back</a>
           {% endif %}
+          <p class="basis-full text-xs text-slate-500"
+             x-show="postAnchorSummary()"
+             x-text="postAnchorSummary()"></p>
         </div>
       </div>
       <p class="lr-consol-tabbar-error" x-show="pageTab === 'submit' && postError" x-cloak x-text="postError"></p>
@@ -481,6 +484,26 @@ function consolidationDetail() {
         this.regeneratingPublish = false;
       }
     },
+    postCounts() {
+      const list = (this.c && Array.isArray(this.c.findings)) ? this.c.findings : [];
+      let inline = 0;
+      let summary = 0;
+      for (const f of list) {
+        const path = (f.path || f.file || '').toString().trim();
+        const line = f.line;
+        if (path && line != null && line !== '' && !Number.isNaN(Number(line))) inline += 1;
+        else summary += 1;
+      }
+      return { inline, summary, total: list.length };
+    },
+    postAnchorSummary() {
+      const { inline, summary, total } = this.postCounts();
+      if (!total) return '';
+      const parts = [];
+      if (inline) parts.push(inline + ' inline on the diff');
+      if (summary) parts.push(summary + ' in the summary body');
+      return parts.length ? ('Will post: ' + parts.join(', ') + '.') : '';
+    },
     async post() {
       this.postError = '';
       const action = this.verdict || 'comment';
@@ -489,9 +512,11 @@ function consolidationDetail() {
         approve: 'approve',
         request_changes: 'request changes',
       };
+      const anchor = this.postAnchorSummary();
       const ok = await lrConfirm({
         title: 'Submit feedback?',
-        message: 'Post as “' + (labels[action] || action) + '” to GitHub for consolidation #' + this.c.id + '?',
+        message: 'Post as “' + (labels[action] || action) + '” to GitHub for consolidation #' + this.c.id + '?'
+          + (anchor ? ('\n\n' + anchor) : ''),
         confirmLabel: 'Submit',
       });
       if (!ok) return;

@@ -547,20 +547,25 @@
                       </span>
                     </p>
                   </div>
-                  <div class="flex flex-wrap items-center gap-2"
+                  <div class="flex flex-col items-stretch gap-1 sm:items-end"
                        x-show="canSubmitFindings()" x-cloak>
-                    <label class="text-xs font-medium uppercase tracking-wide text-slate-500" for="findings-verdict">Verdict</label>
-                    <select id="findings-verdict" x-model="findingsVerdict"
-                            class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
-                      <option value="comment">Comment</option>
-                      <option value="approve">Approve</option>
-                      <option value="request_changes">Request changes</option>
-                    </select>
-                    <button type="button" @click="postFindingsFeedback()"
-                            :disabled="findingsPosting || !activeFindingsConsolidation().ready_to_post || !(findingsPublishBody || '').trim()"
-                            class="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-                      <span x-text="findingsPosting ? 'Posting…' : 'Submit feedback'"></span>
-                    </button>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <label class="text-xs font-medium uppercase tracking-wide text-slate-500" for="findings-verdict">Verdict</label>
+                      <select id="findings-verdict" x-model="findingsVerdict"
+                              class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100">
+                        <option value="comment">Comment</option>
+                        <option value="approve">Approve</option>
+                        <option value="request_changes">Request changes</option>
+                      </select>
+                      <button type="button" @click="postFindingsFeedback()"
+                              :disabled="findingsPosting || !activeFindingsConsolidation().ready_to_post || !(findingsPublishBody || '').trim()"
+                              class="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                        <span x-text="findingsPosting ? 'Posting…' : 'Submit feedback'"></span>
+                      </button>
+                    </div>
+                    <p class="text-xs text-slate-500"
+                       x-show="findingsPostAnchorSummary()"
+                       x-text="findingsPostAnchorSummary()"></p>
                   </div>
                 </div>
 
@@ -2013,15 +2018,38 @@ function reviewForm() {
         this.findingsRegeneratingPublish = false;
       }
     },
+    findingsPostCounts() {
+      const c = this.activeFindingsConsolidation();
+      const list = (c && Array.isArray(c.findings)) ? c.findings : [];
+      let inline = 0;
+      let summary = 0;
+      for (const f of list) {
+        const path = (f.path || f.file || '').toString().trim();
+        const line = f.line;
+        if (path && line != null && line !== '' && !Number.isNaN(Number(line))) inline += 1;
+        else summary += 1;
+      }
+      return { inline, summary, total: list.length };
+    },
+    findingsPostAnchorSummary() {
+      const { inline, summary, total } = this.findingsPostCounts();
+      if (!total) return '';
+      const parts = [];
+      if (inline) parts.push(inline + ' inline on the diff');
+      if (summary) parts.push(summary + ' in the summary body');
+      return parts.length ? ('Will post: ' + parts.join(', ') + '.') : '';
+    },
     async postFindingsFeedback() {
       const c = this.activeFindingsConsolidation();
       if (!c) return;
       this.findingsPostError = '';
       const action = this.findingsVerdict || 'comment';
       const labels = { comment: 'comment', approve: 'approve', request_changes: 'request changes' };
+      const anchor = this.findingsPostAnchorSummary();
       const ok = await lrConfirm({
         title: 'Submit feedback?',
-        message: 'Post as “' + (labels[action] || action) + '” to GitHub for consolidation #' + c.id + '?',
+        message: 'Post as “' + (labels[action] || action) + '” to GitHub for consolidation #' + c.id + '?'
+          + (anchor ? ('\n\n' + anchor) : ''),
         confirmLabel: 'Submit',
       });
       if (!ok) return;

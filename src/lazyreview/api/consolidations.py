@@ -25,9 +25,20 @@ from lazyreview.db import (
 )
 from lazyreview.services.consolidation_jobs import consolidations_dir
 from lazyreview.services.gh import GhError, post_pr_comment, submit_pr_review
+from lazyreview.services.review_post import (
+    build_review_comments,
+    parse_findings_list,
+    split_findings_for_post,
+)
 from lazyreview.services.settings import get_consolidator_config
 
 router = APIRouter(tags=["consolidations"])
+
+_ACTION_TO_EVENT = {
+    "approve": "APPROVE",
+    "request_changes": "REQUEST_CHANGES",
+    "comment": "COMMENT",
+}
 
 
 class CreateConsolidationBody(BaseModel):
@@ -328,26 +339,44 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
     if not text.strip():
         raise HTTPException(status_code=400, detail="Empty publish body")
 
+    findings = parse_findings_list(row.get("findings_json") or row.get("findings"))
+    inline_findings, _summary_only = split_findings_for_post(findings)
+    review_comments = build_review_comments(inline_findings)
+    head_sha = str(pr.get("head_sha") or row.get("head_sha") or "").strip()
+
     gh_url = None
     gh_review_id = None
+    dropped: list = []
     try:
-        if body.action == "comment":
+        event = _ACTION_TO_EVENT.get(body.action)
+        if event is None:
+            raise HTTPException(status_code=400, detail=f"Invalid action {body.action}")
+        # Summary-only comment action with no inlines: keep issue-comment behavior.
+        if body.action == "comment" and not review_comments:
             res = post_pr_comment(pr["owner"], pr["repo"], int(pr["number"]), text)
             gh_url = res.get("output")
-        elif body.action == "approve":
+        else:
             res = submit_pr_review(
-                pr["owner"], pr["repo"], int(pr["number"]), text, "APPROVE"
+                pr["owner"],
+                pr["repo"],
+                int(pr["number"]),
+                text,
+                event,
+                commit_id=head_sha or None,
+                comments=review_comments or None,
             )
             gh_url = res.get("html_url")
             gh_review_id = res.get("id")
-        elif body.action == "request_changes":
-            res = submit_pr_review(
-                pr["owner"], pr["repo"], int(pr["number"]), text, "REQUEST_CHANGES"
-            )
-            gh_url = res.get("html_url")
-            gh_review_id = res.get("id")
+            dropped = list(res.get("dropped_comments") or [])
     except GhError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+    dedup = row.get("dedup_summary") or ""
+    if review_comments:
+        note = f"Posted {len(review_comments) - len(dropped)} inline comment(s)"
+        if dropped:
+            note += f"; dropped {len(dropped)} bad anchor(s)"
+        dedup = f"{dedup}; {note}".strip("; ")
 
     updated = mark_consolidation_feedback_provided(
         conn,
@@ -364,6 +393,11 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
         body=text,
         gh_comment_url=gh_url,
         gh_review_id=gh_review_id,
-        dedup_summary=row.get("dedup_summary"),
+        dedup_summary=dedup or None,
     )
-    return {"consolidation": updated, "action": action}
+    return {
+        "consolidation": updated,
+        "action": action,
+        "inline_comments": len(review_comments),
+        "dropped_inline_comments": len(dropped),
+    }

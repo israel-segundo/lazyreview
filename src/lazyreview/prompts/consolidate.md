@@ -89,13 +89,20 @@ allows (new head, remaining gaps, or re-check) — do not invent history you can
 
 ## Recommended GitHub action (required)
 
-Choose exactly one `recommended_action` for the human submit modal:
+Choose exactly one `recommended_action` for the human submit modal. Decide by
+**whether any kept finding blocks merge** (build broken, AC unmet, or disposition
+`_Fix before merge._`) — **not** by severity alone. A High finding with
+`_Fast-follow._` / `_Author's call._` may still allow `approve`.
 
 | Value | When |
 |-------|------|
-| `approve` | No kept S1 or S2 findings remain after dedup (S3-only or empty is fine). |
-| `request_changes` | Any kept S1, or material kept S2 that should block merge. |
-| `comment` | Everything else (e.g. only non-blocking S2/S3, or mixed signals). |
+| `request_changes` | Any kept finding that compromises the build or ticket ACs, or uses disposition `_Fix before merge._`. |
+| `approve` | No such blockers — including when kept Medium/Low (or non-blocking High) remain. Empty findings are fine. |
+| `comment` | Ambiguous / neither fits (rare; prefer `approve` or `request_changes`). |
+
+Always set a clear `disposition` on each kept finding (`_Fix before merge._`,
+`_Fast-follow._`, `_Author's call._`, or `_Out of scope._`). Prefer `path` + `line`
+when the claim anchors to a changed line (inline comments use them at post time).
 
 Do **not** post. Only recommend. Put the choice in `meta.json` (below).
 

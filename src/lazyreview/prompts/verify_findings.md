@@ -55,13 +55,19 @@ Never claim you reproduced something you did not check.
 
 ## Recommended action (recompute)
 
-After filtering, set `meta.json.recommended_action`:
+After filtering, set `meta.json.recommended_action` by **blocker disposition**, not
+severity alone. Class `blocker` (or disposition `_Fix before merge._`, or a clear
+build / AC compromise) forces `request_changes`. Non-blocking High/Medium/Low may
+still allow `approve`.
 
 | Value | When |
 | --- | --- |
-| `approve` | No kept S1 or S2 findings remain (S3-only or empty is fine). |
-| `request_changes` | Any kept S1, or material kept S2 that should block merge. |
-| `comment` | Everything else. |
+| `request_changes` | Any kept finding classed `blocker` / `_Fix before merge._`, or that compromises the build or ticket ACs. |
+| `approve` | No such blockers — including when kept non-blocking findings remain. Empty is fine. |
+| `comment` | Ambiguous / neither fits (rare). |
+
+Prefer keeping `path` + `line` on findings that anchor to a changed line (inline
+comments at post time). Pathless findings stay in the summary body only.
 
 Put `{ "recommended_action", "rationale" }` in `{meta_json_path}`. Do **not** post.
 

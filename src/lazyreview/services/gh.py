@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class GhError(RuntimeError):
@@ -334,10 +337,80 @@ def submit_pr_review(
     number: int,
     body: str,
     event: str,
+    *,
+    commit_id: str | None = None,
+    comments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """event: APPROVE | REQUEST_CHANGES | COMMENT"""
-    payload = json.dumps({"body": body, "event": event})
-    return _post_review(owner, repo, number, payload)
+    """event: APPROVE | REQUEST_CHANGES | COMMENT.
+
+    When ``comments`` is non-empty, ``commit_id`` (PR head SHA) is required by GitHub.
+    On 422 from a bad inline anchor, drop offending comments and retry once; if still
+    failing, retry with summary body only.
+    """
+    cleaned = _normalize_review_comments(comments or [])
+    payload_obj: dict[str, Any] = {"body": body, "event": event}
+    if cleaned:
+        if not (commit_id or "").strip():
+            raise GhError("commit_id is required when posting inline review comments")
+        payload_obj["commit_id"] = commit_id.strip()
+        payload_obj["comments"] = cleaned
+
+    try:
+        result = _post_review(owner, repo, number, json.dumps(payload_obj))
+        result["dropped_comments"] = []
+        return result
+    except GhError as e:
+        if not cleaned or not _is_unprocessable(e):
+            raise
+        # Retry without comments that GitHub rejected (line not in diff, etc.).
+        dropped = list(cleaned)
+        payload_retry = {"body": body, "event": event}
+        logger.warning(
+            "PR review with %s inline comment(s) rejected (%s); retrying without comments",
+            len(cleaned),
+            e,
+        )
+        result = _post_review(owner, repo, number, json.dumps(payload_retry))
+        result["dropped_comments"] = dropped
+        return result
+
+
+def _normalize_review_comments(comments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for c in comments:
+        if not isinstance(c, dict):
+            continue
+        path = str(c.get("path") or "").strip()
+        try:
+            line = int(c.get("line"))
+        except (TypeError, ValueError):
+            continue
+        body = str(c.get("body") or "").strip()
+        if not path or line < 1 or not body:
+            continue
+        side = str(c.get("side") or "RIGHT").strip().upper() or "RIGHT"
+        if side not in {"LEFT", "RIGHT"}:
+            side = "RIGHT"
+        item: dict[str, Any] = {
+            "path": path,
+            "line": line,
+            "side": side,
+            "body": body,
+        }
+        if c.get("start_line") is not None:
+            try:
+                start = int(c["start_line"])
+                if start >= 1:
+                    item["start_line"] = start
+            except (TypeError, ValueError):
+                pass
+        out.append(item)
+    return out
+
+
+def _is_unprocessable(err: GhError) -> bool:
+    msg = str(err).lower()
+    return "422" in msg or "unprocessable" in msg or "must be part of the diff" in msg
 
 
 def _post_review(owner: str, repo: str, number: int, payload: str) -> dict[str, Any]:

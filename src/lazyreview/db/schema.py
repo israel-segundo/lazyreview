@@ -307,7 +307,7 @@ DEFAULT_SETTINGS = {
     "session_effort": EffortLevel.HIGH.value,
 }
 
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -793,6 +793,34 @@ def init_db(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "UPDATE settings SET value = ? WHERE key = 'consolidator_prompt'",
                 (prompt_seed,),
+            )
+
+    if prev is not None and prev < 25:
+        # Disposition-based approve + summary publish (inline comments at post).
+        if prompt_seed:
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'consolidator_prompt'",
+                (prompt_seed,),
+            )
+        verify_prompt_seed = _default_verify_prompt()
+        if verify_prompt_seed:
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("verify_prompt", verify_prompt_seed),
+            )
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'verify_prompt'",
+                (verify_prompt_seed,),
+            )
+        publish_prompt_seed = _default_publish_prompt()
+        if publish_prompt_seed:
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("publish_prompt", publish_prompt_seed),
+            )
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'publish_prompt'",
+                (publish_prompt_seed,),
             )
 
     if prev is not None and prev < 10 and prompt_seed:
