@@ -109,7 +109,7 @@ def _pr_and_run(conn, tmp_path: Path, *, status="succeeded", head="abc"):
 def test_schema_consolidations_and_settings(tmp_path: Path):
     conn = _conn(tmp_path)
     ver = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert ver == SCHEMA_VERSION == 25
+    assert ver == SCHEMA_VERSION == 26
     cols = {
         r["name"]
         for r in conn.execute("PRAGMA table_info(consolidations)").fetchall()

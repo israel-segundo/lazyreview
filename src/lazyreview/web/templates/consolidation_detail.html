@@ -314,9 +314,10 @@ function consolidationDetail() {
     console.warn('failed to parse consolidation JSON', e);
   }
   return Object.assign({}, (window.LR && window.LR.chatRailMixin) ? window.LR.chatRailMixin({
-    mode: 'explore',
+    mode: 'challenge',
     prId: {{ pr.id if pr else 'null' }},
-    storageKey: 'lazyreview-chat-open-pr-{{ pr.id if pr else consolidation.id }}',
+    consolidationId: {{ consolidation.id }},
+    storageKey: 'lazyreview-chat-open-consol-{{ consolidation.id }}',
     defaultOpen: true,
   }) : {}, {
     c: initial || {},
@@ -346,6 +347,43 @@ function consolidationDetail() {
       if (this.canSubmit() && !this.c.ready_to_post) {
         this._startPublishPoll();
       }
+    },
+    onChatFindingsUpdated(session) {
+      if (!session || !this.c) return;
+      const findings = Array.isArray(session.working_findings)
+        ? session.working_findings
+        : [];
+      const action = session.working_recommended_action;
+      const rationale = session.working_recommended_action_rationale;
+      const patch = {
+        findings,
+        findings_json: JSON.stringify(findings),
+        ready_to_post: 0,
+        publish_body: null,
+      };
+      if (action && ['approve', 'request_changes', 'comment'].includes(action)) {
+        patch.recommended_action = action;
+        this.verdict = action;
+      }
+      if (rationale != null) patch.recommended_action_rationale = rationale;
+      if (session.working_body_md) patch.body = session.working_body_md;
+      this.c = { ...this.c, ...patch };
+      this.publishBody = '';
+      this._edited = false;
+      for (const label of ['High', 'Medium', 'Low']) {
+        if (this.findingsForTab(label).length) { this.findingsTab = label; break; }
+      }
+    },
+    onChatDone(data) {
+      this._edited = false;
+      this.publishBody = '';
+      this.regeneratingPublish = true;
+      if (data && data.session) this.chatSession = data.session;
+      if (this.c) {
+        this.c = { ...this.c, ready_to_post: 0, publish_body: null };
+      }
+      this._startPublishPoll();
+      this.refresh();
     },
     canSubmit() {
       return this.c && this.c.status === 'succeeded' && !this.c.feedback_provided;

@@ -164,6 +164,8 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
   working_findings_json TEXT,
   working_recommended_action TEXT,
   working_recommended_action_rationale TEXT,
+  working_body_md TEXT,
+  working_publish_guidance TEXT,
   status TEXT NOT NULL DEFAULT 'open',
   workdir_path TEXT,
   error_message TEXT,
@@ -307,7 +309,7 @@ DEFAULT_SETTINGS = {
     "session_effort": EffortLevel.HIGH.value,
 }
 
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -486,6 +488,8 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
   working_findings_json TEXT,
   working_recommended_action TEXT,
   working_recommended_action_rationale TEXT,
+  working_body_md TEXT,
+  working_publish_guidance TEXT,
   status TEXT NOT NULL DEFAULT 'open',
   workdir_path TEXT,
   error_message TEXT,
@@ -812,6 +816,29 @@ def init_db(conn: sqlite3.Connection) -> None:
                 "UPDATE settings SET value = ? WHERE key = 'verify_prompt'",
                 (verify_prompt_seed,),
             )
+        publish_prompt_seed = _default_publish_prompt()
+        if publish_prompt_seed:
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("publish_prompt", publish_prompt_seed),
+            )
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'publish_prompt'",
+                (publish_prompt_seed,),
+            )
+
+    if prev is not None and prev < 26:
+        # Challenge chat: editable internal report + publish guidance.
+        chat_cols = {
+            r["name"]
+            for r in conn.execute("PRAGMA table_info(chat_sessions)").fetchall()
+        }
+        for col, decl in (
+            ("working_body_md", "TEXT"),
+            ("working_publish_guidance", "TEXT"),
+        ):
+            if col not in chat_cols:
+                conn.execute(f"ALTER TABLE chat_sessions ADD COLUMN {col} {decl}")
         publish_prompt_seed = _default_publish_prompt()
         if publish_prompt_seed:
             conn.execute(

@@ -2574,6 +2574,8 @@ def create_chat_session(
     working_findings_json: str | None = None,
     working_recommended_action: str | None = None,
     working_recommended_action_rationale: str | None = None,
+    working_body_md: str | None = None,
+    working_publish_guidance: str | None = None,
     workdir_path: str | None = None,
 ) -> dict[str, Any]:
     now = utcnow()
@@ -2582,9 +2584,10 @@ def create_chat_session(
         INSERT INTO chat_sessions (
           pr_id, head_sha, mode, consolidation_id, agent, model, effort,
           working_findings_json, working_recommended_action,
-          working_recommended_action_rationale, status, workdir_path,
+          working_recommended_action_rationale, working_body_md,
+          working_publish_guidance, status, workdir_path,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
         """,
         (
             int(pr_id),
@@ -2597,6 +2600,8 @@ def create_chat_session(
             working_findings_json,
             working_recommended_action,
             working_recommended_action_rationale,
+            working_body_md,
+            working_publish_guidance,
             workdir_path,
             now,
             now,

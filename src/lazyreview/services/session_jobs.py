@@ -279,6 +279,7 @@ class SessionRunner:
                 return existing
         d_agent, d_model, d_effort = _session_defaults(conn)
         findings_json = consol.get("findings_json") or "[]"
+        body_md = (consol.get("body") or "").strip() or None
         row = create_chat_session(
             conn,
             pr_id=pr_id,
@@ -296,13 +297,25 @@ class SessionRunner:
                 "recommended_action_rationale"
             )
             or "",
+            working_body_md=body_md,
         )
         workdir = sessions_dir(self.settings) / str(row["id"])
         workdir.mkdir(parents=True, exist_ok=True)
+        consol_work = Path(
+            consol.get("workdir_path")
+            or (self.settings.data_dir / "consolidations" / str(consolidation_id))
+        )
+        stale_publish = consol_work / "publish-body.md"
+        if stale_publish.exists():
+            try:
+                stale_publish.unlink()
+            except OSError:
+                pass
         update_consolidation(
             conn,
             consolidation_id,
             ready_to_post=0,
+            publish_body=None,
         )
         return (
             update_chat_session(conn, int(row["id"]), workdir_path=str(workdir)) or row
@@ -441,6 +454,14 @@ class SessionRunner:
                         structured.get("recommended_action_rationale") or ""
                     )
                     fields["working_recommended_action_rationale"] = rationale
+            if "working_body_md" in structured and structured["working_body_md"] is not None:
+                body_md = structured["working_body_md"]
+                if isinstance(body_md, str):
+                    fields["working_body_md"] = body_md
+            if "publish_guidance" in structured and structured["publish_guidance"] is not None:
+                guidance = structured["publish_guidance"]
+                if isinstance(guidance, str):
+                    fields["working_publish_guidance"] = guidance
 
         cli_sid = _extract_cli_session_id(stdout)
         if cli_sid:
@@ -537,6 +558,13 @@ class SessionRunner:
                     f"## Working recommended action: "
                     f"`{session.get('working_recommended_action') or 'comment'}`",
                     session.get("working_recommended_action_rationale") or "",
+                    "",
+                    "## Working internal report (`working_body_md`)",
+                    session.get("working_body_md") or "(empty — build from findings on Done)",
+                    "",
+                    "## Working publish guidance",
+                    (session.get("working_publish_guidance") or "").strip()
+                    or "(none)",
                     "",
                 ]
             )
@@ -749,12 +777,17 @@ class SessionRunner:
         if not isinstance(findings, list):
             findings = []
 
-        body = findings_to_body_md(
-            pr=pr,
-            findings=findings,
-            recommended_action=action,
-            rationale=rationale,
-        )
+        working_body = (session.get("working_body_md") or "").strip()
+        if working_body:
+            body = working_body if working_body.endswith("\n") else working_body + "\n"
+        else:
+            body = findings_to_body_md(
+                pr=pr,
+                findings=findings,
+                recommended_action=action,
+                rationale=rationale,
+            )
+        guidance = (session.get("working_publish_guidance") or "").strip()
         work_dir = Path(
             consol.get("workdir_path")
             or (self.settings.data_dir / "consolidations" / str(consol_id))
@@ -771,6 +804,20 @@ class SessionRunner:
             + "\n",
             encoding="utf-8",
         )
+        guidance_path = work_dir / "publish-guidance.md"
+        if guidance:
+            guidance_path.write_text(guidance + "\n", encoding="utf-8")
+        elif guidance_path.exists():
+            try:
+                guidance_path.unlink()
+            except OSError:
+                pass
+        stale_publish = work_dir / "publish-body.md"
+        if stale_publish.exists():
+            try:
+                stale_publish.unlink()
+            except OSError:
+                pass
 
         update_consolidation(
             conn,

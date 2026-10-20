@@ -17,6 +17,8 @@ the recommended action — that is already decided in `meta.json`.
 - `analysis-brief.md` — PR analysis brief (optional context for a tighter TL;DR)
 - `findings.json` — machine-readable kept findings (`path` / `line` optional)
 - `pr.json` — PR metadata
+- `publish-guidance.md` — optional human/challenge notes for tone and extra summary phrasing
+  (honor when present and non-empty; never invent findings or change disposition)
 
 ## Output (required)
 
@@ -75,6 +77,9 @@ If several people appear, name them in one short sentence (use “my …” for 
 8. **Do not** include a separate "recommended action" heading — the lead sentence is the
    disposition.
 9. Tone: colleague, not linter. Short sentences. Concrete over abstract.
+10. **Publish guidance.** If `publish-guidance.md` exists and is non-empty, apply its tone
+    and summary notes (softer/harder voice, mention a point, keep shorter). Still do not
+    invent findings, change `recommended_action`, or contradict blockers in `findings.json`.
 
 ## Suggested shape
 

@@ -1504,6 +1504,9 @@ function reviewForm() {
         history.replaceState(null, '', url.pathname + url.search + url.hash);
       } catch (_) { /* ignore */ }
       if (id === 'findings') this.syncFindingsPublishFromConsolidation();
+      else if (typeof this.syncChatForFindingsContext === 'function') {
+        this.syncChatForFindingsContext();
+      }
     },
     backToActivity() {
       this.highlightConsolidationId = null;
@@ -1900,6 +1903,7 @@ function reviewForm() {
       const cons = c || this.activeFindingsConsolidation();
       if (!cons) {
         this.findingsPublishBody = '';
+        this.syncChatForFindingsContext();
         return;
       }
       const rec = cons.recommended_action || 'comment';
@@ -1916,6 +1920,104 @@ function reviewForm() {
       if (this.canSubmitFindings() && !cons.ready_to_post) {
         this._startFindingsPublishPoll();
       }
+      this.syncChatForFindingsContext();
+    },
+    syncChatForFindingsContext() {
+      const onFindings = this.tab === 'findings';
+      const c = onFindings ? this.activeFindingsConsolidation() : null;
+      const challengeReady = !!(
+        c && c.status === 'succeeded' && !c.feedback_provided
+      );
+      if (challengeReady) {
+        const cid = Number(c.id);
+        if (this.chatMode !== 'challenge' || Number(this.chatConsolidationId) !== cid) {
+          this.chatMode = 'challenge';
+          this.chatConsolidationId = cid;
+          this.chatSession = null;
+          this.chatTurns = [];
+          if (this.chatOpen && typeof this.ensureChatSession === 'function') {
+            this.ensureChatSession({ quiet: true });
+          }
+        }
+      } else if (this.chatMode !== 'explore' || this.chatConsolidationId) {
+        this.chatMode = 'explore';
+        this.chatConsolidationId = null;
+        this.chatSession = null;
+        this.chatTurns = [];
+        if (this.chatOpen && typeof this.ensureChatSession === 'function') {
+          this.ensureChatSession({ quiet: true });
+        }
+      }
+    },
+    openChat() {
+      this.syncChatForFindingsContext();
+      this.chatOpen = true;
+      this.persistChatOpen();
+      this.$nextTick(() => {
+        if (typeof this.clampChatWidth === 'function') this.clampChatWidth();
+        requestAnimationFrame(() => {
+          if (typeof this.syncChatRailHeight === 'function') this.syncChatRailHeight();
+        });
+      });
+      if (typeof this.ensureChatSession === 'function') {
+        this.ensureChatSession({ quiet: true });
+      }
+    },
+    onChatFindingsUpdated(session) {
+      if (!session) return;
+      const cid = Number(session.consolidation_id || this.chatConsolidationId);
+      if (!cid) return;
+      const idx = (this.consolidations || []).findIndex(x => Number(x.id) === cid);
+      if (idx < 0) return;
+      const findings = Array.isArray(session.working_findings)
+        ? session.working_findings
+        : [];
+      const patch = {
+        findings,
+        findings_json: JSON.stringify(findings),
+        ready_to_post: 0,
+        publish_body: null,
+      };
+      const action = session.working_recommended_action;
+      if (action && ['approve', 'request_changes', 'comment'].includes(action)) {
+        patch.recommended_action = action;
+        this.findingsVerdict = action;
+      }
+      if (session.working_recommended_action_rationale != null) {
+        patch.recommended_action_rationale = session.working_recommended_action_rationale;
+      }
+      if (session.working_body_md) patch.body = session.working_body_md;
+      const next = this.consolidations.slice();
+      next[idx] = { ...next[idx], ...patch };
+      this.consolidations = next;
+      this.findingsPublishBody = '';
+      this._findingsPublishEdited = false;
+      for (const label of ['High', 'Medium', 'Low']) {
+        if (this.consolFindingsForTab(label).length) {
+          this.consolFindingsTab = label;
+          break;
+        }
+      }
+    },
+    onChatDone(data) {
+      const cid = Number(
+        (data && data.consolidation_id) || this.chatConsolidationId
+      );
+      this._findingsPublishEdited = false;
+      this.findingsPublishBody = '';
+      this.findingsRegeneratingPublish = true;
+      if (data && data.session) this.chatSession = data.session;
+      if (cid) {
+        const idx = (this.consolidations || []).findIndex(x => Number(x.id) === cid);
+        if (idx >= 0) {
+          const next = this.consolidations.slice();
+          next[idx] = { ...next[idx], ready_to_post: 0, publish_body: null };
+          this.consolidations = next;
+        }
+        this.highlightConsolidationId = cid;
+      }
+      this._startFindingsPublishPoll();
+      this.refreshFindingsConsolidation();
     },
     consolFindingsList() {
       const c = this.activeFindingsConsolidation();
