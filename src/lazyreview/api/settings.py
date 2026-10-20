@@ -24,6 +24,10 @@ class SettingsBody(BaseModel):
     consolidator_model: str | None = None
     consolidator_effort: str | None = None
     consolidator_prompt: str | None = None
+    verify_agent: str | None = None
+    verify_model: str | None = None
+    verify_effort: str | None = None
+    verify_prompt: str | None = None
     pr_analysis_agent: str | None = None
     pr_analysis_model: str | None = None
     pr_analysis_effort: str | None = None
@@ -56,6 +60,10 @@ def write_settings(body: SettingsBody, request: Request):
             consolidator_model=body.consolidator_model,
             consolidator_effort=body.consolidator_effort,
             consolidator_prompt=body.consolidator_prompt,
+            verify_agent=body.verify_agent,
+            verify_model=body.verify_model,
+            verify_effort=body.verify_effort,
+            verify_prompt=body.verify_prompt,
             pr_analysis_agent=body.pr_analysis_agent,
             pr_analysis_model=body.pr_analysis_model,
             pr_analysis_effort=body.pr_analysis_effort,

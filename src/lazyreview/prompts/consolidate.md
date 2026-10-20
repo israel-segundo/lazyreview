@@ -161,11 +161,13 @@ my earlier review** — never `@your_login`. Only use `@login` for other people.
 - **Medium — <one-line claim>.** Already covered by @bob’s comment on `path/file.go`.
 ```
 
-**5. Verified while consolidating** — heading `## Verified while consolidating`, then
+**5. Merged while consolidating** — heading `## Merged while consolidating`, then
 one short paragraph: which source review agents/models you merged
 (`{source_runs_label}`), that you used the analysis brief when present, that you
 fetched existing PR feedback with `gh` and deduped against it (including the S1/S2
 Already addressed list), which review pass this is (1st / 2nd / …), and limits.
+This is a **merge disclosure only** — do not claim you reproduced findings in the
+worktree (a separate verify stage does that after you finish).
 
 **6. Suggested split** — heading `## Suggested split`, then one or two sentences
 separating fix-before-merge from follow-ups.

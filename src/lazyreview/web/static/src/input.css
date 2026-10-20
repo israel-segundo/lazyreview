@@ -1058,6 +1058,7 @@ html {
 .lr-mermaid-host {
   padding: 0.85rem 1rem;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   text-align: center;
   font-size: 0.8125rem;
   color: var(--color-slate-500, #64748b);
@@ -1065,6 +1066,18 @@ html {
 .lr-mermaid-host svg {
   max-width: 100%;
   height: auto;
+}
+/* Why-page diagrams: fit the column (no nested scrollbars). Expand opens
+   a full-width modal with a natural-size re-render. */
+.lr-mermaid--fit .lr-mermaid-host {
+  overflow: visible;
+}
+.lr-mermaid--fit .lr-mermaid-host svg {
+  max-width: 100%;
+  width: 100%;
+  height: auto;
+  display: block;
+  margin-inline: auto;
 }
 .lr-mermaid-error {
   margin: 0;
@@ -1083,10 +1096,14 @@ html {
   justify-content: center;
   min-height: 12rem;
   padding: 0.5rem;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .lr-mermaid-expand-body svg {
-  max-width: 100%;
+  max-width: none;
+  width: auto;
   height: auto;
+  display: block;
 }
 
 .lr-prompt-source {

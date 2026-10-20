@@ -291,6 +291,11 @@ DEFAULT_SETTINGS = {
     "consolidator_model": ClaudeModelAlias.HAIKU.value,
     "consolidator_effort": EffortLevel.LOW.value,
     # consolidator_prompt seeded in init_db from prompts/consolidate.md
+    # Verify findings (post-consolidate) — default Cursor so it differs from consolidator
+    "verify_agent": AgentName.CURSOR.value,
+    "verify_model": DEFAULT_CURSOR_MODEL,
+    "verify_effort": "",
+    # verify_prompt seeded in init_db from prompts/verify_findings.md
     "pr_analysis_agent": AgentName.CLAUDE.value,
     "pr_analysis_model": ClaudeModelAlias.OPUS.value,
     "pr_analysis_effort": EffortLevel.HIGH.value,
@@ -302,7 +307,7 @@ DEFAULT_SETTINGS = {
     "session_effort": EffortLevel.HIGH.value,
 }
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -534,6 +539,9 @@ def init_db(conn: sqlite3.Connection) -> None:
     publish_prompt_seed = _default_publish_prompt()
     if publish_prompt_seed:
         defaults["publish_prompt"] = publish_prompt_seed
+    verify_prompt_seed = _default_verify_prompt()
+    if verify_prompt_seed:
+        defaults["verify_prompt"] = verify_prompt_seed
     defaults["batch_review_defaults"] = json.dumps(DEFAULT_BATCH_REVIEW_DEFAULTS)
     for key, value in defaults.items():
         conn.execute(
@@ -760,6 +768,33 @@ def init_db(conn: sqlite3.Connection) -> None:
             "ON notifications(pr_id, kind, id DESC)"
         )
 
+    if prev is not None and prev < 24:
+        # Post-consolidate verify-findings stage (worktree reproduce / refute).
+        for key, value in (
+            ("verify_agent", AgentName.CURSOR.value),
+            ("verify_model", DEFAULT_CURSOR_MODEL),
+            ("verify_effort", ""),
+        ):
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+        verify_prompt_seed = _default_verify_prompt()
+        if verify_prompt_seed:
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("verify_prompt", verify_prompt_seed),
+            )
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'verify_prompt'",
+                (verify_prompt_seed,),
+            )
+        if prompt_seed:
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'consolidator_prompt'",
+                (prompt_seed,),
+            )
+
     if prev is not None and prev < 10 and prompt_seed:
         conn.execute(
             "UPDATE settings SET value = ? WHERE key = 'consolidator_prompt'",
@@ -786,6 +821,14 @@ def _default_pr_analysis_prompt() -> str:
 
 def _default_publish_prompt() -> str:
     path = Path(__file__).resolve().parent.parent / "prompts" / "publish_github.md"
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _default_verify_prompt() -> str:
+    path = Path(__file__).resolve().parent.parent / "prompts" / "verify_findings.md"
     try:
         return path.read_text(encoding="utf-8")
     except OSError:

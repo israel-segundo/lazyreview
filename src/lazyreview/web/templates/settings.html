@@ -150,7 +150,7 @@
     <div x-show="section === 'agents'" x-cloak class="lr-settings-panel lr-settings-panel--agents">
       <header class="lr-settings-header">
         <h1 class="lr-settings-title">Agents &amp; Prompts</h1>
-        <p class="lr-settings-sub">Configure review defaults, consolidator, and PR analysis agents and prompts.</p>
+        <p class="lr-settings-sub">Configure review defaults, consolidator, verify, and PR analysis agents and prompts.</p>
       </header>
 
       <div class="lr-settings-tabs" role="tablist" aria-label="Agent settings">
@@ -164,6 +164,11 @@
                 :class="agentsTab === 'consolidation' && 'lr-settings-tab--active'"
                 :aria-selected="agentsTab === 'consolidation'"
                 @click="agentsTab = 'consolidation'">Consolidation</button>
+        <button type="button" role="tab"
+                class="lr-settings-tab"
+                :class="agentsTab === 'verify' && 'lr-settings-tab--active'"
+                :aria-selected="agentsTab === 'verify'"
+                @click="agentsTab = 'verify'">Verify</button>
         <button type="button" role="tab"
                 class="lr-settings-tab"
                 :class="agentsTab === 'analysis' && 'lr-settings-tab--active'"
@@ -505,6 +510,175 @@
               Reset prompt to default
             </button>
             <span class="text-sm text-slate-500 dark:text-slate-400" x-text="consolidatorMsg"></span>
+          </div>
+        </div>
+      </div>
+
+      {# Verify findings tab #}
+      <div x-show="agentsTab === 'verify'" x-cloak class="lr-settings-tab-body lr-settings-tab-body--prompt" role="tabpanel">
+        <div class="lr-prompt-shell">
+          <div class="lr-prompt-meta">
+            <p class="text-sm text-slate-600 dark:text-slate-400">
+              After consolidation, verifies each consensus finding against the PR worktree
+              (reproduce / refute / drop false alarms) before the publish draft.
+              Default agent differs from the consolidator.
+            </p>
+            <div class="mt-4 grid gap-3 sm:grid-cols-3">
+
+              <div class="relative overflow-visible"
+                   :class="verifyOpenCombo === 'agent' ? 'z-30' : 'z-10'"
+                   @click.outside="verifyCloseCombo('agent')" @keydown.escape.stop="verifyCloseCombo('agent')">
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-300" for="v-agent">Agent</label>
+                <div class="mt-1 flex w-full items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-950"
+                     :class="verifyOpenCombo === 'agent' && 'ring-2 ring-slate-400/40'">
+                  <span class="inline-flex shrink-0 items-center" x-show="verifyAgent" x-cloak aria-hidden="true">
+                    <img x-show="agentKey(verifyAgent) === LR.AgentName.CLAUDE" x-cloak
+                         src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain" />
+                    <img x-show="agentKey(verifyAgent) === LR.AgentName.AGY" x-cloak
+                         src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain" />
+                    <img x-show="agentKey(verifyAgent) === LR.AgentName.CODEX" x-cloak
+                         src="/static/img/agents/codex.svg" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain" />
+                    <img x-show="agentKey(verifyAgent) === LR.AgentName.CURSOR" x-cloak
+                         src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+                    <img x-show="agentKey(verifyAgent) === LR.AgentName.CURSOR" x-cloak
+                         src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+                  </span>
+                  <input id="v-agent" type="text" autocomplete="off" role="combobox"
+                         :aria-expanded="verifyOpenCombo === 'agent'"
+                         x-model="verifyAgentQuery"
+                         @focus="verifyOpenAgentCombo()" @click="verifyOpenAgentCombo()" @input="verifyOnAgentFilter()"
+                         @keydown.arrow-down.prevent="verifyComboMove('agent', 1)"
+                         @keydown.arrow-up.prevent="verifyComboMove('agent', -1)"
+                         @keydown.enter.prevent="verifyComboConfirm('agent')"
+                         placeholder="Filter agents…"
+                         class="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none focus:ring-0 dark:bg-transparent" />
+                </div>
+                <ul x-show="verifyOpenCombo === 'agent'" x-cloak
+                    class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
+                  <template x-for="(a, idx) in verifyFilteredAgents()" :key="a.name">
+                    <li :class="verifyComboOptionClass('agent', idx, !a.available)"
+                        @mousedown.prevent="verifyPickAgent(a)"
+                        @mouseenter="verifyComboHighlight = idx">
+                      <span class="inline-flex shrink-0 items-center" aria-hidden="true">
+                        <img x-show="agentKey(a.name) === LR.AgentName.CLAUDE" x-cloak
+                             src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain" />
+                        <img x-show="agentKey(a.name) === LR.AgentName.AGY" x-cloak
+                             src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain" />
+                        <img x-show="agentKey(a.name) === LR.AgentName.CODEX" x-cloak
+                             src="/static/img/agents/codex.svg" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain" />
+                        <img x-show="agentKey(a.name) === LR.AgentName.CURSOR" x-cloak
+                             src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+                        <img x-show="agentKey(a.name) === LR.AgentName.CURSOR" x-cloak
+                             src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                             class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+                      </span>
+                      <span x-text="a.display_name + (a.available ? '' : ' (missing)')"></span>
+                    </li>
+                  </template>
+                </ul>
+              </div>
+              <div class="relative overflow-visible"
+                   :class="verifyOpenCombo === 'model' ? 'z-30' : 'z-10'"
+                   @click.outside="verifyCloseCombo('model')" @keydown.escape.stop="verifyCloseCombo('model')">
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-300" for="v-model">Model</label>
+                <input id="v-model" type="text" autocomplete="off" role="combobox"
+                       :aria-expanded="verifyOpenCombo === 'model'"
+                       x-model="verifyModelQuery"
+                       @focus="verifyOpenModelCombo()" @click="verifyOpenModelCombo()" @input="verifyOnModelFilter()"
+                       @keydown.arrow-down.prevent="verifyComboMove('model', 1)"
+                       @keydown.arrow-up.prevent="verifyComboMove('model', -1)"
+                       @keydown.enter.prevent="verifyComboConfirm('model')"
+                       placeholder="Filter models…"
+                       class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950" />
+                <ul x-show="verifyOpenCombo === 'model'" x-cloak
+                    class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
+                  <template x-for="(m, idx) in verifyFilteredModels()" :key="m.id">
+                    <li :class="verifyComboOptionClass('model', idx, false)"
+                        @mousedown.prevent="verifyPickModel(m)"
+                        @mouseenter="verifyComboHighlight = idx"
+                        x-text="m.label"></li>
+                  </template>
+                </ul>
+              </div>
+              <div class="relative overflow-visible"
+                   :class="verifyOpenCombo === 'effort' ? 'z-30' : 'z-10'"
+                   @click.outside="verifyCloseCombo('effort')" @keydown.escape.stop="verifyCloseCombo('effort')">
+                <label class="block text-xs font-medium text-slate-600 dark:text-slate-300" for="v-effort">Effort</label>
+                <input id="v-effort" type="text" autocomplete="off" role="combobox"
+                       :aria-expanded="verifyOpenCombo === 'effort'"
+                       x-model="verifyEffortQuery"
+                       :disabled="!verifyEfforts.length"
+                       @focus="verifyOpenEffortCombo()" @click="verifyOpenEffortCombo()" @input="verifyOnEffortFilter()"
+                       @keydown.arrow-down.prevent="verifyComboMove('effort', 1)"
+                       @keydown.arrow-up.prevent="verifyComboMove('effort', -1)"
+                       @keydown.enter.prevent="verifyComboConfirm('effort')"
+                       :placeholder="verifyEfforts.length ? 'Filter effort…' : 'n/a for this model'"
+                       class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50 dark:border-slate-600 dark:bg-slate-950" />
+                <ul x-show="verifyOpenCombo === 'effort' && verifyEfforts.length" x-cloak
+                    class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
+                  <template x-for="(e, idx) in verifyFilteredEfforts()" :key="e">
+                    <li :class="verifyComboOptionClass('effort', idx, false)"
+                        @mousedown.prevent="verifyPickEffort(e)"
+                        @mouseenter="verifyComboHighlight = idx"
+                        x-text="e"></li>
+                  </template>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="lr-prompt-editor">
+            <div class="lr-prompt-toolbar">
+              <span class="text-sm font-medium text-slate-800 dark:text-slate-200">Prompt</span>
+              <div class="lr-prompt-mode">
+                <button type="button"
+                        class="lr-prompt-mode-btn"
+                        :class="verifyPromptMode === 'preview' && 'lr-prompt-mode-btn--active'"
+                        @click="verifyPromptMode = 'preview'">Preview</button>
+                <button type="button"
+                        class="lr-prompt-mode-btn"
+                        :class="verifyPromptMode === 'source' && 'lr-prompt-mode-btn--active'"
+                        @click="verifyPromptMode = 'source'">Markdown</button>
+              </div>
+            </div>
+            <div class="lr-prompt-canvas">
+              <div class="lr-prompt-body"
+                   x-show="verifyPromptMode === 'preview'" x-cloak
+                   x-html="renderMarkdown(verifyPrompt)"></div>
+              <textarea x-show="verifyPromptMode === 'source'" x-cloak
+                        x-model="verifyPrompt"
+                        spellcheck="false"
+                        class="lr-prompt-source"
+                        aria-label="Verify findings prompt markdown"></textarea>
+            </div>
+            <p class="lr-prompt-hint">
+              Placeholders:
+              <code>{body_path}</code>,
+              <code>{findings_json_path}</code>,
+              <code>{meta_json_path}</code>,
+              <code>{pr_url}</code>
+            </p>
+          </div>
+
+          <div class="lr-prompt-footer">
+            <button type="button" @click="saveVerify()"
+                    class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+              Save
+            </button>
+            <button type="button" @click="resetVerifyPrompt()"
+                    class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+              Reset prompt to default
+            </button>
+            <span class="text-sm text-slate-500 dark:text-slate-400" x-text="verifyMsg"></span>
           </div>
         </div>
       </div>
@@ -1160,6 +1334,20 @@ function settingsPage() {
     consolidatorPrompt: {{ (settings.consolidator_prompt|default(''))|tojson }},
     defaultConsolidatorPrompt: {{ (settings.consolidator_prompt_default|default(''))|tojson }},
     consolidatorMsg: '',
+    verifyPromptMode: 'preview',
+    verifyAgent: {{ (settings.verify_agent|default(AgentName.CURSOR.value))|tojson }},
+    verifyModel: {{ (settings.verify_model|default('composer-2.5'))|tojson }},
+    verifyEffort: {{ (settings.verify_effort|default(''))|tojson }},
+    verifyPrompt: {{ (settings.verify_prompt|default(''))|tojson }},
+    defaultVerifyPrompt: {{ (settings.verify_prompt_default|default(''))|tojson }},
+    verifyMsg: '',
+    verifyModels: [],
+    verifyEfforts: [],
+    verifyOpenCombo: null,
+    verifyAgentQuery: '',
+    verifyModelQuery: '',
+    verifyEffortQuery: '',
+    verifyComboHighlight: -1,
     analysisAgent: {{ (settings.pr_analysis_agent|default(AgentName.CLAUDE.value))|tojson }},
     sessionAgent: {{ (settings.session_agent|default(AgentName.CLAUDE.value))|tojson }},
     sessionModel: {{ (settings.session_model|default(ClaudeModelAlias.OPUS.value))|tojson }},
@@ -1221,6 +1409,12 @@ function settingsPage() {
       }
       this.analysisOnAgentChange(false);
       this.analysisSyncComboQueries();
+      if (!this.agents.find(a => a.name === this.verifyAgent)) {
+        const firstV = this.agents.find(a => a.available) || this.agents[0];
+        if (firstV) this.verifyAgent = firstV.name;
+      }
+      this.verifyOnAgentChange(false);
+      this.verifySyncComboQueries();
       if (!this.agents.find(a => a.name === this.sessionAgent)) {
         const firstS = this.agents.find(a => a.available) || this.agents[0];
         if (firstS) this.sessionAgent = firstS.name;
@@ -1537,6 +1731,180 @@ function settingsPage() {
       await this.saveConsolidation();
       this.consolidatorMsg = 'Prompt reset and saved.';
       setTimeout(() => { this.consolidatorMsg = ''; }, 2500);
+    },
+
+    async saveVerify() {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          verify_agent: this.verifyAgent,
+          verify_model: this.verifyModel,
+          verify_effort: this.verifyEffort || '',
+          verify_prompt: this.verifyPrompt
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) { await lrAlert(data.detail || 'save failed', { title: 'Save failed' }); return; }
+      this.verifyAgent = data.verify_agent;
+      this.verifyModel = data.verify_model;
+      this.verifyEffort = data.verify_effort || '';
+      this.verifyPrompt = data.verify_prompt || '';
+      this.verifyMsg = 'Saved.';
+      setTimeout(() => { this.verifyMsg = ''; }, 2500);
+    },
+    async resetVerifyPrompt() {
+      const ok = await lrConfirm({
+        title: 'Reset prompt?',
+        message: 'Replace the verify prompt with the built-in default?',
+        confirmLabel: 'Reset',
+        danger: true,
+      });
+      if (!ok) return;
+      this.verifyPrompt = this.defaultVerifyPrompt || this.verifyPrompt;
+      await this.saveVerify();
+      this.verifyMsg = 'Prompt reset and saved.';
+      setTimeout(() => { this.verifyMsg = ''; }, 2500);
+    },
+    verifyCloseCombo(which) {
+      if (this.verifyOpenCombo === which) {
+        this.verifyOpenCombo = null;
+        this.verifyComboHighlight = -1;
+        this.verifySyncComboQueries();
+      }
+    },
+    verifySyncComboQueries() {
+      if (this.verifyOpenCombo !== 'agent') this.verifyAgentQuery = this.verifyAgentLabel();
+      if (this.verifyOpenCombo !== 'model') this.verifyModelQuery = this.verifyModelLabel();
+      if (this.verifyOpenCombo !== 'effort') this.verifyEffortQuery = this.verifyEffort || '';
+    },
+    verifyAgentLabel() {
+      const a = this.agents.find(x => x.name === this.verifyAgent);
+      if (!a) return this.verifyAgent || '';
+      return a.display_name + (a.available ? '' : ' (missing)');
+    },
+    verifyModelLabel() {
+      const m = this.verifyModels.find(x => x.id === this.verifyModel);
+      return m ? m.label : (this.verifyModel || '');
+    },
+    verifyFilteredAgents() {
+      const q = this.verifyOpenCombo === 'agent' ? this.verifyAgentQuery : '';
+      return this.agents.filter(a =>
+        this._match(a.display_name, q) || this._match(a.name, q)
+      );
+    },
+    verifyFilteredModels() {
+      const q = this.verifyOpenCombo === 'model' ? this.verifyModelQuery : '';
+      return this.verifyModels.filter(m =>
+        this._match(m.label, q) || this._match(m.id, q)
+      );
+    },
+    verifyFilteredEfforts() {
+      const q = this.verifyOpenCombo === 'effort' ? this.verifyEffortQuery : '';
+      return this.verifyEfforts.filter(e => this._match(e, q));
+    },
+    verifyComboOptions(which) {
+      if (which === 'agent') return this.verifyFilteredAgents();
+      if (which === 'model') return this.verifyFilteredModels();
+      return this.verifyFilteredEfforts();
+    },
+    verifyComboOptionClass(which, idx, disabled) {
+      const base = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-sm ';
+      if (disabled) return base + 'cursor-not-allowed text-slate-400 dark:text-slate-500';
+      if (this.verifyOpenCombo === which && this.verifyComboHighlight === idx) {
+        return base + 'bg-blue-50 text-blue-900 dark:bg-blue-950 dark:text-blue-100';
+      }
+      return base + 'text-slate-800 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800';
+    },
+    verifyOpenAgentCombo() { this.verifyOpenCombo = 'agent'; this.verifyAgentQuery = ''; this.verifyComboHighlight = 0; },
+    verifyOpenModelCombo() { this.verifyOpenCombo = 'model'; this.verifyModelQuery = ''; this.verifyComboHighlight = 0; },
+    verifyOpenEffortCombo() { if (!this.verifyEfforts.length) return; this.verifyOpenCombo = 'effort'; this.verifyEffortQuery = ''; this.verifyComboHighlight = 0; },
+    verifyOnAgentFilter() { this.verifyOpenCombo = 'agent'; this.verifyComboHighlight = 0; },
+    verifyOnModelFilter() { this.verifyOpenCombo = 'model'; this.verifyComboHighlight = 0; },
+    verifyOnEffortFilter() { this.verifyOpenCombo = 'effort'; this.verifyComboHighlight = 0; },
+    verifyComboMove(which, delta) {
+      if (this.verifyOpenCombo !== which) {
+        if (which === 'agent') this.verifyOpenAgentCombo();
+        else if (which === 'model') this.verifyOpenModelCombo();
+        else this.verifyOpenEffortCombo();
+      }
+      const opts = this.verifyComboOptions(which);
+      if (!opts.length) { this.verifyComboHighlight = -1; return; }
+      let i = this.verifyComboHighlight;
+      if (i < 0) i = 0;
+      else i = (i + delta + opts.length) % opts.length;
+      this.verifyComboHighlight = i;
+    },
+    verifyComboConfirm(which) {
+      const opts = this.verifyComboOptions(which);
+      const item = opts[this.verifyComboHighlight] || opts[0];
+      if (!item) return;
+      if (which === 'agent') this.verifyPickAgent(item);
+      else if (which === 'model') this.verifyPickModel(item);
+      else this.verifyPickEffort(item);
+    },
+    verifyPickAgent(a) {
+      if (!a || !a.available) return;
+      this.verifyAgent = a.name;
+      this.verifyOpenCombo = null;
+      this.verifyComboHighlight = -1;
+      this.verifyOnAgentChange(true);
+      this.verifySyncComboQueries();
+    },
+    verifyPickModel(m) {
+      if (!m) return;
+      this.verifyModel = m.id;
+      this.verifyOpenCombo = null;
+      this.verifyComboHighlight = -1;
+      this.verifyOnModelChange();
+      this.verifySyncComboQueries();
+    },
+    verifyPickEffort(e) {
+      if (e == null) return;
+      this.verifyEffort = e;
+      this.verifyOpenCombo = null;
+      this.verifyComboHighlight = -1;
+      this.verifySyncComboQueries();
+    },
+    verifyOnAgentChange(resetModel) {
+      const a = this.agents.find(x => x.name === this.verifyAgent);
+      const models = ((a && a.models) || []).slice();
+      models.sort((x, y) =>
+        String(x.label || x.id).localeCompare(String(y.label || y.id), undefined, { sensitivity: 'base' })
+      );
+      this.verifyModels = models;
+      if (resetModel || !this.verifyModels.find(m => m.id === this.verifyModel)) {
+        const preferred = 'composer-2.5';
+        this.verifyModel = this.verifyModels.find(m => m.id === preferred)
+          ? preferred
+          : (this.verifyModels[0] ? this.verifyModels[0].id : this.verifyModel);
+      }
+      this.verifySyncEffortsFromModel(resetModel);
+      this.verifySyncComboQueries();
+    },
+    verifyOnModelChange() {
+      this.verifySyncEffortsFromModel(true);
+      this.verifySyncComboQueries();
+    },
+    verifySyncEffortsFromModel(reset) {
+      const a = this.agents.find(x => x.name === this.verifyAgent);
+      const m = this.verifyModels.find(x => x.id === this.verifyModel);
+      let efforts = [];
+      if (m && Array.isArray(m.efforts) && m.efforts.length) {
+        efforts = m.efforts.slice();
+      } else if (a && Array.isArray(a.efforts) && a.efforts.length) {
+        efforts = a.efforts.slice();
+      }
+      this.verifyEfforts = efforts;
+      if (!efforts.length) {
+        this.verifyEffort = '';
+        return;
+      }
+      if (reset || !efforts.includes(this.verifyEffort)) {
+        this.verifyEffort = efforts.includes('high')
+          ? 'high'
+          : (efforts.includes('medium') ? 'medium' : efforts[0]);
+      }
     },
 
     async saveAnalysis() {

@@ -1,14 +1,15 @@
 {% extends "base.html" %}
 {% block title %} — Why lazyreview?{% endblock %}
 {% block content %}
-<article class="mx-auto max-w-3xl space-y-10">
+<article class="mx-auto max-w-5xl space-y-10">
   <header class="space-y-3">
     <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Why lazyreview?</h1>
     <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
       lazyreview is a local, human-in-the-loop desk for agentic pull-request review.
       It finds the PRs waiting on you, orients with an analysis brief, runs several
-      review agents in parallel, consolidates them into one consensus, drafts the
-      GitHub-facing comment — and stops. Nothing posts until you say so.
+      review agents in parallel, consolidates them into one consensus, verifies those
+      findings against the PR worktree, drafts the GitHub-facing comment — and stops.
+      Nothing posts until you say so.
     </p>
   </header>
 
@@ -27,17 +28,23 @@
       </li>
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Batch multi-agent reviews</strong>
-        (Claude, Agy, Cursor) with your default models and effort from Settings.
+        (Claude, Cursor, Agy, Codex) with your default models and effort from Settings.
       </li>
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Consolidates into one report</strong>
-        with a recommended GitHub action (<code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">approve</code>,
+        — dedupes across runs and existing PR feedback into an internal consensus plus
+        <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">meta.json</code>.
+      </li>
+      <li>
+        <strong class="font-medium text-slate-900 dark:text-slate-100">Verifies findings against the worktree</strong>
+        — reproduces or refutes each consensus claim, drops false alarms, and recomputes
+        the recommended GitHub action (<code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">approve</code>,
         <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">request_changes</code>, or
         <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">comment</code>).
       </li>
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Publish transform</strong>
-        turns the internal report into a GitHub draft you can edit, then submit yourself.
+        turns the verified internal report into a GitHub draft you can edit, then submit yourself.
       </li>
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Interactive chat</strong>
@@ -57,26 +64,32 @@
       <h2 class="text-lg font-semibold">Workflow</h2>
       <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
         After the analysis brief, you kick off one or more agentic reviews.
-        Those runs feed a single consolidate-and-publish step; you iterate on that
-        draft until it is ready, then post to GitHub yourself.
+        Those runs feed consolidate → verify findings against the PR worktree →
+        publish draft; you iterate on that draft until it is ready, then post to
+        GitHub yourself.
       </p>
     </div>
-    <figure class="lr-mermaid overflow-x-auto">
+    <figure class="lr-mermaid lr-mermaid--fit">
       <div class="lr-mermaid-toolbar">
         <span class="lr-mermaid-label">End-to-end flow</span>
+        <button type="button" class="lr-mermaid-expand" data-lr-mermaid-expand>Expand</button>
       </div>
-      <pre class="mermaid px-3 py-4 text-sm">flowchart TD
-  sync[PR first added] --> analysis[PR analysis brief]
+      <pre class="lr-mermaid-src" hidden>flowchart TD
+  sync[PR sync] --> analysis[PR analysis brief]
   analysis --> order[Human starts reviews]
   order --> r1[Claude review]
   order --> r2[Cursor review]
   order --> r3[Agy review]
-  r1 --> consol[Consolidate and publish draft]
+  order --> r4[Codex review]
+  r1 --> consol[Consolidate]
   r2 --> consol
   r3 --> consol
-  consol &lt;--&gt; chat[Chat challenge]
-  chat --> publish[Publish draft]
-  publish --> github[Post to GitHub]</pre>
+  r4 --> consol
+  consol --> verify[Verify findings]
+  verify --> publish[Publish draft]
+  publish &lt;--&gt; chat[Chat challenge]
+  chat --> github[Post to GitHub]</pre>
+      <div class="lr-mermaid-host" aria-busy="true">Rendering…</div>
     </figure>
   </section>
 
@@ -85,74 +98,61 @@
       <h2 class="text-lg font-semibold">Local architecture</h2>
       <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
         Everything durable stays on your machine. Sync and post talk to GitHub through
-        <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">gh</code>;
-        analysis and every review share one detached worktree per PR (backed by a bare
-        mirror). Findings and the analysis brief are written into SQLite. Consolidate /
-        publish / human challenge reuse that stored context in a consolidation job
-        directory — they do not need a second checkout.
+        <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">gh</code>.
+        Analysis, reviews, verify, and interactive chat share one detached worktree
+        per PR (backed by a bare mirror). Findings and the analysis brief land in SQLite.
+        Consolidate and publish run in a consolidation job directory staged from the DB;
+        verify holds the shared worktree and rewrites those consensus artifacts before
+        the publish transform.
       </p>
     </div>
-    <figure class="lr-mermaid overflow-x-auto">
+    <figure class="lr-mermaid lr-mermaid--fit">
       <div class="lr-mermaid-toolbar">
         <span class="lr-mermaid-label">Containers and data stores</span>
+        <button type="button" class="lr-mermaid-expand" data-lr-mermaid-expand>Expand</button>
       </div>
-      <pre class="mermaid px-3 py-4 text-sm">flowchart TB
-  You[You]
+      <pre class="lr-mermaid-src" hidden>flowchart TB
+  You[You / browser]
+  Daemon[lazyreview daemon]
   GH[GitHub]
+  Agents[Agent CLIs]
 
-  subgraph Local["Docker container - lazyreview"]
+  You &lt;--&gt;|127.0.0.1:3334| Daemon
+  Daemon &lt;--&gt;|gh sync / post| GH
+  Daemon --> Agents
+
+  subgraph Data["/data volume"]
     direction TB
-    Daemon["lazyreview daemon - UI, API, sync, job runners"]
-
-    subgraph Stores["lazyreview-data volume - /data"]
-      direction LR
-      DB[("SQLite lazyreview.db")]
-      Mirror["Bare mirror workspaces/mirrors"]
-      WT["Shared PR worktree workspaces/prs"]
-      ADir["analyses/"]
-      RDir["runs/"]
-      CDir["consolidations/"]
-    end
-
-    Agents["Agent CLIs - claude, agent, agy, codex"]
+    DB[("SQLite")]
+    Mirror[Bare git mirrors]
+    WT[Shared PR worktree]
+    Jobs["analyses / runs / consolidations"]
+    Mirror --> WT
+    Jobs --> DB
   end
 
-  You &lt;--&gt;|browser - 127.0.0.1:3334| Daemon
-  Daemon &lt;--&gt;|gh sync and post| GH
-  Daemon &lt;--&gt;|PRs, briefs, findings, drafts, feedback| DB
-
-  Mirror -->|git worktree add detach| WT
-  Daemon -->|create or hold on first analysis or review| WT
-
-  Daemon -->|run analysis and reviews| Agents
-  Agents -->|cwd shared worktree| WT
-  Agents -->|brief.md| ADir
-  Agents -->|findings and logs| RDir
-  ADir -->|brief_markdown| DB
-  RDir -->|findings rows| DB
-
-  Daemon -->|stage brief and findings from DB| CDir
-  Daemon -->|run consolidate and publish| Agents
-  Agents -->|cwd consolidation job dir| CDir
-  CDir -->|body.md publish draft meta| DB
-
-  You -->|challenge - edit or regenerate| Daemon
-  Daemon -->|rewrite draft in place| CDir
-  Daemon -->|update publish_body| DB
-  You -->|confirm post| Daemon
-  Daemon -->|gh comment or review| GH
-  Daemon -->|feedback_actions| DB</pre>
+  Daemon &lt;--&gt; DB
+  Agents --> WT
+  Agents --> Jobs</pre>
+      <div class="lr-mermaid-host" aria-busy="true">Rendering…</div>
     </figure>
     <ul class="list-disc space-y-2 pl-5 text-slate-700 dark:text-slate-300 leading-relaxed">
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">One worktree per PR</strong>
-        — created lazily, held while analysis or review jobs run, reused across agents
-        for the same head.
+        — created lazily, held while analysis, review, verify, or interactive chat runs,
+        reused across agents for the same head.
       </li>
       <li>
-        <strong class="font-medium text-slate-900 dark:text-slate-100">SQLite is the handoff</strong>
-        — consolidate does not re-read the worktree; it loads the brief and findings from
-        the DB into <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">consolidations/{id}/</code>.
+        <strong class="font-medium text-slate-900 dark:text-slate-100">SQLite is the handoff into consolidate</strong>
+        — brief and per-run findings are staged into
+        <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">consolidations/{id}/</code>
+        (no worktree for that merge pass).
+      </li>
+      <li>
+        <strong class="font-medium text-slate-900 dark:text-slate-100">Verify uses the worktree</strong>
+        — after consolidate, a separate agent pass holds the shared PR worktree,
+        reproduces or refutes each consensus finding, and rewrites the consensus
+        artifacts before publish.
       </li>
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Human challenges stay local</strong>
@@ -165,32 +165,37 @@
     <div class="space-y-2">
       <h2 class="text-lg font-semibold">Prompt chaining</h2>
       <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
-        Each stage has its own prompt. Analysis, consolidator, and publish prompts
+        Each stage has its own prompt. Analysis, consolidator, verify, and publish prompts
         are editable under
         <a class="text-blue-600 hover:underline dark:text-blue-400" href="/settings">Settings</a>;
         review runs use the review skill. Outputs of earlier stages become inputs to later ones —
         not a single mega-prompt.
       </p>
     </div>
-    <figure class="lr-mermaid overflow-x-auto">
+    <figure class="lr-mermaid lr-mermaid--fit">
       <div class="lr-mermaid-toolbar">
         <span class="lr-mermaid-label">Prompt chain</span>
+        <button type="button" class="lr-mermaid-expand" data-lr-mermaid-expand>Expand</button>
       </div>
-      <pre class="mermaid px-3 py-4 text-sm">flowchart TD
-  p1["Analysis prompt produces brief.md"]
-  p2["Review skill produces findings per run"]
-  p3["Consolidator prompt produces body.md and meta.json"]
-  p4["Publish prompt produces GitHub draft"]
-  p5["You edit and submit via gh"]
-  p1 --> p2 --> p3 --> p4 --> p5
-  p3 -->|recommended_action| ui[Submit modal preselect]
-  p4 -->|ready_to_post| ui</pre>
+      <pre class="lr-mermaid-src" hidden>flowchart TD
+  p1["Analysis → brief.md"]
+  p2["Review skill → findings per run"]
+  p3["Consolidate → body.md + meta.json"]
+  p4["Verify findings against worktree"]
+  p5["Publish → GitHub draft"]
+  p6["You edit and submit via gh"]
+  p1 --> p2 --> p3 --> p4 --> p5 --> p6
+  p4 -->|recommended_action| ui[Submit modal preselect]
+  p5 -->|ready_to_post| ui</pre>
+      <div class="lr-mermaid-host" aria-busy="true">Rendering…</div>
     </figure>
     <ol class="list-decimal space-y-2 pl-5 text-slate-700 dark:text-slate-300 leading-relaxed">
       <li><strong class="font-medium text-slate-900 dark:text-slate-100">Analysis</strong> — orientation brief for the current head (intent, coverage, blast radius).</li>
       <li><strong class="font-medium text-slate-900 dark:text-slate-100">Reviews</strong> — independent agentic passes; findings stored per run.</li>
       <li><strong class="font-medium text-slate-900 dark:text-slate-100">Consolidate</strong> — dedupe across runs and existing PR comments; emit an internal report plus <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">meta.json</code>.</li>
-      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Publish</strong> — rewrite that report into concise GitHub-facing markdown (still local).</li>
+      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Verify</strong> — reproduce or refute each consensus finding in the shared PR worktree; drop false alarms; recompute <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">recommended_action</code>.</li>
+      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Publish</strong> — rewrite the verified report into concise GitHub-facing markdown (still local).</li>
+      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Chat (optional)</strong> — Explore the PR worktree, or Challenge findings / recommended action; Done regenerates the publish draft.</li>
       <li><strong class="font-medium text-slate-900 dark:text-slate-100">Submit</strong> — you choose the action, edit the draft, and post. Never auto-posted.</li>
     </ol>
   </section>
@@ -199,7 +204,7 @@
     <h2 class="text-lg font-semibold">Not another auto-review bot</h2>
     <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
       Generic AI PR bots drop comments straight onto GitHub. lazyreview is the opposite:
-      multi-agent signal in, one consensus out, human still owns the write.
+      multi-agent signal in, verified consensus out, human still owns the write.
       Worktrees, logs, and history stay on your machine. When the head moves, stale work
       is marked so you don’t ship a review for the wrong commit.
     </p>
@@ -220,22 +225,126 @@
   </section>
 </article>
 
+{# Full-width Mermaid expand (same pattern as PR analysis brief) #}
+<div id="why-mermaid-backdrop" class="lr-modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="why-mermaid-title">
+  <div class="absolute inset-0 bg-slate-900/50" data-lr-mermaid-close></div>
+  <div class="lr-modal-panel lr-modal-panel--mermaid">
+    <div class="lr-modal-header">
+      <h2 id="why-mermaid-title" class="text-lg font-semibold">Diagram</h2>
+      <button type="button" class="lr-modal-close" data-lr-mermaid-close aria-label="Close">Close</button>
+    </div>
+    <div id="why-mermaid-expand-body" class="mt-3 lr-modal-scroll lr-mermaid-expand-body"></div>
+  </div>
+</div>
+
 <script>
   document.addEventListener('DOMContentLoaded', async function () {
     if (!window.mermaid) return;
-    try {
-      if (window.LR && typeof window.LR.mermaidTheme === 'function') {
-        window.mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: 'strict',
-          theme: window.LR.mermaidTheme(),
-          fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-        });
-      }
-      await window.mermaid.run({ querySelector: '.mermaid' });
-    } catch (e) {
-      console.warn('mermaid render failed', e);
+
+    var seq = 0;
+    var backdrop = document.getElementById('why-mermaid-backdrop');
+    var expandBody = document.getElementById('why-mermaid-expand-body');
+    var titleEl = document.getElementById('why-mermaid-title');
+
+    function theme() {
+      return (window.LR && typeof window.LR.mermaidTheme === 'function')
+        ? window.LR.mermaidTheme()
+        : (document.documentElement.classList.contains('dark') ? 'dark' : 'default');
     }
+
+    function closeExpand() {
+      if (!backdrop) return;
+      backdrop.hidden = true;
+      if (expandBody) expandBody.innerHTML = '';
+      document.body.style.overflow = '';
+    }
+
+    async function renderDiagram(src, host, opts) {
+      var useMaxWidth = !opts || opts.useMaxWidth !== false;
+      window.mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: theme(),
+        fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+        flowchart: {
+          useMaxWidth: useMaxWidth,
+          htmlLabels: true,
+          wrappingWidth: 220,
+          nodeSpacing: 24,
+          rankSpacing: 36,
+        },
+      });
+      var id = 'why-mmd-' + (++seq);
+      var out = await window.mermaid.render(id, src);
+      host.innerHTML = out.svg;
+      host.removeAttribute('aria-busy');
+      if (out.bindFunctions) out.bindFunctions(host);
+      return out;
+    }
+
+    async function openExpand(fig) {
+      if (!fig || !backdrop || !expandBody) return;
+      var srcEl = fig.querySelector('.lr-mermaid-src');
+      var src = srcEl ? srcEl.textContent : '';
+      if (!src.trim()) return;
+      var label = fig.querySelector('.lr-mermaid-label');
+      if (titleEl) titleEl.textContent = (label && label.textContent.trim()) || 'Diagram';
+      expandBody.innerHTML = '<p class="text-sm text-slate-500">Rendering…</p>';
+      backdrop.hidden = false;
+      document.body.style.overflow = 'hidden';
+      try {
+        var holder = document.createElement('div');
+        await renderDiagram(src, holder, { useMaxWidth: false });
+        expandBody.innerHTML = '';
+        expandBody.appendChild(holder.firstElementChild || holder);
+      } catch (err) {
+        expandBody.innerHTML = '';
+        var pre = document.createElement('pre');
+        pre.className = 'lr-mermaid-error';
+        pre.textContent = 'Mermaid error: ' + (err && err.message ? err.message : String(err));
+        expandBody.appendChild(pre);
+      }
+    }
+
+    var figs = document.querySelectorAll('figure.lr-mermaid');
+    for (var i = 0; i < figs.length; i++) {
+      var fig = figs[i];
+      var srcEl = fig.querySelector('.lr-mermaid-src');
+      var host = fig.querySelector('.lr-mermaid-host');
+      var src = srcEl ? srcEl.textContent : '';
+      if (!host) continue;
+      if (!src.trim()) {
+        host.textContent = 'Empty diagram';
+        host.removeAttribute('aria-busy');
+        continue;
+      }
+      try {
+        await renderDiagram(src, host, { useMaxWidth: true });
+      } catch (err) {
+        host.innerHTML = '';
+        host.removeAttribute('aria-busy');
+        var pre = document.createElement('pre');
+        pre.className = 'lr-mermaid-error';
+        pre.textContent = 'Mermaid error: ' + (err && err.message ? err.message : String(err));
+        host.appendChild(pre);
+      }
+    }
+
+    document.querySelectorAll('[data-lr-mermaid-expand]').forEach(function (btn) {
+      btn.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        openExpand(btn.closest('.lr-mermaid'));
+      });
+    });
+    document.querySelectorAll('[data-lr-mermaid-close]').forEach(function (el) {
+      el.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        closeExpand();
+      });
+    });
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && backdrop && !backdrop.hidden) closeExpand();
+    });
   });
 </script>
 {% endblock %}

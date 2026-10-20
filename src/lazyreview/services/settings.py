@@ -10,6 +10,7 @@ from lazyreview.agents.names import (
     ALL_AGENT_NAMES,
     AgentName,
     ClaudeModelAlias,
+    DEFAULT_CURSOR_MODEL,
     EffortLevel,
 )
 from lazyreview.db import get_all_settings, get_setting, set_setting
@@ -18,6 +19,7 @@ from lazyreview.db.schema import (
     _default_consolidator_prompt,
     _default_pr_analysis_prompt,
     _default_publish_prompt,
+    _default_verify_prompt,
 )
 from lazyreview.services.pr_sync import (
     DEFAULT_SYNC_INTERVAL_MINUTES,
@@ -31,6 +33,7 @@ from lazyreview.services.timezones import (
 
 ALLOWED_UNITS = {"hours", "days", "weeks"}
 ALLOWED_CONSOLIDATOR_AGENTS = ALL_AGENT_NAMES
+ALLOWED_VERIFY_AGENTS = ALL_AGENT_NAMES
 ALLOWED_PR_ANALYSIS_AGENTS = ALL_AGENT_NAMES
 ALLOWED_SESSION_AGENTS = ALL_AGENT_NAMES
 ALLOWED_BATCH_AGENTS = ALL_AGENT_NAMES
@@ -39,6 +42,9 @@ MAX_BATCH_DEFAULTS = 20
 _DEFAULT_CONSOLIDATOR_AGENT = AgentName.CLAUDE.value
 _DEFAULT_CONSOLIDATOR_MODEL = ClaudeModelAlias.HAIKU.value
 _DEFAULT_CONSOLIDATOR_EFFORT = EffortLevel.LOW.value
+_DEFAULT_VERIFY_AGENT = AgentName.CURSOR.value
+_DEFAULT_VERIFY_MODEL = DEFAULT_CURSOR_MODEL
+_DEFAULT_VERIFY_EFFORT = ""
 _DEFAULT_PR_ANALYSIS_AGENT = AgentName.CLAUDE.value
 _DEFAULT_PR_ANALYSIS_MODEL = ClaudeModelAlias.OPUS.value
 _DEFAULT_PR_ANALYSIS_EFFORT = EffortLevel.HIGH.value
@@ -101,6 +107,7 @@ def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
     prompt = raw.get("consolidator_prompt") or _default_consolidator_prompt() or ""
     analysis_prompt = raw.get("pr_analysis_prompt") or _default_pr_analysis_prompt() or ""
     publish_prompt = raw.get("publish_prompt") or _default_publish_prompt() or ""
+    verify_prompt = raw.get("verify_prompt") or _default_verify_prompt() or ""
     batch_defaults = parse_batch_review_defaults(raw.get("batch_review_defaults"))
     display_timezone = normalize_display_timezone(raw.get("display_timezone"))
     return {
@@ -126,6 +133,13 @@ def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
         "consolidator_effort": raw.get("consolidator_effort") or _DEFAULT_CONSOLIDATOR_EFFORT,
         "consolidator_prompt": prompt,
         "consolidator_prompt_default": _default_consolidator_prompt() or "",
+        "verify_agent": raw.get("verify_agent") or _DEFAULT_VERIFY_AGENT,
+        "verify_model": raw.get("verify_model") or _DEFAULT_VERIFY_MODEL,
+        "verify_effort": raw.get("verify_effort")
+        if raw.get("verify_effort") is not None
+        else _DEFAULT_VERIFY_EFFORT,
+        "verify_prompt": verify_prompt,
+        "verify_prompt_default": _default_verify_prompt() or "",
         "pr_analysis_agent": raw.get("pr_analysis_agent") or _DEFAULT_PR_ANALYSIS_AGENT,
         "pr_analysis_model": raw.get("pr_analysis_model") or _DEFAULT_PR_ANALYSIS_MODEL,
         "pr_analysis_effort": raw.get("pr_analysis_effort") or _DEFAULT_PR_ANALYSIS_EFFORT,
@@ -151,6 +165,10 @@ def update_app_settings(
     consolidator_model: str | None = None,
     consolidator_effort: str | None = None,
     consolidator_prompt: str | None = None,
+    verify_agent: str | None = None,
+    verify_model: str | None = None,
+    verify_effort: str | None = None,
+    verify_prompt: str | None = None,
     pr_analysis_agent: str | None = None,
     pr_analysis_model: str | None = None,
     pr_analysis_effort: str | None = None,
@@ -192,6 +210,22 @@ def update_app_settings(
         set_setting(conn, "consolidator_effort", consolidator_effort.strip())
     if consolidator_prompt is not None:
         set_setting(conn, "consolidator_prompt", consolidator_prompt)
+    if verify_agent is not None:
+        agent = verify_agent.strip().lower()
+        if agent not in ALLOWED_VERIFY_AGENTS:
+            raise ValueError(
+                f"Verify agent must be one of {sorted(ALLOWED_VERIFY_AGENTS)}"
+            )
+        set_setting(conn, "verify_agent", agent)
+    if verify_model is not None:
+        model = verify_model.strip()
+        if not model:
+            raise ValueError("Verify model is required")
+        set_setting(conn, "verify_model", model)
+    if verify_effort is not None:
+        set_setting(conn, "verify_effort", verify_effort.strip())
+    if verify_prompt is not None:
+        set_setting(conn, "verify_prompt", verify_prompt)
     if pr_analysis_agent is not None:
         agent = pr_analysis_agent.strip().lower()
         if agent not in ALLOWED_PR_ANALYSIS_AGENTS:
@@ -263,6 +297,16 @@ def get_publish_config(conn: sqlite3.Connection) -> dict[str, str]:
     view = get_settings_view(conn)
     return {
         "prompt": view["publish_prompt"],
+    }
+
+
+def get_verify_config(conn: sqlite3.Connection) -> dict[str, str]:
+    view = get_settings_view(conn)
+    return {
+        "agent": view["verify_agent"],
+        "model": view["verify_model"],
+        "effort": view["verify_effort"] or "",
+        "prompt": view["verify_prompt"],
     }
 
 

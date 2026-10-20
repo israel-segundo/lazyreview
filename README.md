@@ -3,8 +3,9 @@
 A local, human-in-the-loop desk for agentic pull-request review.
 
 It finds PRs waiting on you, orients with an analysis brief, lets you run one or
-more review agents (Cursor / Claude / Agy / Codex), consolidates them into one consensus
-with a GitHub-facing draft — and stops. Nothing posts until you say so.
+more review agents (Cursor / Claude / Agy / Codex), consolidates them into one
+consensus, verifies those findings against the PR worktree, drafts the
+GitHub-facing comment — and stops. Nothing posts until you say so.
 
 History, costs, and feedback live in SQLite. Worktrees and run logs stay on your
 machine. When the PR head moves, stale runs are flagged so you don’t ship a
@@ -13,8 +14,8 @@ review for the wrong commit.
 ## Workflow
 
 After the analysis brief, you kick off one or more agentic reviews. Those runs
-feed a single consolidate-and-publish step; you iterate on that draft until it
-is ready, then post to GitHub yourself.
+feed consolidate → verify findings against the PR worktree → publish draft; you
+iterate on that draft until it is ready, then post to GitHub yourself.
 
 ```mermaid
 flowchart TD
@@ -24,79 +25,60 @@ flowchart TD
   order --> r2[Cursor review]
   order --> r3[Agy review]
   order --> r4[Codex review]
-  r1 --> consol[Consolidate and publish draft]
+  r1 --> consol[Consolidate]
   r2 --> consol
   r3 --> consol
   r4 --> consol
-  consol <--> challenge[Human challenges]
+  consol --> verify[Verify findings]
+  verify --> publish[Publish draft]
+  publish <--> challenge[Human challenges]
   challenge --> github[Post to GitHub]
 ```
 
 ## Local architecture
 
 Everything durable stays on your machine. Sync and post talk to GitHub through
-`gh`; analysis and every review share one detached worktree per PR (backed by a
-bare mirror). Findings and the analysis brief are written into SQLite. Consolidate /
-publish / human challenge reuse that stored context in a consolidation job
-directory — they do not need a second checkout.
+`gh`. Analysis, reviews, verify, and interactive chat share one detached worktree
+per PR (backed by a bare mirror). Findings and the analysis brief land in SQLite.
+Consolidate and publish run in a consolidation job directory staged from the DB;
+verify holds the shared worktree and rewrites those consensus artifacts before
+the publish transform.
 
 ```mermaid
 flowchart TB
-  You[You]
+  You[You / browser]
+  Daemon[lazyreview daemon]
   GH[GitHub]
+  Agents[Agent CLIs]
 
-  subgraph Local["Docker container - lazyreview"]
+  You <-->|127.0.0.1:3334| Daemon
+  Daemon <-->|gh sync / post| GH
+  Daemon --> Agents
+
+  subgraph Data["/data volume"]
     direction TB
-    Daemon["lazyreview daemon - UI, API, sync, job runners"]
-
-    subgraph Stores["lazyreview-data volume - /data"]
-      direction LR
-      DB[("SQLite lazyreview.db")]
-      Mirror["Bare mirror workspaces/mirrors"]
-      WT["Shared PR worktree workspaces/prs"]
-      ADir["analyses/"]
-      RDir["runs/"]
-      CDir["consolidations/"]
-    end
-
-    Agents["Agent CLIs - claude, agent, agy, codex"]
+    DB[("SQLite")]
+    Mirror[Bare git mirrors]
+    WT[Shared PR worktree]
+    Jobs["analyses / runs / consolidations"]
+    Mirror --> WT
+    Jobs --> DB
   end
 
-  You <-->|browser - 127.0.0.1:3334| Daemon
-  Daemon <-->|gh sync and post| GH
-  Daemon <-->|PRs, briefs, findings, drafts, feedback| DB
-
-  Mirror -->|git worktree add detach| WT
-  Daemon -->|create or hold on first analysis or review| WT
-
-  Daemon -->|run analysis and reviews| Agents
-  Agents -->|cwd shared worktree| WT
-  Agents -->|brief.md| ADir
-  Agents -->|findings and logs| RDir
-  ADir -->|brief_markdown| DB
-  RDir -->|findings rows| DB
-
-  Daemon -->|stage brief and findings from DB| CDir
-  Daemon -->|run consolidate and publish| Agents
-  Agents -->|cwd consolidation job dir| CDir
-  CDir -->|body.md publish draft meta| DB
-
-  You -->|challenge - edit or regenerate| Daemon
-  Daemon -->|rewrite draft in place| CDir
-  Daemon -->|update publish_body| DB
-  You -->|confirm post| Daemon
-  Daemon -->|gh comment or review| GH
-  Daemon -->|feedback_actions| DB
+  Daemon <--> DB
+  Agents --> WT
+  Agents --> Jobs
 ```
 
-- **One worktree per PR** — created lazily, held while analysis, review, or interactive chat sessions run, reused across agents for the same head.
-- **SQLite is the handoff** — consolidate does not re-read the worktree; it loads the brief and findings from the DB into `consolidations/{id}/`.
+- **One worktree per PR** — created lazily, held while analysis, review, verify, or interactive chat sessions run, reused across agents for the same head.
+- **SQLite is the handoff into consolidate** — brief and per-run findings are staged into `consolidations/{id}/` (no worktree for that merge pass).
+- **Verify uses the worktree** — after consolidate, a separate agent pass holds the shared PR worktree, reproduces or refutes each consensus finding, drops false alarms, and rewrites `body.md` / `findings.json` / `meta.json` before publish.
 - **Interactive chat** — right-rail Explore (PR Q&A) and Challenge (adversarial rounds over consolidation findings). Turns + working findings live in SQLite; Done writes findings/action and re-runs the publish transform. Never auto-posts.
 - **Human challenges stay local** — edit, chat, or regenerate the draft until you post.
 
 ## Prompt chaining
 
-Each stage has its own prompt. Analysis, consolidator, and publish prompts are
+Each stage has its own prompt. Analysis, consolidator, verify, and publish prompts are
 editable under **Settings**; review runs use the review skill. Outputs of earlier
 stages become inputs to later ones — not a single mega-prompt.
 
@@ -105,19 +87,21 @@ flowchart TD
   p1["Analysis prompt produces brief.md"]
   p2["Review skill produces findings per run"]
   p3["Consolidator prompt produces body.md and meta.json"]
-  p4["Publish prompt produces GitHub draft"]
-  p5["You edit and submit via gh"]
-  p1 --> p2 --> p3 --> p4 --> p5
-  p3 -->|recommended_action| ui[Submit modal preselect]
-  p4 -->|ready_to_post| ui
+  p4["Verify prompt rewrites findings against worktree"]
+  p5["Publish prompt produces GitHub draft"]
+  p6["You edit and submit via gh"]
+  p1 --> p2 --> p3 --> p4 --> p5 --> p6
+  p4 -->|recommended_action| ui[Submit modal preselect]
+  p5 -->|ready_to_post| ui
 ```
 
 1. **Analysis** — orientation brief for the current head (intent, coverage, blast radius).
 2. **Reviews** — independent agentic passes; findings stored per run.
 3. **Consolidate** — dedupe across runs and existing PR comments; emit an internal report plus `meta.json`.
-4. **Chat (optional)** — Explore the PR worktree, or Challenge findings / recommended action in rounds; Done syncs findings and regenerates the publish draft.
-5. **Publish** — rewrite that report into concise GitHub-facing markdown (still local).
-6. **Submit** — you choose the action (`approve` / `request_changes` / `comment`), edit the draft, and post via `gh`. Never auto-posted.
+4. **Verify** — reproduce or refute each consensus finding in the shared PR worktree; drop false alarms; recompute `recommended_action`.
+5. **Publish** — rewrite the verified report into concise GitHub-facing markdown (still local).
+6. **Chat (optional)** — Explore the PR worktree, or Challenge findings / recommended action in rounds; Done syncs findings and regenerates the publish draft.
+7. **Submit** — you choose the action (`approve` / `request_changes` / `comment`), edit the draft, and post via `gh`. Never auto-posted.
 
 ## Prerequisites
 
@@ -186,8 +170,8 @@ for that CLI. Each agent run gets `GH_TOKEN` plus only its own provider's keys.
 Codex's own sandbox can't start inside Docker, so Codex chat runs with its
 shell tools turned off: it answers from the analysis brief, findings, and
 conversation, but can't open files the way Claude chat can. Codex reviews,
-analyses, and consolidations run unrestricted inside the container, like the
-other agents.
+analyses, consolidations, and verify runs unrestricted inside the container,
+like the other agents.
 
 ### Review skill
 
@@ -280,5 +264,5 @@ lazyreview serve
 ## Settings (UI)
 
 `/settings` — default agents/models/effort (including interactive chat defaults),
-editable analysis / consolidator / publish prompts, and retention for finished runs
+editable analysis / consolidator / verify / publish prompts, and retention for finished runs
 **and** chat sessions (default 1 week). Hourly daemon sweep + **Purge old runs now**.

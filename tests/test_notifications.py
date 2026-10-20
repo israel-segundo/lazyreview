@@ -70,7 +70,7 @@ def _pr(conn):
 def test_schema_has_notifications(tmp_path: Path):
     conn = _conn(tmp_path)
     ver = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert ver == SCHEMA_VERSION == 23
+    assert ver == SCHEMA_VERSION == 24
     cols = {
         r["name"] for r in conn.execute("PRAGMA table_info(notifications)").fetchall()
     }

@@ -34,11 +34,26 @@ from lazyreview.db import (
 from lazyreview.db.schema import connect
 from lazyreview.services.credentials import subprocess_env
 from lazyreview.services.gh import GhError, list_pr_comments
-from lazyreview.services.settings import get_consolidator_config, get_publish_config
+from lazyreview.services.pr_workspace import hold_worktree
+from lazyreview.services.settings import (
+    get_consolidator_config,
+    get_publish_config,
+    get_verify_config,
+)
 
 logger = logging.getLogger(__name__)
 
 _TERMINAL_RUN_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
+
+# Worktree inspect + rewrite consolidation artifacts; no GitHub mutate.
+VERIFY_ALLOWED_TOOLS = (
+    "Read,Glob,Grep,Write,Edit,"
+    "Bash(git status *),Bash(git diff *),Bash(git log *),"
+    "Bash(git show *),Bash(git blame *),Bash(git rev-parse *),"
+    "Bash(pytest *),Bash(python -m pytest *),Bash(npm test *),"
+    "Bash(npm run test *),Bash(cargo test *),Bash(go test *),"
+    "Bash(gh pr view *),Bash(gh pr checks *)"
+)
 
 
 def consolidations_dir(settings: Settings) -> Path:
@@ -232,6 +247,108 @@ def build_consolidate_command(
     raise RuntimeError(f"Unsupported consolidator agent: {agent}")
 
 
+def build_verify_command(
+    *,
+    agent: str,
+    model: str,
+    effort: str | None,
+    prompt: str,
+    worktree: Path,
+    work_dir: Path,
+) -> BuiltCommand:
+    """Build verify CLI: PR worktree as cwd/workspace, consolidation dir as --add-dir."""
+    adapter = get_adapter(agent)
+    path = which_binary(adapter.binary)
+    if not path:
+        raise RuntimeError(f"{adapter.binary} not found on PATH")
+    model_args = adapter.resolve_model_args(model, effort or None)
+    wt = str(worktree)
+    work = str(work_dir)
+
+    if agent == AgentName.CLAUDE.value:
+        return BuiltCommand(
+            argv=[
+                path,
+                "-p",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+                "--dangerously-skip-permissions",
+                "--permission-mode",
+                "bypassPermissions",
+                *model_args,
+                "--allowedTools",
+                VERIFY_ALLOWED_TOOLS,
+                "--add-dir",
+                wt,
+                "--add-dir",
+                work,
+            ],
+            stdin_text=prompt,
+        )
+    if agent == AgentName.AGY.value:
+        return BuiltCommand(
+            argv=[
+                path,
+                "-p",
+                prompt,
+                "--output-format",
+                "stream-json",
+                "--mode",
+                "accept-edits",
+                "--dangerously-skip-permissions",
+                *model_args,
+                "--add-dir",
+                wt,
+                "--add-dir",
+                work,
+            ],
+        )
+    if agent == AgentName.CURSOR.value:
+        return BuiltCommand(
+            argv=[
+                path,
+                "-p",
+                "--force",
+                "--trust",
+                "--workspace",
+                wt,
+                "--add-dir",
+                work,
+                "--output-format",
+                "stream-json",
+                "--stream-partial-output",
+                *model_args,
+                prompt,
+            ]
+        )
+    if agent == AgentName.CODEX.value:
+        return BuiltCommand(
+            argv=codex_exec_argv(
+                path,
+                cwd=worktree,
+                add_dirs=[work_dir],
+                model_args=model_args,
+            ),
+            stdin_text=prompt,
+        )
+    raise RuntimeError(f"Unsupported verify agent: {agent}")
+
+
+def count_findings_json(raw: str | None) -> int:
+    """Return number of findings in a findings.json string; 0 on empty/invalid."""
+    if not (raw or "").strip():
+        return 0
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return 0
+    if isinstance(data, list):
+        return len(data)
+    return 0
+
+
 _VALID_RECOMMENDED_ACTIONS = frozenset({"approve", "request_changes", "comment"})
 
 
@@ -276,6 +393,22 @@ def render_consolidator_prompt(
 
 def render_publish_prompt(template: str, *, publish_body_path: Path) -> str:
     return template.replace("{publish_body_path}", str(publish_body_path))
+
+
+def render_verify_prompt(
+    template: str,
+    *,
+    body_path: Path,
+    findings_json_path: Path,
+    meta_json_path: Path,
+    pr_url: str = "",
+) -> str:
+    return (
+        template.replace("{body_path}", str(body_path))
+        .replace("{findings_json_path}", str(findings_json_path))
+        .replace("{meta_json_path}", str(meta_json_path))
+        .replace("{pr_url}", pr_url or "")
+    )
 
 
 def format_source_runs_label(findings_by_run: list[dict[str, Any]]) -> str:
@@ -781,7 +914,7 @@ class ConsolidationRunner:
             meta_raw = meta_path.read_text(encoding="utf-8") if meta_path.exists() else ""
             recommended_action, rationale = parse_consolidation_meta(meta_raw)
 
-            # Keep status=running through publish so UI polling stays active.
+            # Keep status=running through verify + publish so UI polling stays active.
             update_consolidation(
                 conn,
                 consolidation_id,
@@ -797,6 +930,34 @@ class ConsolidationRunner:
                 error_message=None,
                 ready_to_post=0,
                 publish_body=None,
+            )
+
+            verify_err = self._run_verify_phase(
+                consolidation_id,
+                conn=conn,
+                pr=pr,
+                work_dir=work_dir,
+                body_path=body_path,
+                findings_out=findings_out,
+                meta_path=meta_path,
+                started=started,
+            )
+            if verify_err is not None:
+                return
+
+            # Re-read artifacts after verify (or unchanged if verify was skipped).
+            body = body_path.read_text(encoding="utf-8") if body_path.exists() else body
+            if findings_out.exists():
+                findings_json = findings_out.read_text(encoding="utf-8")
+            meta_raw = meta_path.read_text(encoding="utf-8") if meta_path.exists() else meta_raw
+            recommended_action, rationale = parse_consolidation_meta(meta_raw)
+            update_consolidation(
+                conn,
+                consolidation_id,
+                body=body,
+                findings_json=findings_json,
+                recommended_action=recommended_action,
+                recommended_action_rationale=rationale or None,
             )
 
             publish_cfg = get_publish_config(conn)
@@ -923,6 +1084,168 @@ class ConsolidationRunner:
                 error_message=str(e)[-2000:],
             )
             raise
+
+    def _run_verify_phase(
+        self,
+        consolidation_id: int,
+        *,
+        conn: sqlite3.Connection,
+        pr: dict[str, Any],
+        work_dir: Path,
+        body_path: Path,
+        findings_out: Path,
+        meta_path: Path,
+        started: float,
+    ) -> str | None:
+        """Reproduce/refute consensus findings in the PR worktree.
+
+        Returns None on success or skip (zero findings). On failure/cancel, updates
+        the consolidation row and returns a short error string.
+        """
+        findings_raw = (
+            findings_out.read_text(encoding="utf-8") if findings_out.exists() else "[]"
+        )
+        if count_findings_json(findings_raw) == 0:
+            return None
+
+        if self._is_cancel_requested(consolidation_id, conn):
+            update_consolidation(
+                conn,
+                consolidation_id,
+                status="cancelled",
+                finished_at=utcnow(),
+                duration_ms=int((time.monotonic() - started) * 1000),
+                error_message="Cancelled by user",
+            )
+            return "cancelled"
+
+        verify_cfg = get_verify_config(conn)
+        v_agent = verify_cfg["agent"]
+        v_model = verify_cfg["model"]
+        v_effort = verify_cfg["effort"] or None
+        verify_prompt_path = work_dir / "verify-prompt.md"
+        verify_stdout_path = work_dir / "verify-stdout.log"
+        verify_stderr_path = work_dir / "verify-stderr.log"
+        verify_cli_path = work_dir / "verify-cli.json"
+
+        prompt_text = render_verify_prompt(
+            verify_cfg["prompt"],
+            body_path=body_path,
+            findings_json_path=findings_out,
+            meta_json_path=meta_path,
+            pr_url=str(pr.get("url") or ""),
+        )
+        verify_prompt_path.write_text(prompt_text, encoding="utf-8")
+
+        head_sha = str(pr.get("head_sha") or "")
+        try:
+            with hold_worktree(self.settings, pr, head_sha, conn=conn) as worktree:
+                if self._is_cancel_requested(consolidation_id, conn):
+                    update_consolidation(
+                        conn,
+                        consolidation_id,
+                        status="cancelled",
+                        finished_at=utcnow(),
+                        duration_ms=int((time.monotonic() - started) * 1000),
+                        error_message="Cancelled by user",
+                    )
+                    return "cancelled"
+
+                built = build_verify_command(
+                    agent=v_agent,
+                    model=v_model,
+                    effort=v_effort,
+                    prompt=prompt_text,
+                    worktree=worktree,
+                    work_dir=work_dir,
+                )
+                verify_cli_path.write_text(
+                    json.dumps(
+                        {
+                            "argv": built.argv,
+                            "stdin": bool(built.stdin_text),
+                            "cwd": str(worktree),
+                            "work_dir": str(work_dir),
+                            "agent": v_agent,
+                            "model": v_model,
+                            "effort": v_effort,
+                        },
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+                v_rc = self._run_process(
+                    consolidation_id,
+                    built.argv,
+                    cwd=worktree,
+                    stdout_path=verify_stdout_path,
+                    stderr_path=verify_stderr_path,
+                    conn=conn,
+                    stdin_text=built.stdin_text,
+                )
+        except Exception as e:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            err = f"Verify findings failed: {e}"[-2000:]
+            update_consolidation(
+                conn,
+                consolidation_id,
+                status="failed",
+                finished_at=utcnow(),
+                duration_ms=duration_ms,
+                ready_to_post=0,
+                error_message=err,
+            )
+            return err
+
+        if self._is_cancel_requested(consolidation_id, conn):
+            update_consolidation(
+                conn,
+                consolidation_id,
+                status="cancelled",
+                finished_at=utcnow(),
+                duration_ms=int((time.monotonic() - started) * 1000),
+                error_message="Cancelled by user",
+            )
+            return "cancelled"
+
+        body_ok = body_path.exists() and bool(
+            body_path.read_text(encoding="utf-8", errors="replace").strip()
+        )
+        findings_ok = findings_out.exists()
+        meta_ok = meta_path.exists() and bool(
+            meta_path.read_text(encoding="utf-8", errors="replace").strip()
+        )
+        if v_rc != 0 or not body_ok or not findings_ok or not meta_ok:
+            v_err = ""
+            if verify_stderr_path.exists():
+                v_err = verify_stderr_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )[-1500:]
+            if not v_err and verify_stdout_path.exists():
+                v_err = verify_stdout_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )[-1500:]
+            if not v_err:
+                if v_rc != 0:
+                    v_err = f"Verify findings exit {v_rc}"
+                else:
+                    v_err = (
+                        "Verify findings succeeded but body.md, findings.json, "
+                        "or meta.json was missing or empty"
+                    )
+            duration_ms = int((time.monotonic() - started) * 1000)
+            update_consolidation(
+                conn,
+                consolidation_id,
+                status="failed",
+                finished_at=utcnow(),
+                duration_ms=duration_ms,
+                ready_to_post=0,
+                error_message=v_err[-2000:],
+            )
+            return v_err
+
+        return None
 
     def _execute_publish_only(
         self,
