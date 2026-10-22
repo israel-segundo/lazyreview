@@ -563,7 +563,8 @@
                         <span x-text="findingsPosting ? 'Posting…' : 'Submit feedback'"></span>
                       </button>
                     </div>
-                    <p class="text-xs text-slate-500"
+                    <p class="text-xs"
+                       :class="findingsPostCounts().offDiff ? 'font-medium text-amber-800 dark:text-amber-200' : 'text-slate-500'"
                        x-show="findingsPostAnchorSummary()"
                        x-text="findingsPostAnchorSummary()"></p>
                   </div>
@@ -590,57 +591,18 @@
                    x-show="findingsPostError" x-cloak x-text="findingsPostError"></p>
 
                 <div class="p-4 space-y-4">
-                  <div x-show="consolFindingsCount()" class="space-y-3">
-                    <div class="lr-modal-tabs" role="tablist" aria-label="Finding severity">
-                      <button type="button" role="tab" class="lr-modal-tab"
-                              :class="consolFindingsTab === 'High' && 'is-active'"
-                              @click.prevent="consolFindingsTab = 'High'"
-                              x-text="'High (' + consolFindingsForTab('High').length + ')'"></button>
-                      <button type="button" role="tab" class="lr-modal-tab"
-                              :class="consolFindingsTab === 'Medium' && 'is-active'"
-                              @click.prevent="consolFindingsTab = 'Medium'"
-                              x-text="'Medium (' + consolFindingsForTab('Medium').length + ')'"></button>
-                      <button type="button" role="tab" class="lr-modal-tab"
-                              :class="consolFindingsTab === 'Low' && 'is-active'"
-                              @click.prevent="consolFindingsTab = 'Low'"
-                              x-text="'Low (' + consolFindingsForTab('Low').length + ')'"></button>
-                    </div>
-                    <p class="text-sm text-slate-500"
-                       x-show="!consolFindingsForTab(consolFindingsTab).length"
-                       x-text="'No ' + consolFindingsTab.toLowerCase() + ' findings.'"></p>
-                    <div class="lr-findings" x-show="consolFindingsForTab(consolFindingsTab).length">
-                      <template x-for="(f, idx) in consolFindingsForTab(consolFindingsTab)" :key="(f.external_id || f.id || idx)">
-                        <article class="lr-finding">
-                          <div class="lr-finding-head">
-                            <div class="lr-finding-title">
-                              <span class="lr-finding-id" x-show="f.external_id || f.id"
-                                    x-text="f.external_id || ('#' + f.id)"></span>
-                              <span x-show="f.external_id || f.id"> </span>
-                              <span x-html="renderedFindingTitle(f, idx)"></span>
-                            </div>
-                            <span class="lr-finding-sev" :class="findingSeverityClass(f.severity || f.Severity)"
-                                  x-text="findingSeverityLabel(f.severity || f.Severity)"></span>
-                          </div>
-                          <div class="lr-finding-path"
-                               x-show="f.path || f.file"
-                               x-text="(f.path || f.file || '') + (f.line != null ? (':' + f.line) : '')"></div>
-                          <div class="lr-finding-body" x-html="renderedFindingBody(f)"></div>
-                        </article>
-                      </template>
-                    </div>
-                  </div>
-
-                  <details class="rounded-lg border border-slate-200 dark:border-slate-700"
-                           x-show="String(activeFindingsConsolidation().body || '').trim()" x-cloak>
-                    <summary class="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200">
-                      Internal consolidation report
-                    </summary>
-                    <div class="border-t border-slate-100 p-3 consol-md prose-sm max-w-none text-sm text-slate-800 dark:border-slate-800 dark:text-slate-200"
-                         x-html="_renderMarkdown(activeFindingsConsolidation().body || '')"></div>
-                  </details>
-
                   <div class="space-y-3"
                        x-show="activeFindingsConsolidation().status === 'succeeded'" x-cloak>
+                    <div x-show="findingsPostCounts().offDiff && canSubmitFindings()"
+                         class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+                         role="status">
+                      <p class="font-medium">Some findings are anchored off this PR’s diff</p>
+                      <p class="mt-0.5 text-xs opacity-90"
+                         x-show="findingsPostAnchorSummary()"
+                         x-text="findingsPostAnchorSummary()"></p>
+                      <p class="mt-1 text-xs opacity-90">They will be included in the review body when you submit, not as inline diff comments.</p>
+                    </div>
+
                     <div x-show="activeFindingsConsolidation().recommended_action || activeFindingsConsolidation().recommended_action_rationale"
                          class="rounded-lg border px-3 py-2.5 text-sm"
                          :class="findingsRecommendationAlertClass()" role="status">
@@ -692,6 +654,55 @@
                       </a>
                     </div>
                   </div>
+
+                  <div x-show="consolFindingsCount()" class="space-y-3">
+                    <div class="lr-modal-tabs" role="tablist" aria-label="Finding severity">
+                      <button type="button" role="tab" class="lr-modal-tab"
+                              :class="consolFindingsTab === 'High' && 'is-active'"
+                              @click.prevent="consolFindingsTab = 'High'"
+                              x-text="'High (' + consolFindingsForTab('High').length + ')'"></button>
+                      <button type="button" role="tab" class="lr-modal-tab"
+                              :class="consolFindingsTab === 'Medium' && 'is-active'"
+                              @click.prevent="consolFindingsTab = 'Medium'"
+                              x-text="'Medium (' + consolFindingsForTab('Medium').length + ')'"></button>
+                      <button type="button" role="tab" class="lr-modal-tab"
+                              :class="consolFindingsTab === 'Low' && 'is-active'"
+                              @click.prevent="consolFindingsTab = 'Low'"
+                              x-text="'Low (' + consolFindingsForTab('Low').length + ')'"></button>
+                    </div>
+                    <p class="text-sm text-slate-500"
+                       x-show="!consolFindingsForTab(consolFindingsTab).length"
+                       x-text="'No ' + consolFindingsTab.toLowerCase() + ' findings.'"></p>
+                    <div class="lr-findings" x-show="consolFindingsForTab(consolFindingsTab).length">
+                      <template x-for="(f, idx) in consolFindingsForTab(consolFindingsTab)" :key="(f.external_id || f.id || idx)">
+                        <article class="lr-finding">
+                          <div class="lr-finding-head">
+                            <div class="lr-finding-title">
+                              <span class="lr-finding-id" x-show="f.external_id || f.id"
+                                    x-text="f.external_id || ('#' + f.id)"></span>
+                              <span x-show="f.external_id || f.id"> </span>
+                              <span x-html="renderedFindingTitle(f, idx)"></span>
+                            </div>
+                            <span class="lr-finding-sev" :class="findingSeverityClass(f.severity || f.Severity)"
+                                  x-text="findingSeverityLabel(f.severity || f.Severity)"></span>
+                          </div>
+                          <div class="lr-finding-path"
+                               x-show="f.path || f.file"
+                               x-text="(f.path || f.file || '') + (f.line != null ? (':' + f.line) : '')"></div>
+                          <div class="lr-finding-body" x-html="renderedFindingBody(f)"></div>
+                        </article>
+                      </template>
+                    </div>
+                  </div>
+
+                  <details class="rounded-lg border border-slate-200 dark:border-slate-700"
+                           x-show="String(activeFindingsConsolidation().body || '').trim()" x-cloak>
+                    <summary class="cursor-pointer px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+                      Internal consolidation report
+                    </summary>
+                    <div class="border-t border-slate-100 p-3 consol-md prose-sm max-w-none text-sm text-slate-800 dark:border-slate-800 dark:text-slate-200"
+                         x-html="_renderMarkdown(activeFindingsConsolidation().body || '')"></div>
+                  </details>
 
                   <template x-if="consolidationIsActive(activeFindingsConsolidation().status)">
                     <p class="text-sm text-slate-500">

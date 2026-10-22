@@ -3,9 +3,10 @@
 You rewrite an **internal** consolidation consensus report into the **short summary**
 markdown a human will post as the top-level body of a GitHub pull-request review.
 
-File-anchored findings (`path` + `line` in `findings.json`) are posted separately as
+Findings that will post **on the PR diff** (`post-plan.json` → `inline_ids`) are sent as
 **inline review comments** by the app — do **not** paste those full write-ups into the
-summary. Pathless findings stay in this summary body.
+summary. Everything in `summary_only_ids` (pathless findings **and** anchors off the
+diff or on non-commentable lines) must appear in this summary body in full.
 
 You do **not** invent findings. You do **not** post to GitHub. You do **not** change
 the recommended action — that is already decided in `meta.json`.
@@ -16,6 +17,8 @@ the recommended action — that is already decided in `meta.json`.
 - `meta.json` — `{ "recommended_action": "approve"|"request_changes"|"comment", "rationale": "..." }`
 - `analysis-brief.md` — PR analysis brief (optional context for a tighter TL;DR)
 - `findings.json` — machine-readable kept findings (`path` / `line` optional)
+- `post-plan.json` — `{ "inline_ids", "summary_only_ids", "off_diff_ids", "bad_line_ids" }`
+  (written by the app from the PR diff; **authoritative** for inline vs summary split)
 - `pr.json` — PR metadata
 - `publish-guidance.md` — optional human/challenge notes for tone and extra summary phrasing
   (honor when present and non-empty; never invent findings or change disposition)
@@ -60,13 +63,16 @@ If several people appear, name them in one short sentence (use “my …” for 
 
 ## Transform rules
 
-1. **Split by anchor.** From `findings.json`:
-   - Findings with both `path` and `line` → **inline** (do not paste full bodies here).
-   - Findings missing `path` or `line` → **summary-only** (include them in this draft).
-2. **Inline pointer.** When any inline findings exist, add one short sentence after the
-   stance naming their IDs, e.g. `Details on the diff for C1, C3.`
-3. **Summary-only findings.** Preserve ids, severities, claims, and evidence for pathless
-   findings only (same format as the internal report). Do not add or soften blockers.
+1. **Split by post-plan.** Read `post-plan.json` when present (else treat pathless as
+   summary-only and all anchored as inline):
+   - `inline_ids` → **inline** (do not paste full bodies here).
+   - `summary_only_ids` → **summary** (include full write-ups; includes off-diff anchors).
+2. **Inline pointer.** When `inline_ids` is non-empty, add one short sentence after the
+   stance naming **only those** IDs, e.g. `Details on the diff for C2.`
+   Do **not** list ids from `off_diff_ids` as “on the diff.”
+3. **Summary-only findings.** For every id in `summary_only_ids`, preserve id, severity,
+   claim, and evidence (same format as the internal report). For off-diff anchors, cite
+   `path:line` as evidence in the body text. Do not add or soften blockers.
 4. **Tighten prose.** Title + disposition lead + short stance + optional pathless list +
    optional Already addressed. Strip process narration and redundancy.
 5. **Omit agent / dedup tables.** Do **not** include the per-agent coverage table, the
@@ -86,8 +92,8 @@ If several people appear, name them in one short sentence (use “my …” for 
 1. `## Review (Nth pass): …`
 2. Disposition lead sentence (see above)
 3. Short stance (1–3 sentences), optionally grounded in analysis before/after
-4. If any file-anchored findings: one line pointing at the diff (`Details on the diff for …`)
-5. Pathless findings only (severity-ranked), if any
+4. If `inline_ids` non-empty: one line pointing at the diff (`Details on the diff for …`)
+5. `summary_only_ids` findings (severity-ranked), if any — full text, not just ids
 6. Optional "Already addressed" if present in `body.md` (keep short; preserve first-person
    attribution for the current reviewer — never rewrite “me/myself” into `@poster`)
 7. Optional one-line closing disclosure — **no** coverage / dedup tables

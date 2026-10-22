@@ -18,12 +18,15 @@ from lazyreview.db import (
 from lazyreview.db.schema import connect, init_db
 from lazyreview.services.gh import GhError, submit_pr_review
 from lazyreview.services.review_post import (
+    build_github_post_plan,
     build_review_comments,
     count_inline_post_plan,
     filter_comments_for_changed_paths,
     finding_is_blocking,
     inline_comment_body,
+    merge_summary_findings_into_review_body,
     parse_findings_list,
+    partition_findings_for_github_post,
     recommended_action_from_findings,
     split_findings_for_post,
 )
@@ -65,6 +68,58 @@ def test_filter_comments_for_changed_paths():
     kept, skipped = filter_comments_for_changed_paths(comments, {"in.py"})
     assert len(kept) == 1 and kept[0]["path"] == "in.py"
     assert len(skipped) == 1 and skipped[0]["path"] == "out.py"
+
+
+def test_build_github_post_plan_ids():
+    findings = [
+        {"id": "C1", "path": "off.py", "line": 1},
+        {"id": "C2", "path": "in.py", "line": 2},
+        {"id": "C3", "title": "no anchor"},
+    ]
+    plan = build_github_post_plan(findings, {"in.py"})
+    assert plan["inline_ids"] == ["C2"]
+    assert set(plan["summary_only_ids"]) == {"C1", "C3"}
+    assert plan["off_diff_ids"] == ["C1"]
+
+
+def test_partition_findings_off_diff():
+    findings = [
+        {"id": "C1", "path": "off.py", "line": 1, "title": "x", "body": "off diff"},
+        {"id": "C2", "path": "in.py", "line": 2, "title": "y", "body": "on diff"},
+    ]
+    inline, summary = partition_findings_for_github_post(findings, {"in.py"})
+    assert [f["id"] for f in inline] == ["C2"]
+    assert [f["id"] for f in summary] == ["C1"]
+
+
+def test_merge_summary_findings_appends_off_diff():
+    findings = [
+        {
+            "id": "C1",
+            "severity": 2,
+            "title": "Server gap",
+            "body": "Not enforced.",
+            "path": "functions/x.ts",
+            "line": 10,
+        },
+    ]
+    body, n = merge_summary_findings_into_review_body(
+        "## Review\n\nApproved.\n",
+        findings,
+        changed_paths=frozenset({"app/page.tsx"}),
+    )
+    assert n == 1
+    assert "**C1 · Medium — Server gap.**" in body
+    assert "not on this PR's diff" in body
+
+
+def test_merge_summary_findings_skips_when_id_present():
+    findings = [{"id": "C1", "title": "t", "body": "b", "path": "x", "line": 1}]
+    body, n = merge_summary_findings_into_review_body(
+        "## Review\n\n**C1 · Low — t.** b\n",
+        findings,
+    )
+    assert n == 0
 
 
 def test_count_inline_post_plan_off_diff():
@@ -351,6 +406,7 @@ def test_post_sends_inline_comments(tmp_path: Path):
         commit_id=None,
         comments=None,
         changed_paths=None,
+        commentable_lines=None,
     ):
         captured["args"] = {
             "owner": owner,
@@ -361,6 +417,7 @@ def test_post_sends_inline_comments(tmp_path: Path):
             "commit_id": commit_id,
             "comments": comments,
             "changed_paths": changed_paths,
+            "commentable_lines": commentable_lines,
         }
         return {
             "ok": True,
@@ -399,3 +456,124 @@ def test_post_sends_inline_comments(tmp_path: Path):
     assert captured["args"]["comments"][0]["path"] == "src/a.py"
     assert captured["args"]["comments"][0]["line"] == 12
     assert "**C1**" in captured["args"]["comments"][0]["body"]
+
+
+def test_post_appends_off_diff_finding_to_body(tmp_path: Path):
+    from lazyreview.main import create_app
+
+    settings = _settings(tmp_path)
+    settings.ensure_dirs()
+    conn = connect(settings.db_path)
+    init_db(conn)
+    pr = upsert_pr(
+        conn,
+        owner="o",
+        repo="r",
+        number=42,
+        url="https://example.com/o/r/pull/42",
+        title="t",
+        base_ref="main",
+        head_ref="feat",
+        head_sha="abc123def",
+    )
+    _seed_succeeded_analysis(conn, pr)
+    cur = conn.execute(
+        """
+        INSERT INTO review_runs (pr_id, agent, model, status, head_sha, workdir_path, consolidated)
+        VALUES (?, 'claude', 'opus', 'succeeded', 'abc123def', ?, 1)
+        """,
+        (pr["id"], str(tmp_path / "w")),
+    )
+    conn.commit()
+    run_id = int(cur.lastrowid)
+    findings = [
+        {
+            "id": "C1",
+            "severity": 2,
+            "title": "Off diff",
+            "body": "Evidence elsewhere.",
+            "path": "functions/off.ts",
+            "line": 99,
+        },
+        {
+            "id": "C2",
+            "severity": 3,
+            "title": "On diff",
+            "body": "Here.",
+            "path": "src/a.py",
+            "line": 2,
+            "disposition": "_Fast-follow._",
+        },
+    ]
+    row = create_consolidation(
+        conn,
+        pr_id=pr["id"],
+        head_sha="abc123def",
+        source_run_ids=[run_id],
+        agent="claude",
+        model="haiku",
+        effort="low",
+        workdir_path=str(tmp_path / "c"),
+    )
+    update_consolidation(
+        conn,
+        int(row["id"]),
+        status="succeeded",
+        body="## Review\n",
+        publish_body="## Review\n\nApproved.\n\nDetails on the diff for C2.\n",
+        ready_to_post=1,
+        recommended_action="approve",
+        findings_json=json.dumps(findings),
+    )
+    cid = int(row["id"])
+    conn.close()
+
+    captured: dict = {}
+
+    def _fake_submit(
+        owner,
+        repo,
+        number,
+        body,
+        event,
+        *,
+        commit_id=None,
+        comments=None,
+        changed_paths=None,
+        commentable_lines=None,
+    ):
+        captured["body"] = body
+        captured["comments"] = comments
+        return {
+            "ok": True,
+            "id": "99",
+            "html_url": "https://example.com/review/99",
+            "dropped_comments": [],
+            "posted_inline_count": len(comments or []),
+            "skipped_off_diff_count": 0,
+        }
+
+    with (
+        patch("lazyreview.main.get_settings", return_value=settings),
+        patch(
+            "lazyreview.api.consolidations.list_pr_file_patches",
+            return_value={"src/a.py": "@@ -1 +1,3 @@\n line\n+one\n+two\n"},
+        ),
+        patch(
+            "lazyreview.api.consolidations.submit_pr_review",
+            side_effect=_fake_submit,
+        ),
+    ):
+        app = create_app()
+        with TestClient(app) as client:
+            res = client.post(
+                f"/api/consolidations/{cid}/post",
+                json={"action": "approve", "body": "## Review\n\nApproved.\n"},
+            )
+            assert res.status_code == 200, res.text
+            data = res.json()
+            assert data["inline_comments"] == 1
+
+    assert "**C1 · Medium — Off diff.**" in captured["body"]
+    assert len(captured["comments"]) == 1
+    assert captured["comments"][0]["path"] == "src/a.py"

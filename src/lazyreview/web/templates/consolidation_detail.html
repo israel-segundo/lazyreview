@@ -112,7 +112,8 @@
           <a href="/prs/{{ pr.id }}?tab=consolidations"
              class="rounded-lg px-2.5 py-1.5 text-sm text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">Back</a>
           {% endif %}
-          <p class="basis-full text-xs text-slate-500"
+          <p class="basis-full text-xs"
+             :class="postCounts().offDiff ? 'font-medium text-amber-800 dark:text-amber-200' : 'text-slate-500'"
              x-show="postAnchorSummary()"
              x-text="postAnchorSummary()"></p>
         </div>
@@ -228,6 +229,12 @@
 
       {# —— Submit to GitHub (preview/markdown toggle + controls) —— #}
       <div class="lr-consol-panel lr-consol-panel--fill" x-show="pageTab === 'submit'" x-cloak role="tabpanel">
+        <div class="mb-3 shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+             x-show="canSubmit() && postCounts().offDiff" x-cloak role="status">
+          <p class="font-medium">Some findings are anchored off this PR’s diff</p>
+          <p class="mt-0.5 text-xs opacity-90" x-show="postAnchorSummary()" x-text="postAnchorSummary()"></p>
+          <p class="mt-1 text-xs opacity-90">They will be included in the review body when you submit, not as inline diff comments.</p>
+        </div>
         <div class="shrink-0"
              x-show="c.recommended_action || c.recommended_action_rationale"
              x-cloak>

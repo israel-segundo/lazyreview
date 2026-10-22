@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 _BLOCKING_DISPOSITION = re.compile(
@@ -84,7 +85,7 @@ def finding_has_inline_anchor(finding: dict[str, Any]) -> bool:
 def split_findings_for_post(
     findings: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Return (inline_findings, summary_only_findings)."""
+    """Return (inline_findings, summary_only_findings) by anchor presence only."""
     inline: list[dict[str, Any]] = []
     summary: list[dict[str, Any]] = []
     for f in findings:
@@ -93,6 +94,190 @@ def split_findings_for_post(
         else:
             summary.append(f)
     return inline, summary
+
+
+def finding_display_id(finding: dict[str, Any], *, index: int = 0) -> str:
+    fid = str(finding.get("id") or "").strip()
+    return fid or f"C{index + 1}"
+
+
+def _finding_posts_inline_on_diff(
+    finding: dict[str, Any],
+    *,
+    changed_paths: set[str] | frozenset[str] | None,
+    commentable_lines: dict[str, frozenset[int]] | None,
+) -> bool:
+    if not finding_has_inline_anchor(finding):
+        return False
+    path = finding_path(finding)
+    try:
+        line = int(finding.get("line"))
+    except (TypeError, ValueError):
+        return False
+    use_paths = bool(changed_paths)
+    use_lines = bool(commentable_lines)
+    if use_paths and path not in (changed_paths or ()):
+        return False
+    if use_lines:
+        from lazyreview.services.pr_diff import snap_line_to_patch
+
+        available = (commentable_lines or {}).get(path)
+        if available is None:
+            return False
+        if line not in available and snap_line_to_patch(line, available) is None:
+            return False
+    return True
+
+
+def partition_findings_for_github_post(
+    findings: list[dict[str, Any]],
+    changed_paths: set[str] | frozenset[str] | None = None,
+    commentable_lines: dict[str, frozenset[int]] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split findings into (inline on PR diff, summary-only for review body)."""
+    inline: list[dict[str, Any]] = []
+    summary: list[dict[str, Any]] = []
+    for f in findings:
+        if _finding_posts_inline_on_diff(
+            f,
+            changed_paths=changed_paths,
+            commentable_lines=commentable_lines,
+        ):
+            inline.append(f)
+        else:
+            summary.append(f)
+    return inline, summary
+
+
+def build_github_post_plan(
+    findings: list[dict[str, Any]],
+    changed_paths: set[str] | frozenset[str] | None = None,
+    commentable_lines: dict[str, frozenset[int]] | None = None,
+) -> dict[str, list[str]]:
+    """Machine-readable inline vs summary split for publish transform + UI."""
+    inline, summary = partition_findings_for_github_post(
+        findings, changed_paths, commentable_lines
+    )
+    inline_ids = [finding_display_id(f, index=i) for i, f in enumerate(inline)]
+    summary_ids = [finding_display_id(f, index=i) for i, f in enumerate(summary)]
+    off_diff_ids: list[str] = []
+    bad_line_ids: list[str] = []
+    use_paths = bool(changed_paths)
+    use_lines = bool(commentable_lines)
+    for i, f in enumerate(findings):
+        fid = finding_display_id(f, index=i)
+        if not finding_has_inline_anchor(f):
+            continue
+        path = finding_path(f)
+        try:
+            int(f.get("line"))
+        except (TypeError, ValueError):
+            continue
+        if use_paths and path not in (changed_paths or ()):
+            off_diff_ids.append(fid)
+            continue
+        if use_lines:
+            from lazyreview.services.pr_diff import snap_line_to_patch
+
+            available = (commentable_lines or {}).get(path)
+            if available is None:
+                off_diff_ids.append(fid)
+                continue
+            line = int(f.get("line"))
+            if line not in available and snap_line_to_patch(line, available) is None:
+                bad_line_ids.append(fid)
+    return {
+        "inline_ids": inline_ids,
+        "summary_only_ids": summary_ids,
+        "off_diff_ids": off_diff_ids,
+        "bad_line_ids": bad_line_ids,
+    }
+
+
+def write_github_post_plan_file(
+    work_dir: Path,
+    *,
+    owner: str,
+    repo: str,
+    number: int,
+    findings: list[dict[str, Any]],
+) -> None:
+    """Write ``post-plan.json`` in a consolidation workdir (best-effort diff fetch)."""
+    from lazyreview.services.pr_diff import commentable_lines_by_path, list_pr_file_patches
+
+    try:
+        patches = list_pr_file_patches(owner, repo, number)
+        changed = frozenset(patches.keys())
+        lines = commentable_lines_by_path(patches)
+        plan = build_github_post_plan(findings, changed, lines)
+    except Exception:
+        plan = build_github_post_plan(findings)
+    (work_dir / "post-plan.json").write_text(
+        json.dumps(plan, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def _review_body_includes_finding(body: str, finding_id: str) -> bool:
+    if not finding_id.strip():
+        return False
+    fid = re.escape(finding_id.strip())
+    return bool(re.search(rf"\*\*{fid}(?:\s|[·—]|\*\*)", body))
+
+
+def format_summary_only_findings_md(
+    findings: list[dict[str, Any]],
+    *,
+    changed_paths: set[str] | frozenset[str] | None = None,
+) -> str:
+    """Markdown blocks for findings that cannot be posted as inline diff comments."""
+    if not findings:
+        return ""
+    sev_name = {1: "High", 2: "Medium", 3: "Low"}
+    lines = ["", "## Findings (included in review body)", ""]
+    for i, f in enumerate(findings):
+        sev = int(f.get("severity") or 3)
+        claim = (f.get("title") or finding_display_id(f, index=i)).strip()
+        body = (f.get("body") or "").strip()
+        fid = finding_display_id(f, index=i)
+        disposition = str(f.get("disposition") or "").strip()
+        lines.append(
+            f"**{fid} · {sev_name.get(sev, 'Low')} — {claim}.** {body}".strip()
+        )
+        if disposition and disposition not in body:
+            lines.append(disposition)
+        path = finding_path(f)
+        line = f.get("line")
+        if path and line is not None and line != "":
+            cite = f"`{path}:{line}`"
+            if changed_paths is not None and path not in changed_paths:
+                lines.append(
+                    f"_Evidence at {cite} — not on this PR's diff; included in the review body._"
+                )
+            else:
+                lines.append(
+                    f"_Evidence at {cite} — line not on the diff; included in the review body._"
+                )
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def merge_summary_findings_into_review_body(
+    body: str,
+    summary_findings: list[dict[str, Any]],
+    *,
+    changed_paths: set[str] | frozenset[str] | None = None,
+) -> tuple[str, int]:
+    """Append summary-only findings not already in ``body``. Returns (text, appended_count)."""
+    missing: list[dict[str, Any]] = []
+    for i, f in enumerate(summary_findings):
+        fid = finding_display_id(f, index=i)
+        if not _review_body_includes_finding(body, fid):
+            missing.append(f)
+    if not missing:
+        return body, 0
+    appendix = format_summary_only_findings_md(missing, changed_paths=changed_paths)
+    base = (body or "").rstrip()
+    return f"{base}{appendix}", len(missing)
 
 
 def inline_comment_body(finding: dict[str, Any]) -> str:
@@ -142,41 +327,15 @@ def count_inline_post_plan(
     commentable_lines: dict[str, frozenset[int]] | None = None,
 ) -> dict[str, int]:
     """Counts for UI: inline on diff, summary-only, and off-diff / bad-line anchors."""
-    inline, summary, off_diff, bad_line = 0, 0, 0, 0
-    use_paths = bool(changed_paths)
-    use_lines = bool(commentable_lines)
-    for f in findings:
-        if not finding_has_inline_anchor(f):
-            summary += 1
-            continue
-        path = finding_path(f)
-        try:
-            line = int(f.get("line"))
-        except (TypeError, ValueError):
-            summary += 1
-            continue
-        if use_paths and path not in (changed_paths or ()):
-            off_diff += 1
-            summary += 1
-            continue
-        if use_lines:
-            from lazyreview.services.pr_diff import snap_line_to_patch
-
-            available = (commentable_lines or {}).get(path)
-            if available is None:
-                off_diff += 1
-                summary += 1
-                continue
-            if line not in available and snap_line_to_patch(line, available) is None:
-                bad_line += 1
-                summary += 1
-                continue
-        inline += 1
+    inline_list, summary_list = partition_findings_for_github_post(
+        findings, changed_paths, commentable_lines
+    )
+    plan = build_github_post_plan(findings, changed_paths, commentable_lines)
     return {
-        "inline": inline,
-        "summary": summary,
-        "off_diff": off_diff,
-        "bad_line": bad_line,
+        "inline": len(inline_list),
+        "summary": len(summary_list),
+        "off_diff": len(plan["off_diff_ids"]),
+        "bad_line": len(plan["bad_line_ids"]),
         "total": len(findings),
     }
 

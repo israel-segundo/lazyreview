@@ -32,8 +32,9 @@ from lazyreview.services.gh import (
 from lazyreview.services.pr_diff import commentable_lines_by_path, list_pr_file_patches
 from lazyreview.services.review_post import (
     build_review_comments,
+    merge_summary_findings_into_review_body,
     parse_findings_list,
-    split_findings_for_post,
+    partition_findings_for_github_post,
 )
 from lazyreview.services.settings import get_consolidator_config
 
@@ -347,8 +348,6 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
         raise HTTPException(status_code=400, detail="Empty publish body")
 
     findings = parse_findings_list(row.get("findings_json") or row.get("findings"))
-    inline_findings, _summary_only = split_findings_for_post(findings)
-    review_comments = build_review_comments(inline_findings)
     head_sha = str(pr.get("head_sha") or row.get("head_sha") or "").strip()
 
     gh_url = None
@@ -357,6 +356,7 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
     skipped_off_diff = 0
     skipped_bad_line = 0
     posted_inline = 0
+    appended_summary = 0
     changed_paths: frozenset[str] | None = None
     commentable_lines: dict[str, frozenset[int]] | None = None
     try:
@@ -365,6 +365,14 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
         commentable_lines = commentable_lines_by_path(patches)
     except GhError as e:
         logger.warning("Could not list PR diff for inline filter: %s", e)
+
+    inline_findings, summary_only = partition_findings_for_github_post(
+        findings, changed_paths, commentable_lines
+    )
+    review_comments = build_review_comments(inline_findings)
+    text, appended_summary = merge_summary_findings_into_review_body(
+        text, summary_only, changed_paths=changed_paths
+    )
 
     try:
         event = _ACTION_TO_EVENT.get(body.action)
@@ -406,6 +414,9 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
         if attach_dropped > 0:
             note += f"; dropped {attach_dropped} bad line anchor(s)"
         dedup = f"{dedup}; {note}".strip("; ")
+    if appended_summary:
+        extra = f"appended {appended_summary} finding(s) to review body"
+        dedup = f"{dedup}; {extra}".strip("; ")
 
     updated = mark_consolidation_feedback_provided(
         conn,

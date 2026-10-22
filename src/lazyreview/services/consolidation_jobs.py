@@ -34,6 +34,7 @@ from lazyreview.db import (
 from lazyreview.db.schema import connect
 from lazyreview.services.credentials import subprocess_env
 from lazyreview.services.gh import GhError, list_pr_comments
+from lazyreview.services.review_post import parse_findings_list, write_github_post_plan_file
 from lazyreview.services.pr_workspace import hold_worktree
 from lazyreview.services.settings import (
     get_consolidator_config,
@@ -960,6 +961,8 @@ class ConsolidationRunner:
                 recommended_action_rationale=rationale or None,
             )
 
+            self._write_publish_post_plan(work_dir, pr, findings_json)
+
             publish_cfg = get_publish_config(conn)
             publish_prompt_text = render_publish_prompt(
                 publish_cfg["prompt"],
@@ -1247,6 +1250,24 @@ class ConsolidationRunner:
 
         return None
 
+    def _write_publish_post_plan(
+        self,
+        work_dir: Path,
+        pr: dict[str, Any],
+        findings_json: str | None,
+    ) -> None:
+        findings = parse_findings_list(findings_json)
+        try:
+            write_github_post_plan_file(
+                work_dir,
+                owner=str(pr["owner"]),
+                repo=str(pr["repo"]),
+                number=int(pr["number"]),
+                findings=findings,
+            )
+        except OSError as e:
+            logger.warning("Could not write post-plan.json: %s", e)
+
     def _execute_publish_only(
         self,
         consolidation_id: int,
@@ -1354,6 +1375,11 @@ class ConsolidationRunner:
         agent = cfg["agent"]
         model = cfg["model"]
         effort = cfg.get("effort") or None
+        findings_raw = (
+            findings_out.read_text(encoding="utf-8") if findings_out.exists() else "[]"
+        )
+        self._write_publish_post_plan(work_dir, pr, findings_raw)
+
         publish_cfg = get_publish_config(conn)
         publish_prompt_text = render_publish_prompt(
             publish_cfg["prompt"],

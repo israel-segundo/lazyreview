@@ -73,7 +73,9 @@
     const parts = [];
     if (counts.inline) parts.push(counts.inline + ' inline on the diff');
     if (counts.offDiff) {
-      parts.push(counts.offDiff + ' anchored off the diff (summary only)');
+      parts.push(
+        counts.offDiff + ' anchored off the diff (full text in review body, not inline)'
+      );
     }
     if (counts.badLine) {
       parts.push(counts.badLine + ' on non-diff lines (summary or nearest line at post)');
