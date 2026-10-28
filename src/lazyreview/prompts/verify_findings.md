@@ -55,16 +55,16 @@ Never claim you reproduced something you did not check.
 
 ## Recommended action (recompute)
 
-After filtering, set `meta.json.recommended_action` by **blocker disposition**, not
-severity alone. Class `blocker` (or disposition `_Fix before merge._`, or a clear
-build / AC compromise) forces `request_changes`. Non-blocking High/Medium/Low may
-still allow `approve`.
+After filtering, recompute `meta.json.recommended_action` with this **rule of thumb**:
 
 | Value | When |
 | --- | --- |
-| `request_changes` | Any kept finding classed `blocker` / `_Fix before merge._`, or that compromises the build or ticket ACs. |
-| `approve` | No such blockers — including when kept non-blocking findings remain. Empty is fine. |
-| `comment` | Ambiguous / neither fits (rare). |
+| `request_changes` | Any kept **High (S1)** finding; class `blocker` / `_Fix before merge._`; merge conflicts / unmergeable branch; security issue; build/CI red; ticket ACs unmet; or any other real blocker that compromises product functionality or safe merge. |
+| `approve` | No blockers — only cosmetic / nit / docs / `_Fast-follow._` / `_Author's call._` Medium–Low findings, or an empty list. Product functionality is not compromised. |
+| `comment` | Rare. Use only when you would still ship (`approve`) but want the draft lead to read **Approved with comments.** Prefer `approve` or `request_changes` when either clearly fits. |
+
+Do **not** approve past High severity, conflicts, or security findings by labeling them
+`_Fast-follow._`.
 
 Prefer keeping `path` + `line` on findings that anchor to a changed line (inline
 comments at post time). Pathless findings stay in the summary body only.

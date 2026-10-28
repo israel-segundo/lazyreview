@@ -58,9 +58,33 @@ def finding_is_blocking(finding: dict[str, Any]) -> bool:
     return False
 
 
+def _finding_severity_rank(finding: dict[str, Any]) -> int | None:
+    """Normalize severity to 1 (High) / 2 (Medium) / 3 (Low) when possible."""
+    raw = finding.get("severity")
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, (int, float)):
+        n = int(raw)
+        return n if n in (1, 2, 3) else None
+    text = str(raw).strip().lower()
+    if text in {"1", "high", "s1", "sev1", "severity 1"}:
+        return 1
+    if text in {"2", "medium", "s2", "sev2", "severity 2"}:
+        return 2
+    if text in {"3", "low", "s3", "sev3", "severity 3"}:
+        return 3
+    try:
+        n = int(text)
+    except ValueError:
+        return None
+    return n if n in (1, 2, 3) else None
+
+
 def recommended_action_from_findings(findings: list[dict[str, Any]]) -> str:
     """Safety-net action when meta is missing/invalid. Prompts remain primary."""
     if any(finding_is_blocking(f) for f in findings):
+        return "request_changes"
+    if any(_finding_severity_rank(f) == 1 for f in findings):
         return "request_changes"
     return "approve"
 

@@ -49,13 +49,19 @@ def test_recommended_action_from_findings():
         recommended_action_from_findings(
             [{"disposition": "_Fast-follow._", "severity": 1}]
         )
-        == "approve"
+        == "request_changes"
     )
     assert (
         recommended_action_from_findings(
             [{"disposition": "_Fix before merge._", "severity": 2}]
         )
         == "request_changes"
+    )
+    assert (
+        recommended_action_from_findings(
+            [{"disposition": "_Fast-follow._", "severity": 3}]
+        )
+        == "approve"
     )
     assert recommended_action_from_findings([]) == "approve"
 

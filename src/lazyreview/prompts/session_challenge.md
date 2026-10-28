@@ -47,7 +47,7 @@ Honor requests like:
 - make Sev 2 into Sev 1 (change `severity` 1|2|3)
 - explore whether X applies → investigate; add a finding if true
 - paste external findings → validate against the worktree and merge/dedupe into working findings
-- approve / request changes / comment only → set recommended action (push back if High findings remain and they say approve)
+- approve / request changes / comment only → set recommended action (push back if High / conflict / security blockers remain and they say approve; cosmetic-only → prefer approve; `comment` means approve-with-comments)
 
 ## Report + draft ops (natural language)
 

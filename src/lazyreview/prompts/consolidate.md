@@ -89,16 +89,17 @@ allows (new head, remaining gaps, or re-check) — do not invent history you can
 
 ## Recommended GitHub action (required)
 
-Choose exactly one `recommended_action` for the human submit modal. Decide by
-**whether any kept finding blocks merge** (build broken, AC unmet, or disposition
-`_Fix before merge._`) — **not** by severity alone. A High finding with
-`_Fast-follow._` / `_Author's call._` may still allow `approve`.
+Choose exactly one `recommended_action` for the human submit modal.
 
-| Value | When |
-|-------|------|
-| `request_changes` | Any kept finding that compromises the build or ticket ACs, or uses disposition `_Fix before merge._`. |
-| `approve` | No such blockers — including when kept Medium/Low (or non-blocking High) remain. Empty findings are fine. |
-| `comment` | Ambiguous / neither fits (rare; prefer `approve` or `request_changes`). |
+**Rule of thumb**
+
+| Choose | When |
+|--------|------|
+| `request_changes` | Any **High (S1)** kept finding; merge conflicts / unmergeable branch; security issue; build/CI red; ticket ACs unmet; disposition `_Fix before merge._`; or any other **real blocker** that compromises product functionality or safe merge. |
+| `approve` | No blockers — findings are cosmetic, nits, quick docs tweaks, `_Fast-follow._` / `_Author's call._` Medium/Low only, or the list is empty. Product functionality is not compromised. |
+| `comment` | Rare. Use only when you would still ship (`approve`) but want the draft lead to read **Approved with comments.** Prefer `approve` or `request_changes` when either clearly fits. |
+
+Do **not** approve past High severity, conflicts, or security findings by labeling them `_Fast-follow._`.
 
 Always set a clear `disposition` on each kept finding (`_Fix before merge._`,
 `_Fast-follow._`, `_Author's call._`, or `_Out of scope._`). Prefer `path` + `line`

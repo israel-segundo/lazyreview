@@ -1134,7 +1134,7 @@ function reviewForm() {
     highlightRunId: null,
     highlightConsolidationId: null,
     consolFindingsTab: 'High',
-    findingsVerdict: 'comment',
+    findingsVerdict: 'approve',
     findingsPublishBody: '',
     findingsDraftMode: 'preview',
     findingsPosting: false,
@@ -1702,7 +1702,7 @@ function reviewForm() {
       }
       if (c.recommended_action === 'approve') return 'Approve';
       if (c.recommended_action === 'request_changes') return 'Request changes';
-      if (c.recommended_action === 'comment') return 'Comment';
+      if (c.recommended_action === 'comment') return 'Approve with comments';
       return '';
     },
     dispositionTitle(c) {
@@ -1713,7 +1713,16 @@ function reviewForm() {
     dispositionClass(c) {
       if (!c) return '';
       const a = c.feedback_provided ? c.gh_action : c.recommended_action;
+      // "Approved with comments" is an approve-shaped recommendation.
+      if (!c.feedback_provided && a === 'comment') return this.feedbackActionClass('approve');
       return this.feedbackActionClass(a);
+    },
+    verdictFromRecommendation(rec) {
+      // Draft lead "Approved with comments." maps from recommended_action=comment;
+      // pre-select Approve in the submit dropdown.
+      if (rec === 'request_changes') return 'request_changes';
+      if (rec === 'approve' || rec === 'comment') return 'approve';
+      return 'approve';
     },
 
     formatCost(v) {
@@ -1929,8 +1938,7 @@ function reviewForm() {
         this.syncChatForFindingsContext();
         return;
       }
-      const rec = cons.recommended_action || 'comment';
-      if (['approve', 'request_changes', 'comment'].includes(rec)) this.findingsVerdict = rec;
+      this.findingsVerdict = this.verdictFromRecommendation(cons.recommended_action);
       if (!this._findingsPublishEdited || !this.findingsPublishBody) {
         this.findingsPublishBody = cons.publish_body || '';
       }
@@ -2025,7 +2033,7 @@ function reviewForm() {
       const action = session.working_recommended_action;
       if (action && ['approve', 'request_changes', 'comment'].includes(action)) {
         patch.recommended_action = action;
-        this.findingsVerdict = action;
+        this.findingsVerdict = this.verdictFromRecommendation(action);
       }
       if (session.working_recommended_action_rationale != null) {
         patch.recommended_action_rationale = session.working_recommended_action_rationale;
@@ -2092,12 +2100,12 @@ function reviewForm() {
       const a = (this.activeFindingsConsolidation() || {}).recommended_action || '';
       if (a === 'approve') return 'Recommendation: Approve';
       if (a === 'request_changes') return 'Recommendation: Request changes';
-      if (a === 'comment') return 'Recommendation: Comment';
+      if (a === 'comment') return 'Recommendation: Approve with comments';
       return 'Recommendation';
     },
     findingsRecommendationAlertClass() {
       const a = (this.activeFindingsConsolidation() || {}).recommended_action || '';
-      if (a === 'approve') {
+      if (a === 'approve' || a === 'comment') {
         return 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-100';
       }
       if (a === 'request_changes') {

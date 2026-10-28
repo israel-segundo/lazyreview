@@ -39,8 +39,13 @@ chosen from `meta.json.recommended_action` and the internal report:
 | `recommended_action` | Open with |
 | --- | --- |
 | `approve` | `Approved.` — unless the wrap-up form below applies |
-| `comment` | `Approved with comments.` |
+| `comment` | `Approved with comments.` (non-blocking notes only; UI will pre-select **Approve**) |
 | `request_changes` | `Requesting changes.` |
+
+`meta.json` should already follow the consolidator/verify rule of thumb: High /
+conflicts / security / real blockers → `request_changes`; cosmetic / nits / docs /
+no blockers → `approve` (or rare `comment` for approve-with-comments). You still do
+**not** rewrite `recommended_action` here — only mirror it in the lead sentence.
 
 **Approve + wrap up prior findings:** when `recommended_action` is `approve` **and**
 `body.md` has a non-empty **Already addressed** section (S1/S2 items humans already

@@ -329,7 +329,7 @@ function consolidationDetail() {
   }) : {}, {
     c: initial || {},
     publishBody: (initial && initial.publish_body) || '',
-    verdict: 'comment',
+    verdict: 'approve',
     pageTab: 'runs',
     findingsTab: 'High',
     draftMode: 'preview',
@@ -350,8 +350,9 @@ function consolidationDetail() {
     },
     init() {
       if (typeof this.initChatRail === 'function') this.initChatRail();
-      const rec = (this.c && this.c.recommended_action) || 'comment';
-      this.verdict = ['approve', 'request_changes', 'comment'].includes(rec) ? rec : 'comment';
+      this.verdict = this.verdictFromRecommendation(
+        this.c && this.c.recommended_action
+      );
       for (const label of ['High', 'Medium', 'Low']) {
         if (this.findingsForTab(label).length) { this.findingsTab = label; break; }
       }
@@ -387,7 +388,7 @@ function consolidationDetail() {
       };
       if (action && ['approve', 'request_changes', 'comment'].includes(action)) {
         patch.recommended_action = action;
-        this.verdict = action;
+        this.verdict = this.verdictFromRecommendation(action);
       }
       if (rationale != null) patch.recommended_action_rationale = rationale;
       if (session.working_body_md) patch.body = session.working_body_md;
@@ -422,16 +423,23 @@ function consolidationDetail() {
       if (this._poll) return;
       this._poll = setInterval(() => this.refresh(), 2500);
     },
+    verdictFromRecommendation(rec) {
+      // Draft lead "Approved with comments." maps from recommended_action=comment;
+      // pre-select Approve in the submit dropdown.
+      if (rec === 'request_changes') return 'request_changes';
+      if (rec === 'approve' || rec === 'comment') return 'approve';
+      return 'approve';
+    },
     recommendationLabel() {
       const a = (this.c && this.c.recommended_action) || '';
       if (a === 'approve') return 'Recommendation: Approve';
       if (a === 'request_changes') return 'Recommendation: Request changes';
-      if (a === 'comment') return 'Recommendation: Comment';
+      if (a === 'comment') return 'Recommendation: Approve with comments';
       return 'Recommendation';
     },
     recommendationAlertClass() {
       const a = (this.c && this.c.recommended_action) || '';
-      if (a === 'approve') {
+      if (a === 'approve' || a === 'comment') {
         return 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-100';
       }
       if (a === 'request_changes') {
