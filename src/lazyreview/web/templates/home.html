@@ -328,8 +328,10 @@ function homePage() {
         const res = await fetch('/api/prs/sync-pending', { method: 'POST' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'sync failed');
+        const woken = Number(data.review_requests_reactivated || 0);
         this.syncMsg = `Fetched ${data.fetched}, updated ${data.upserted}` +
-          (data.cleared_stale ? `, cleared ${data.cleared_stale} stale` : '') + '.';
+          (data.cleared_stale ? `, cleared ${data.cleared_stale} stale` : '') +
+          (woken ? `, woke ${woken} dismissed approval${woken === 1 ? '' : 's'}` : '') + '.';
         window.location.reload();
       } catch (e) {
         this.syncMsg = String(e.message || e);

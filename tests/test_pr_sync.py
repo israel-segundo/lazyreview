@@ -5,9 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from lazyreview.db import get_pr, pr_internal_status, record_external_pr_review, upsert_pr
+from lazyreview.db import (
+    get_pr,
+    pr_internal_status,
+    record_external_pr_review,
+    upsert_pr,
+)
 from lazyreview.db.schema import connect, init_db
-from lazyreview.services.gh import parse_user_review_for_head
+from lazyreview.services.gh import parse_user_review_for_head, user_has_dismissed_review
 from lazyreview.services.pr_sync import sync_pending_review_prs
 
 
@@ -350,3 +355,147 @@ def test_sync_pending_review_prs_updates_merged_open_pr(tmp_path: Path):
     refreshed = get_pr(conn, pr["id"])
     assert refreshed["state"] == "merged"
     assert int(refreshed["review_requested"]) == 0
+
+
+def test_parse_user_review_for_head_ignores_missing_commit_oid():
+    """Stale approvals without a commit must not attach to a newer head."""
+    reviews = [
+        {
+            "author": {"login": "me"},
+            "state": "APPROVED",
+            "id": "1",
+            "submittedAt": "2026-01-02T00:00:00Z",
+        },
+    ]
+    assert parse_user_review_for_head(reviews, head_sha="newhead", login="me") is None
+
+
+def test_user_has_dismissed_review():
+    reviews = [
+        {
+            "author": {"login": "me"},
+            "state": "DISMISSED",
+            "commit": {"oid": "old"},
+            "id": "1",
+            "submittedAt": "2026-01-01T00:00:00Z",
+        },
+        {
+            "author": {"login": "other"},
+            "state": "DISMISSED",
+            "commit": {"oid": "old"},
+            "id": "2",
+            "submittedAt": "2026-01-02T00:00:00Z",
+        },
+    ]
+    assert user_has_dismissed_review(reviews, login="me") is True
+    assert user_has_dismissed_review(reviews, login="nobody") is False
+
+
+def test_sync_reactivates_when_approval_dismissed_on_new_head(tmp_path: Path):
+    """
+    Org dismiss-stale-approvals: prior approve on old head, new commits, GitHub
+    marks the review DISMISSED and does not re-request the reviewer.
+    """
+    conn = _conn(tmp_path)
+    pr = _pr(conn, head="oldhead")
+    assert record_external_pr_review(
+        conn,
+        pr,
+        gh_action="approve",
+        gh_review_id="77",
+        body="LGTM",
+    )
+    conn.execute("UPDATE prs SET review_requested = 0 WHERE id = ?", (pr["id"],))
+    conn.commit()
+    assert pr_internal_status(conn, get_pr(conn, pr["id"]))["status"] == "approved"
+
+    view_data = {
+        "owner": "o",
+        "repo": "r",
+        "number": 1,
+        "url": pr["url"],
+        "title": "t",
+        "author": "author",
+        "base_ref": "main",
+        "head_ref": "feat",
+        "head_sha": "newhead",
+        "head_updated_at": "2026-01-03T00:00:00Z",
+        "state": "open",
+        "is_draft": False,
+        "reviews": [
+            {
+                "author": {"login": "me"},
+                "state": "DISMISSED",
+                "commit": {"oid": "oldhead"},
+                "id": "77",
+                "submittedAt": "2026-01-02T00:00:00Z",
+            }
+        ],
+    }
+
+    with (
+        patch("lazyreview.services.pr_sync.search_pending_review_prs", return_value=[]),
+        patch("lazyreview.services.pr_sync.view_pr", return_value=view_data),
+        patch("lazyreview.services.pr_sync.gh_user_login", return_value="me"),
+    ):
+        result = sync_pending_review_prs(conn)
+
+    assert result["review_requests_reactivated"] == 1
+    refreshed = get_pr(conn, pr["id"])
+    assert refreshed["head_sha"] == "newhead"
+    assert pr_internal_status(conn, refreshed)["status"] == "needs_review"
+    assert int(refreshed["review_requested"]) == 1
+    assert refreshed["previously_approved"] is True
+
+
+def test_sync_invalidates_feedback_when_same_head_approval_dismissed(tmp_path: Path):
+    """Manual / same-head dismiss clears local approved status and reactivates."""
+    conn = _conn(tmp_path)
+    pr = _pr(conn, head="head1")
+    assert record_external_pr_review(
+        conn,
+        pr,
+        gh_action="approve",
+        gh_review_id="77",
+        body="LGTM",
+    )
+    conn.execute("UPDATE prs SET review_requested = 0 WHERE id = ?", (pr["id"],))
+    conn.commit()
+    assert pr_internal_status(conn, get_pr(conn, pr["id"]))["status"] == "approved"
+
+    view_data = {
+        "owner": "o",
+        "repo": "r",
+        "number": 1,
+        "url": pr["url"],
+        "title": "t",
+        "author": "author",
+        "base_ref": "main",
+        "head_ref": "feat",
+        "head_sha": "head1",
+        "head_updated_at": "2026-01-01T00:00:00Z",
+        "state": "open",
+        "is_draft": False,
+        "reviews": [
+            {
+                "author": {"login": "me"},
+                "state": "DISMISSED",
+                "commit": {"oid": "head1"},
+                "id": "77",
+                "submittedAt": "2026-01-02T00:00:00Z",
+            }
+        ],
+    }
+
+    with (
+        patch("lazyreview.services.pr_sync.search_pending_review_prs", return_value=[]),
+        patch("lazyreview.services.pr_sync.view_pr", return_value=view_data),
+        patch("lazyreview.services.pr_sync.gh_user_login", return_value="me"),
+    ):
+        result = sync_pending_review_prs(conn)
+
+    assert result["feedback_invalidated"] == 1
+    assert result["review_requests_reactivated"] == 1
+    refreshed = get_pr(conn, pr["id"])
+    assert pr_internal_status(conn, refreshed)["status"] == "needs_review"
+    assert int(refreshed["review_requested"]) == 1

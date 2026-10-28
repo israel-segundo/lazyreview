@@ -162,6 +162,15 @@ def _review_commit_oid(item: dict[str, Any]) -> str:
     return ""
 
 
+def _review_author_login(item: dict[str, Any]) -> str:
+    author = item.get("author")
+    if isinstance(author, dict):
+        return author.get("login") or ""
+    if isinstance(author, str):
+        return author
+    return ""
+
+
 def parse_user_review_for_head(
     reviews: list[Any],
     *,
@@ -179,19 +188,16 @@ def parse_user_review_for_head(
     for item in reviews:
         if not isinstance(item, dict):
             continue
-        author = item.get("author")
-        author_login = ""
-        if isinstance(author, dict):
-            author_login = author.get("login") or ""
-        elif isinstance(author, str):
-            author_login = author
-        if author_login != login:
+        if _review_author_login(item) != login:
             continue
         state = (item.get("state") or "").upper()
         if state in ("DISMISSED", "PENDING"):
             continue
         commit = _review_commit_oid(item)
-        if commit and commit != head_sha:
+        # Require an explicit head match when GitHub reports a commit. Reviews
+        # with no commit oid are ignored so a stale approval cannot attach to a
+        # newer head after "dismiss stale approvals" fires.
+        if not commit or commit != head_sha:
             continue
         action = _GH_REVIEW_TO_ACTION.get(state)
         if not action:
@@ -208,6 +214,20 @@ def parse_user_review_for_head(
     if not candidates:
         return None
     return max(candidates, key=lambda r: r.get("submitted_at") or "")
+
+
+def user_has_dismissed_review(reviews: list[Any], *, login: str) -> bool:
+    """True if ``login`` has at least one DISMISSED review on the PR."""
+    if not login:
+        return False
+    for item in reviews:
+        if not isinstance(item, dict):
+            continue
+        if _review_author_login(item) != login:
+            continue
+        if (item.get("state") or "").upper() == "DISMISSED":
+            return True
+    return False
 
 
 def _head_committed_at(commits: list[Any], head_sha: str) -> str | None:

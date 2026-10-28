@@ -194,6 +194,47 @@ def list_stale_review_request_prs(
     return [dict(r) for r in rows if int(r["id"]) not in keep_ids]
 
 
+def set_pr_review_requested(
+    conn: sqlite3.Connection, pr_id: int, review_requested: bool
+) -> None:
+    """Flip the sync/active flag without changing other PR fields."""
+    conn.execute(
+        """
+        UPDATE prs
+        SET review_requested = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (1 if review_requested else 0, utcnow(), int(pr_id)),
+    )
+    conn.commit()
+
+
+def clear_feedback_for_head(
+    conn: sqlite3.Connection, pr_id: int, head_sha: str
+) -> int:
+    """
+    Clear submitted-feedback flags for consolidations on ``head_sha``.
+
+    Used when GitHub dismisses our review (e.g. stale approvals on new commits)
+    so ``pr_internal_status`` returns needs_review again while keeping history.
+    """
+    head = (head_sha or "").strip()
+    if not head:
+        return 0
+    cur = conn.execute(
+        """
+        UPDATE consolidations
+        SET feedback_provided = 0
+        WHERE pr_id = ?
+          AND head_sha = ?
+          AND feedback_provided = 1
+        """,
+        (int(pr_id), head),
+    )
+    conn.commit()
+    return int(cur.rowcount or 0)
+
+
 def clear_stale_review_requests(
     conn: sqlite3.Connection,
     keep: list[tuple[str, str, int]],

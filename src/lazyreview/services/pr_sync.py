@@ -8,10 +8,14 @@ import threading
 from typing import Any
 
 from lazyreview.db import (
+    clear_feedback_for_head,
     clear_stale_review_requests,
     get_setting,
     list_stale_review_request_prs,
+    pr_internal_status,
+    pr_previously_approved,
     record_external_pr_review,
+    set_pr_review_requested,
     set_setting,
     upsert_pr,
     utcnow,
@@ -21,6 +25,7 @@ from lazyreview.services.gh import (
     gh_user_login,
     parse_user_review_for_head,
     search_pending_review_prs,
+    user_has_dismissed_review,
     view_pr,
 )
 
@@ -92,6 +97,78 @@ def _sync_external_review(
     )
 
 
+def _reconcile_github_review_state(
+    conn: sqlite3.Connection,
+    pr: dict[str, Any],
+    data: dict[str, Any],
+    *,
+    login: str,
+    in_pending_queue: bool,
+) -> dict[str, bool]:
+    """
+    Keep local status aligned with GitHub after stale-approval dismissals.
+
+    Org settings that dismiss approvals on new commits do not always re-request
+    reviewers, so the PR drops out of ``--review-requested @me``. Detect that
+    and (1) clear local submitted feedback for the current head when GitHub no
+    longer has an active review from us, and (2) flip ``review_requested`` back
+    on so the PR is active again.
+    """
+    out = {"external": False, "invalidated": False, "reactivated": False}
+    if not login:
+        return out
+    if (pr.get("state") or "").lower() != "open":
+        if _sync_external_review(conn, pr, data, login=login):
+            out["external"] = True
+        return out
+
+    reviews = data.get("reviews") or []
+    head = (pr.get("head_sha") or "").strip()
+    active = (
+        parse_user_review_for_head(reviews, head_sha=head, login=login)
+        if head
+        else None
+    )
+    dismissed = user_has_dismissed_review(reviews, login=login)
+    # Capture before clear_feedback_for_head — invalidating the current-head
+    # approve row would otherwise make previously_approved flip to false.
+    had_prior_approve = pr_previously_approved(conn, pr)
+    status = pr_internal_status(conn, pr)["status"]
+
+    # Local says we finished this head, but GitHub has no active review from us
+    # (typical after dismiss-stale-approvals, or a manual dismiss).
+    if status != "needs_review" and active is None and reviews:
+        cleared = clear_feedback_for_head(conn, int(pr["id"]), head) if head else 0
+        if cleared:
+            out["invalidated"] = True
+            status = "needs_review"
+
+    if active and _sync_external_review(conn, pr, data, login=login):
+        out["external"] = True
+        status = pr_internal_status(conn, pr)["status"]
+
+    # Bring the PR back into the active set when GitHub dismissed our approval
+    # (or a prior approve exists and the current head still needs review) but
+    # did not put us back on the review-requested search. Homepage refresh uses
+    # this path for open approved PRs that left --review-requested @me.
+    if (
+        not in_pending_queue
+        and status == "needs_review"
+        and not int(pr.get("review_requested") or 0)
+        and (
+            dismissed
+            or out["invalidated"]
+            or had_prior_approve
+            or pr_previously_approved(conn, pr)
+        )
+    ):
+        set_pr_review_requested(conn, int(pr["id"]), True)
+        pr["review_requested"] = 1
+        out["reactivated"] = True
+
+    return out
+
+
 def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
     """Pull open PRs where the authenticated user is a requested reviewer."""
     items = search_pending_review_prs()
@@ -99,6 +176,8 @@ def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
     errors: list[str] = []
     keys: list[tuple[str, str, int]] = []
     external_synced = 0
+    invalidated = 0
+    reactivated = 0
     try:
         login = gh_user_login()
     except GhError as e:
@@ -113,8 +192,16 @@ def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
         try:
             data = view_pr(item["url"])
             pr = _upsert_from_view(conn, data, review_requested=True)
-            if login and _sync_external_review(conn, pr, data, login=login):
-                external_synced += 1
+            if login:
+                result = _reconcile_github_review_state(
+                    conn, pr, data, login=login, in_pending_queue=True
+                )
+                if result["external"]:
+                    external_synced += 1
+                if result["invalidated"]:
+                    invalidated += 1
+                if result["reactivated"]:
+                    reactivated += 1
             upserted.append(pr)
         except GhError as e:
             try:
@@ -136,16 +223,18 @@ def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
             except Exception as inner:
                 errors.append(f"{owner}/{repo}#{number}: {inner}")
 
-    # Refresh state for PRs that dropped out of the pending queue (often merged/closed)
+    # Refresh state for PRs that dropped out of the pending queue (often merged/closed).
+    # Defer dismissal reconcile until after clear_stale_review_requests so it cannot
+    # wipe a reactivation in the same sync pass.
     stale = list_stale_review_request_prs(conn, keys)
     handled_ids: set[int] = {int(p["id"]) for p in upserted}
+    stale_views: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for row in stale:
         try:
             data = view_pr(row["url"])
             pr = _upsert_from_view(conn, data, review_requested=False)
             handled_ids.add(int(pr["id"]))
-            if login and _sync_external_review(conn, pr, data, login=login):
-                external_synced += 1
+            stale_views.append((pr, data))
         except GhError as e:
             upsert_pr(
                 conn,
@@ -165,6 +254,26 @@ def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
 
     cleared = clear_stale_review_requests(conn, keys)
 
+    def _accumulate(result: dict[str, bool]) -> None:
+        nonlocal external_synced, invalidated, reactivated
+        if result["external"]:
+            external_synced += 1
+        if result["invalidated"]:
+            invalidated += 1
+        if result["reactivated"]:
+            reactivated += 1
+
+    if login:
+        for pr, data in stale_views:
+            # Re-read after clear_stale so review_requested reflects DB state.
+            fresh = dict(pr)
+            fresh["review_requested"] = 0
+            _accumulate(
+                _reconcile_github_review_state(
+                    conn, fresh, data, login=login, in_pending_queue=False
+                )
+            )
+
     # Re-fetch every remaining open local PR so merged/closed GitHub state
     # lands even when review_requested was already cleared (e.g. after an
     # external approve/request-changes that dropped the PR from the queue).
@@ -178,9 +287,12 @@ def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
             data = view_pr(pr_row["url"])
             pr = _upsert_from_view(conn, data, review_requested=None)
             refreshed_open += 1
-            if login and (pr.get("state") or "").lower() == "open":
-                if _sync_external_review(conn, pr, data, login=login):
-                    external_synced += 1
+            if login:
+                _accumulate(
+                    _reconcile_github_review_state(
+                        conn, pr, data, login=login, in_pending_queue=False
+                    )
+                )
         except GhError as e:
             errors.append(
                 f"open {pr_row['owner']}/{pr_row['repo']}#{pr_row['number']}: {e}"
@@ -194,6 +306,8 @@ def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
         "cleared_stale": cleared,
         "refreshed_open": refreshed_open,
         "external_reviews_synced": external_synced,
+        "feedback_invalidated": invalidated,
+        "review_requests_reactivated": reactivated,
         "prs": upserted,
         "errors": errors,
         "synced_at": get_setting(conn, "pr_sync_last_at"),
@@ -235,10 +349,13 @@ class PrSyncer:
             try:
                 result = sync_pending_review_prs(self.conn)
                 logger.info(
-                    "pr sync: fetched=%s upserted=%s cleared=%s",
+                    "pr sync: fetched=%s upserted=%s cleared=%s "
+                    "invalidated=%s reactivated=%s",
                     result["fetched"],
                     result["upserted"],
                     result["cleared_stale"],
+                    result.get("feedback_invalidated", 0),
+                    result.get("review_requests_reactivated", 0),
                 )
             except Exception:
                 logger.exception("pr sync failed")
