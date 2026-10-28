@@ -710,10 +710,17 @@
         } catch (e) {}
       },
 
+      _applyOpenChatSessionToPage() {
+        if (typeof this.syncFindingsFromOpenChatSession === 'function') {
+          this.syncFindingsFromOpenChatSession();
+        }
+      },
+
       async ensureChatSession(opts) {
         opts = opts || {};
         if (this.chatSession && this.chatSession.status === 'open') {
           await this.reloadChatTurns();
+          this._applyOpenChatSessionToPage();
           return;
         }
         // Quiet restore (page refresh with rail open) should not show Thinking…
@@ -752,6 +759,7 @@
           this.chatModel = data.model || this.chatModel;
           this.chatEffort = data.effort || this.chatEffort;
           await this.reloadChatTurns();
+          this._applyOpenChatSessionToPage();
           this.$nextTick(() => this.syncChatRailHeight());
         } catch (e) {
           if (!quiet) this.chatError = String(e.message || e);

@@ -1492,20 +1492,22 @@ function reviewForm() {
       // Derive lock/badge sets from consolidation statuses so dormant never
       // looks like an in-flight consolidating run.
       this.syncLocksFromConsolidations(this.consolidations);
-      try {
-        const res = await fetch('/api/agents');
-        const data = await res.json();
-        this.agents = (data.agents || []).slice().sort((a, b) =>
-          String(a.display_name || a.name).localeCompare(String(b.display_name || b.name), undefined, { sensitivity: 'base' })
-        );
-      } finally {
-        // Always mark ready so the batch modal does not wait forever when
-        // /api/agents fails; row building then keeps configured ids as-is.
-        this._agentsReady = true;
-      }
+      // Findings + chat restore must not wait on /api/agents (slow CLI probes).
+      this.syncFindingsPublishFromConsolidation();
       this.maybeStartPoll();
       this.pollAnalysis();
-      this.syncFindingsPublishFromConsolidation();
+      fetch('/api/agents')
+        .then((res) => (res.ok ? res.json() : { agents: [] }))
+        .then((data) => {
+          this.agents = (data.agents || []).slice().sort((a, b) =>
+            String(a.display_name || a.name).localeCompare(String(b.display_name || b.name), undefined, { sensitivity: 'base' })
+          );
+        })
+        .catch(() => {})
+        .finally(() => {
+          // Batch modal waits on this; never block the page on agent discovery.
+          this._agentsReady = true;
+        });
     },
     setTab(id) {
       this.tab = id;
@@ -1951,6 +1953,19 @@ function reviewForm() {
       );
       if (challengeReady) {
         const cid = Number(c.id);
+        if (this.chatMode === 'challenge' && Number(this.chatConsolidationId) === cid) {
+          if (
+            this.chatOpen
+            && typeof this.ensureChatSession === 'function'
+            && (
+              !this.chatSession
+              || Number(this.chatSession.consolidation_id) !== cid
+            )
+          ) {
+            this.ensureChatSession({ quiet: true });
+          }
+          return;
+        }
         if (this.chatMode !== 'challenge' || Number(this.chatConsolidationId) !== cid) {
           this.chatMode = 'challenge';
           this.chatConsolidationId = cid;
@@ -1983,6 +1998,14 @@ function reviewForm() {
       if (typeof this.ensureChatSession === 'function') {
         this.ensureChatSession({ quiet: true });
       }
+    },
+    syncFindingsFromOpenChatSession() {
+      const s = this.chatSession;
+      if (!s || s.status !== 'open' || this.chatMode !== 'challenge') return;
+      if (this.tab !== 'findings') return;
+      const cid = Number(this.chatConsolidationId);
+      if (!cid || Number(s.consolidation_id) !== cid) return;
+      this.onChatFindingsUpdated(s);
     },
     onChatFindingsUpdated(session) {
       if (!session) return;

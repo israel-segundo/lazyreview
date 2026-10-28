@@ -366,6 +366,12 @@ function consolidationDetail() {
       }
       if (this.canSubmit()) this.loadDiffPaths();
     },
+    syncFindingsFromOpenChatSession() {
+      const s = this.chatSession;
+      if (!s || s.status !== 'open' || this.chatMode !== 'challenge') return;
+      if (Number(s.consolidation_id) !== Number(this.c && this.c.id)) return;
+      this.onChatFindingsUpdated(s);
+    },
     onChatFindingsUpdated(session) {
       if (!session || !this.c) return;
       const findings = Array.isArray(session.working_findings)
