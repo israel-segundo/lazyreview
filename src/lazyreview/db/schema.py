@@ -143,6 +143,9 @@ CREATE TABLE IF NOT EXISTS consolidations (
   recommended_action_rationale TEXT,
   publish_body TEXT,
   ready_to_post INTEGER NOT NULL DEFAULT 0,
+  publish_status TEXT,
+  publish_started_at TEXT,
+  publish_finished_at TEXT,
   started_at TEXT,
   finished_at TEXT,
   duration_ms INTEGER,
@@ -309,7 +312,7 @@ DEFAULT_SETTINGS = {
     "session_effort": EffortLevel.HIGH.value,
 }
 
-SCHEMA_VERSION = 26
+SCHEMA_VERSION = 27
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -849,6 +852,20 @@ def init_db(conn: sqlite3.Connection) -> None:
                 "UPDATE settings SET value = ? WHERE key = 'publish_prompt'",
                 (publish_prompt_seed,),
             )
+
+    if prev is not None and prev < 27:
+        # Track GitHub-draft (publish transform) regeneration for /activity.
+        consol_cols = {
+            r["name"]
+            for r in conn.execute("PRAGMA table_info(consolidations)").fetchall()
+        }
+        for col, decl in (
+            ("publish_status", "TEXT"),
+            ("publish_started_at", "TEXT"),
+            ("publish_finished_at", "TEXT"),
+        ):
+            if col not in consol_cols:
+                conn.execute(f"ALTER TABLE consolidations ADD COLUMN {col} {decl}")
 
     if prev is not None and prev < 10 and prompt_seed:
         conn.execute(

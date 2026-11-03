@@ -8,7 +8,7 @@
     <div>
       <h1 class="text-2xl font-semibold tracking-tight">Activity</h1>
       <p class="mt-1 text-sm text-slate-600 dark:text-slate-400">
-        PR analyses, review runs, and consolidations across all PRs — newest first.
+        PR analyses, review runs, consolidations, and GitHub draft regenerations across all PRs — newest first.
       </p>
     </div>
     <div class="flex flex-wrap items-center gap-3 text-sm">
@@ -180,13 +180,14 @@ function activityPage() {
       if (item.kind === 'analysis') return 'analysis #' + item.id;
       if (item.kind === 'run') return 'run #' + item.id;
       if (item.kind === 'consolidation') return 'consolidation #' + item.id;
+      if (item.kind === 'publish') return 'GitHub draft #' + item.id;
       return item.kind + ' #' + item.id;
     },
     itemHref(item) {
       if (item.kind === 'analysis') return '/prs/' + item.pr_id + '?tab=overview';
       if (item.kind === 'run') return '/runs/' + item.id;
-      if (item.kind === 'consolidation') {
-        if (item.status === 'succeeded') {
+      if (item.kind === 'consolidation' || item.kind === 'publish') {
+        if (item.kind === 'publish' || item.status === 'succeeded') {
           return '/prs/' + item.pr_id + '?tab=findings&consolidation=' + item.id;
         }
         return '/prs/' + item.pr_id + '?tab=activity';
@@ -197,11 +198,12 @@ function activityPage() {
       const status = item.status;
       if (status === 'succeeded') return 'lr-status-ball--succeeded';
       if (status === 'failed') return 'lr-status-ball--failed';
-      if (status === 'cancelled') return 'lr-status-ball--cancelled';
+      if (status === 'cancelled') return 'lr-status-ball--idle';
       if (status === 'dormant') return 'lr-status-ball--dormant';
       if (status === 'running' || status === 'queued') {
         if (item.kind === 'analysis') return 'lr-status-ball--analyzing lr-status-ball--pulse';
         if (item.kind === 'consolidation') return 'lr-status-ball--consolidating lr-status-ball--pulse';
+        if (item.kind === 'publish') return 'lr-status-ball--consolidating lr-status-ball--pulse';
         return 'lr-status-ball--running lr-status-ball--pulse';
       }
       return '';

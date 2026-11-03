@@ -18,6 +18,7 @@ from lazyreview.db.schema import SCHEMA_VERSION, connect, init_db
 from lazyreview.services.session_jobs import (
     SessionRunner,
     findings_to_body_md,
+    is_apply_findings_command,
     parse_structured_trailer,
 )
 from lazyreview.services.session_safety import (
@@ -91,7 +92,7 @@ def test_schema_has_chat_tables(tmp_path: Path):
     conn = connect(db)
     init_db(conn)
     ver = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert ver == SCHEMA_VERSION == 26
+    assert ver == SCHEMA_VERSION == 27
     tables = {
         r["name"]
         for r in conn.execute(
@@ -263,12 +264,12 @@ def test_finish_session_preserves_body_and_writes_guidance(tmp_path: Path):
         working_publish_guidance="Softer tone; mention flaky CI in summary.",
     )
 
-    result = runner.finish_session(sid)
+    result = runner.apply_findings(sid)
     assert result["consolidation_id"] == int(consol["id"])
     assert enqueued == [int(consol["id"])]
 
-    done = get_chat_session(conn, sid)
-    assert done["status"] == "done"
+    still_open = get_chat_session(conn, sid)
+    assert still_open["status"] == "open"
 
     refreshed = get_consolidation(conn, int(consol["id"]))
     assert "challenged" in (refreshed.get("body") or "")
@@ -276,6 +277,7 @@ def test_finish_session_preserves_body_and_writes_guidance(tmp_path: Path):
     assert refreshed.get("recommended_action") == "comment"
     assert int(refreshed["ready_to_post"] or 0) == 0
     assert not (refreshed.get("publish_body") or "").strip()
+    assert refreshed.get("publish_status") == "queued"
     findings = refreshed.get("findings") or []
     assert len(findings) == 1
     assert int(findings[0].get("severity") or 0) == 2
@@ -307,10 +309,10 @@ def test_finish_session_falls_back_to_findings_template(tmp_path: Path):
         working_recommended_action="request_changes",
         working_recommended_action_rationale="still blocked",
     )
-    # Stale guidance from a prior Done should be removed.
+    # Stale guidance from a prior apply should be removed.
     (work / "publish-guidance.md").write_text("old\n", encoding="utf-8")
 
-    runner.finish_session(sid)
+    runner.apply_findings(sid)
     body = (work / "body.md").read_text(encoding="utf-8")
     assert "Challenge" in body or "request_changes" in body
     assert "Broken" in body
@@ -357,3 +359,96 @@ def test_round_persists_body_and_guidance_from_trailer(tmp_path: Path):
     assert updated.get("working_publish_guidance") == "Keep it short."
     assert updated.get("working_recommended_action") == "approve"
     assert int((updated.get("working_findings") or [{}])[0].get("severity") or 0) == 3
+
+
+def test_is_apply_findings_command():
+    assert is_apply_findings_command("apply findings")
+    assert is_apply_findings_command("Apply findings!")
+    assert is_apply_findings_command("update the consolidation")
+    assert not is_apply_findings_command("please apply findings and also drop C2")
+    assert not is_apply_findings_command("how do I apply findings?")
+
+
+def test_apply_findings_command_skips_llm(tmp_path: Path):
+    conn = _conn(tmp_path)
+    settings = _settings(tmp_path)
+    settings.ensure_dirs()
+    _, consol, _work = _pr_and_consol(conn, tmp_path)
+    runner = SessionRunner(settings, conn)
+    enqueued: list[int] = []
+
+    class _ConsolRunner:
+        def enqueue_publish(self, cid: int) -> None:
+            enqueued.append(int(cid))
+
+    runner.bind_consolidation_runner(_ConsolRunner())
+    session = runner.create_challenge_session(int(consol["id"]))
+    sid = int(session["id"])
+    update_chat_session(
+        conn,
+        sid,
+        working_findings_json=(
+            '[{"id":"C1","severity":2,"title":"Broken","body":"Still."},'
+            '{"id":"C9","severity":3,"title":"Nit","body":"Nice."}]'
+        ),
+        working_body_md="## Review\n\nWith C9.\n",
+    )
+
+    with patch.object(runner, "_run_proc") as run_proc:
+        result = runner.send_message(sid, "apply findings")
+        run_proc.assert_not_called()
+
+    assert result.get("applied_findings") is True
+    assert enqueued == [int(consol["id"])]
+    refreshed = get_consolidation(conn, int(consol["id"]))
+    assert len(refreshed.get("findings") or []) == 2
+    assert refreshed.get("publish_status") == "queued"
+    assert get_chat_session(conn, sid)["status"] == "open"
+    assert "Applied working findings" in (result["turn"]["text"] or "")
+
+
+def test_trailer_apply_findings_flag(tmp_path: Path):
+    conn = _conn(tmp_path)
+    settings = _settings(tmp_path)
+    settings.ensure_dirs()
+    _, consol, _work = _pr_and_consol(conn, tmp_path)
+    runner = SessionRunner(settings, conn)
+    enqueued: list[int] = []
+
+    class _ConsolRunner:
+        def enqueue_publish(self, cid: int) -> None:
+            enqueued.append(int(cid))
+
+    runner.bind_consolidation_runner(_ConsolRunner())
+    session = runner.create_challenge_session(int(consol["id"]))
+    sid = int(session["id"])
+
+    assistant = (
+        "Applied as requested.\n\n"
+        "```json\n"
+        '{"working_findings":[{"id":"C1","severity":2,"title":"Broken","body":"x"}],'
+        '"recommended_action":"comment",'
+        '"recommended_action_rationale":"ok",'
+        '"working_body_md":"## Body\\n",'
+        '"apply_findings":true}\n'
+        "```"
+    )
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    cm = MagicMock()
+    cm.__enter__.return_value = wt
+    cm.__exit__.return_value = None
+    with (
+        patch.object(runner, "_run_proc", return_value=0),
+        patch.object(runner, "_build_command", return_value=(["true"], None)),
+        patch("lazyreview.services.session_jobs.hold_worktree", return_value=cm),
+        patch(
+            "lazyreview.services.session_jobs._extract_assistant_text",
+            return_value=assistant,
+        ),
+    ):
+        result = runner.send_message(sid, "please apply these into the consolidation")
+
+    assert result.get("applied_findings") is True
+    assert enqueued == [int(consol["id"])]
+    assert get_chat_session(conn, sid)["status"] == "open"

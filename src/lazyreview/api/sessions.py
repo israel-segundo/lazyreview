@@ -123,9 +123,11 @@ def post_message(session_id: int, body: MessageBody, request: Request):
         raise HTTPException(status_code=503, detail=str(e)) from e
 
 
+@router.post("/sessions/{session_id}/apply")
 @router.post("/sessions/{session_id}/done")
-def finish_session(session_id: int, request: Request):
+def apply_findings(session_id: int, request: Request):
+    """Write working findings into the consolidation and regenerate the GitHub draft."""
     try:
-        return _runner(request).finish_session(session_id)
+        return _runner(request).apply_findings(session_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

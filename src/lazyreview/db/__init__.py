@@ -390,11 +390,12 @@ def pr_activity_summary(
     finished_runs: int = 0,
     active_consolidations: int = 0,
     finished_consolidations: int = 0,
+    active_publishes: int = 0,
 ) -> dict[str, Any]:
     """
     Aggregate home-page activity ball for a PR.
 
-    - running: any analysis / review run / consolidation is queued or running
+    - running: any analysis / review run / consolidation / publish draft is queued or running
     - done: nothing in flight, but at least one finished activity exists
     - idle: nothing started yet
     """
@@ -405,8 +406,14 @@ def pr_activity_summary(
     finished_runs = int(finished_runs or 0)
     active_consolidations = int(active_consolidations or 0)
     finished_consolidations = int(finished_consolidations or 0)
+    active_publishes = int(active_publishes or 0)
 
-    if analysis_running or active_runs > 0 or active_consolidations > 0:
+    if (
+        analysis_running
+        or active_runs > 0
+        or active_consolidations > 0
+        or active_publishes > 0
+    ):
         parts: list[str] = []
         if analysis_running:
             parts.append("analysis " + (analysis or "running"))
@@ -418,6 +425,11 @@ def pr_activity_summary(
             parts.append(
                 f"{active_consolidations} consolidation"
                 f"{'s' if active_consolidations != 1 else ''} in progress"
+            )
+        if active_publishes:
+            parts.append(
+                f"{active_publishes} GitHub draft"
+                f"{'s' if active_publishes != 1 else ''} regenerating"
             )
         return {
             "activity_status": "running",
@@ -457,16 +469,25 @@ def list_global_activity(
     running_only: bool = False,
 ) -> dict[str, Any]:
     """
-    Cross-PR timeline of analyses, review runs, and consolidations.
+    Cross-PR timeline of analyses, review runs, consolidations, and publish drafts.
 
     Sorted newest-first by COALESCE(finished_at, started_at, created_at).
     Returns {items, total, limit, offset}.
+
+    Publish-only regenerations appear as kind ``publish`` while
+    ``publish_status`` is queued/running (consolidation status stays succeeded).
     """
     limit = max(1, min(int(limit or 25), 500))
     offset = max(0, int(offset or 0))
     a_filter = f"AND a.status IN {_ACTIVITY_IN_FLIGHT_SQL}" if running_only else ""
     r_filter = f"AND r.status IN {_ACTIVITY_IN_FLIGHT_SQL}" if running_only else ""
     c_filter = f"AND c.status IN {_ACTIVITY_IN_FLIGHT_SQL}" if running_only else ""
+    # Publish rows are only meaningful while in flight (no separate history table).
+    pub_filter = (
+        f"AND c.publish_status IN {_ACTIVITY_IN_FLIGHT_SQL}"
+        if running_only
+        else f"AND c.publish_status IN {_ACTIVITY_IN_FLIGHT_SQL}"
+    )
     union_sql = f"""
           SELECT
             'analysis' AS kind,
@@ -540,6 +561,33 @@ def list_global_activity(
           FROM consolidations c
           JOIN prs p ON p.id = c.pr_id
           WHERE 1=1 {c_filter}
+
+          UNION ALL
+
+          SELECT
+            'publish' AS kind,
+            c.id AS id,
+            c.pr_id AS pr_id,
+            p.owner AS owner,
+            p.repo AS repo,
+            p.number AS number,
+            p.title AS title,
+            c.publish_status AS status,
+            c.agent AS agent,
+            c.model AS model,
+            c.effort AS effort,
+            c.head_sha AS head_sha,
+            0 AS deprecated,
+            0 AS consolidated,
+            COALESCE(c.publish_started_at, c.created_at) AS created_at,
+            c.publish_started_at AS started_at,
+            c.publish_finished_at AS finished_at,
+            COALESCE(
+              c.publish_finished_at, c.publish_started_at, c.created_at
+            ) AS when_at
+          FROM consolidations c
+          JOIN prs p ON p.id = c.pr_id
+          WHERE 1=1 {pub_filter}
     """
     total = int(
         conn.execute(f"SELECT COUNT(*) AS n FROM ({union_sql})").fetchone()["n"]
@@ -572,13 +620,15 @@ def list_global_activity(
     }
 
 def count_global_activity_running(conn: sqlite3.Connection) -> int:
-    """How many analyses / runs / consolidations are queued or running."""
+    """How many analyses / runs / consolidations / publish drafts are in flight."""
     row = conn.execute(
         f"""
         SELECT
           (SELECT COUNT(*) FROM pr_analyses WHERE status IN {_ACTIVITY_IN_FLIGHT_SQL})
           + (SELECT COUNT(*) FROM review_runs WHERE status IN {_ACTIVITY_IN_FLIGHT_SQL})
           + (SELECT COUNT(*) FROM consolidations WHERE status IN {_ACTIVITY_IN_FLIGHT_SQL})
+          + (SELECT COUNT(*) FROM consolidations
+               WHERE publish_status IN {_ACTIVITY_IN_FLIGHT_SQL})
           AS n
         """
     ).fetchone()
@@ -599,6 +649,8 @@ def list_prs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
              WHERE c.pr_id = p.id AND c.status IN ('queued', 'running')) AS active_consolidation_count,
           (SELECT COUNT(*) FROM consolidations c
              WHERE c.pr_id = p.id AND c.status IN ('succeeded', 'failed', 'cancelled')) AS finished_consolidation_count,
+          (SELECT COUNT(*) FROM consolidations c
+             WHERE c.pr_id = p.id AND c.publish_status IN ('queued', 'running')) AS active_publish_count,
           CASE
             WHEN (SELECT COUNT(*) FROM review_runs r WHERE r.pr_id = p.id) = 0 THEN 0
             WHEN p.head_sha IS NULL OR p.head_sha = '' THEN 0
@@ -636,6 +688,7 @@ def list_prs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                 finished_runs=pr.get("finished_run_count"),
                 active_consolidations=pr.get("active_consolidation_count"),
                 finished_consolidations=pr.get("finished_consolidation_count"),
+                active_publishes=pr.get("active_publish_count"),
             )
         )
         out.append(pr)

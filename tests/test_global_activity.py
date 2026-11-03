@@ -10,6 +10,7 @@ from lazyreview.db import (
     create_pr_analysis,
     create_run,
     list_global_activity,
+    update_consolidation,
     update_pr_analysis,
     update_run,
     upsert_pr,
@@ -129,4 +130,45 @@ def test_list_global_activity_empty(tmp_path: Path):
     assert result["total"] == 0
     assert result["limit"] == 25
     assert result["offset"] == 0
+    assert count_global_activity_running(conn) == 0
+
+
+def test_list_global_activity_includes_publish_regen(tmp_path: Path):
+    conn = _conn(tmp_path)
+    pr = _pr(conn)
+    c = create_consolidation(
+        conn,
+        pr_id=pr["id"],
+        head_sha="abc",
+        source_run_ids=[],
+        agent="claude",
+        model="haiku",
+        effort="low",
+        workdir_path="/tmp/c1",
+        status="queued",
+    )
+    update_consolidation(
+        conn,
+        int(c["id"]),
+        status="succeeded",
+        publish_status="queued",
+        publish_started_at="2026-11-03T15:00:00+00:00",
+    )
+
+    running = list_global_activity(conn, running_only=True)
+    assert running["total"] == 1
+    item = running["items"][0]
+    assert item["kind"] == "publish"
+    assert item["id"] == int(c["id"])
+    assert item["status"] == "queued"
+    assert count_global_activity_running(conn) == 1
+
+    # Completed publish regenerations drop off the feed (no history row).
+    update_consolidation(
+        conn,
+        int(c["id"]),
+        publish_status="succeeded",
+        publish_finished_at="2026-11-03T15:01:00+00:00",
+    )
+    assert list_global_activity(conn, running_only=True)["total"] == 0
     assert count_global_activity_running(conn) == 0

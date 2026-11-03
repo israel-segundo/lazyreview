@@ -10,6 +10,7 @@ from lazyreview.db import (
     create_run,
     list_prs,
     pr_activity_summary,
+    update_consolidation,
     update_pr_analysis,
     update_run,
     upsert_pr,
@@ -137,3 +138,33 @@ def test_list_prs_activity_running_from_consolidation(tmp_path: Path):
     row = list_prs(conn)[0]
     assert row["activity_status"] == "running"
     assert "consolidation" in row["activity_label"]
+
+
+def test_list_prs_activity_running_from_publish(tmp_path: Path):
+    conn = _conn(tmp_path)
+    pr = _pr(conn)
+    c = create_consolidation(
+        conn,
+        pr_id=pr["id"],
+        head_sha="abc",
+        source_run_ids=[],
+        agent="claude",
+        model="haiku",
+        effort="low",
+        workdir_path="/tmp/c1",
+        status="queued",
+    )
+    update_consolidation(
+        conn,
+        int(c["id"]),
+        status="succeeded",
+        publish_status="running",
+        publish_started_at="2026-11-03T15:00:00+00:00",
+    )
+    row = list_prs(conn)[0]
+    assert row["activity_status"] == "running"
+    assert "GitHub draft" in row["activity_label"]
+
+    summary = pr_activity_summary(analysis_status=None, active_publishes=1)
+    assert summary["activity_status"] == "running"
+    assert "GitHub draft" in summary["activity_label"]

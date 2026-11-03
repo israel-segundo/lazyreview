@@ -362,7 +362,7 @@
                           @click="cancelConsolidation(c.id)"
                           class="rounded-lg px-2 py-1 text-xs text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-950/40">Cancel</button>
                   <span class="text-xs text-slate-500"
-                        x-show="c.status === 'succeeded' && !c.feedback_provided && !c.ready_to_post"
+                        x-show="c.status === 'succeeded' && !c.feedback_provided && (c.publish_status === 'queued' || c.publish_status === 'running')"
                         x-cloak>Preparing GitHub draft…</span>
                   <button type="button"
                           x-show="c.status === 'succeeded'" x-cloak
@@ -620,8 +620,8 @@
                                   class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
                                   x-show="canRegenerateFindingsPublish()" x-cloak
                                   @click="regenerateFindingsPublish()"
-                                  :disabled="findingsRegeneratingPublish || findingsPosting || !activeFindingsConsolidation().ready_to_post">
-                            <span x-text="findingsRegeneratingPublish || !activeFindingsConsolidation().ready_to_post ? 'Regenerating…' : 'Regenerate draft'"></span>
+                                  :disabled="findingsRegeneratingPublish || findingsPosting || isFindingsPublishing()">
+                            <span x-text="findingsRegeneratingPublish || isFindingsPublishing() ? 'Regenerating…' : 'Regenerate draft'"></span>
                           </button>
                           <div class="lr-prompt-mode">
                             <button type="button" class="lr-prompt-mode-btn"
@@ -1948,10 +1948,16 @@ function reviewForm() {
           break;
         }
       }
-      if (this.canSubmitFindings() && !cons.ready_to_post) {
+      if (this.canSubmitFindings() && this.isFindingsPublishing(cons)) {
+        this.findingsRegeneratingPublish = true;
         this._startFindingsPublishPoll();
       }
       this.syncChatForFindingsContext();
+    },
+    isFindingsPublishing(c) {
+      const cons = c || this.activeFindingsConsolidation();
+      const st = cons && cons.publish_status;
+      return st === 'queued' || st === 'running';
     },
     syncChatForFindingsContext() {
       const onFindings = this.tab === 'findings';
@@ -2063,7 +2069,13 @@ function reviewForm() {
         const idx = (this.consolidations || []).findIndex(x => Number(x.id) === cid);
         if (idx >= 0) {
           const next = this.consolidations.slice();
-          next[idx] = { ...next[idx], ready_to_post: 0, publish_body: null };
+          next[idx] = {
+            ...next[idx],
+            ...(data && data.consolidation ? data.consolidation : {}),
+            ready_to_post: 0,
+            publish_body: null,
+            publish_status: 'queued',
+          };
           this.consolidations = next;
         }
         this.highlightConsolidationId = cid;
@@ -2130,7 +2142,8 @@ function reviewForm() {
           next[idx] = { ...next[idx], ...data };
           this.consolidations = next;
         }
-        if (data.ready_to_post && this._findingsPublishPoll) {
+        const publishing = data.publish_status === 'queued' || data.publish_status === 'running';
+        if (!publishing && this._findingsPublishPoll) {
           clearInterval(this._findingsPublishPoll);
           this._findingsPublishPoll = null;
           this.findingsRegeneratingPublish = false;
@@ -2142,7 +2155,7 @@ function reviewForm() {
     },
     async regenerateFindingsPublish() {
       const c = this.activeFindingsConsolidation();
-      if (!c || !this.canRegenerateFindingsPublish() || this.findingsRegeneratingPublish) return;
+      if (!c || !this.canRegenerateFindingsPublish() || this.findingsRegeneratingPublish || this.isFindingsPublishing(c)) return;
       const ok = await lrConfirm({
         title: 'Regenerate GitHub draft?',
         message: 'Re-run the publish transform for consolidation #' + c.id + '. The internal report is left unchanged.',
@@ -2163,7 +2176,7 @@ function reviewForm() {
         const idx = (this.consolidations || []).findIndex(x => Number(x.id) === Number(c.id));
         if (idx >= 0) {
           const next = this.consolidations.slice();
-          next[idx] = { ...next[idx], ...data, ready_to_post: 0 };
+          next[idx] = { ...next[idx], ...data, ready_to_post: 0, publish_status: data.publish_status || 'queued' };
           this.consolidations = next;
         }
         this._startFindingsPublishPoll();

@@ -257,16 +257,16 @@
                       x-show="canRegeneratePublish()"
                       x-cloak
                       @click="regeneratePublish()"
-                      :disabled="regeneratingPublish || posting || !c.ready_to_post"
-                      :aria-busy="regeneratingPublish || !c.ready_to_post">
-                <svg x-show="regeneratingPublish || !c.ready_to_post" x-cloak
+                      :disabled="regeneratingPublish || posting || isPublishing()"
+                      :aria-busy="regeneratingPublish || isPublishing()">
+                <svg x-show="regeneratingPublish || isPublishing()" x-cloak
                      class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg"
                      fill="none" viewBox="0 0 24 24" aria-hidden="true">
                   <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                   <path class="opacity-75" fill="currentColor"
                         d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                <span x-text="regeneratingPublish || !c.ready_to_post ? 'Regenerating…' : 'Regenerate draft'"></span>
+                <span x-text="regeneratingPublish || isPublishing() ? 'Regenerating…' : 'Regenerate draft'"></span>
               </button>
               <div class="lr-prompt-mode">
                 <button type="button"
@@ -362,10 +362,15 @@ function consolidationDetail() {
       else this.pageTab = 'runs';
 
       this.$watch('publishBody', () => { this._edited = true; });
-      if (this.canSubmit() && !this.c.ready_to_post) {
+      if (this.canSubmit() && this.isPublishing()) {
+        this.regeneratingPublish = true;
         this._startPublishPoll();
       }
       if (this.canSubmit()) this.loadDiffPaths();
+    },
+    isPublishing() {
+      const st = this.c && this.c.publish_status;
+      return st === 'queued' || st === 'running';
     },
     syncFindingsFromOpenChatSession() {
       const s = this.chatSession;
@@ -405,7 +410,13 @@ function consolidationDetail() {
       this.regeneratingPublish = true;
       if (data && data.session) this.chatSession = data.session;
       if (this.c) {
-        this.c = { ...this.c, ready_to_post: 0, publish_body: null };
+        this.c = {
+          ...this.c,
+          ...(data && data.consolidation ? data.consolidation : {}),
+          ready_to_post: 0,
+          publish_body: null,
+          publish_status: 'queued',
+        };
       }
       this._startPublishPoll();
       this.refresh();
@@ -514,12 +525,15 @@ function consolidationDetail() {
         const res = await fetch('/api/consolidations/' + this.c.id);
         if (!res.ok) return;
         const data = await res.json();
-        if (data.ready_to_post && this._poll) {
+        const publishing = data.publish_status === 'queued' || data.publish_status === 'running';
+        if (!publishing && this._poll) {
           clearInterval(this._poll);
           this._poll = null;
           this.regeneratingPublish = false;
-          window.location.reload();
-          return;
+          if (data.ready_to_post) {
+            window.location.reload();
+            return;
+          }
         }
         this.c = data;
         if (data.publish_body && !this.publishBody) this.publishBody = data.publish_body;
@@ -527,7 +541,7 @@ function consolidationDetail() {
       } catch (e) {}
     },
     async regeneratePublish() {
-      if (!this.canRegeneratePublish() || this.regeneratingPublish) return;
+      if (!this.canRegeneratePublish() || this.regeneratingPublish || this.isPublishing()) return;
       const ok = await lrConfirm({
         title: 'Regenerate GitHub draft?',
         message: 'Re-run the publish transform for consolidation #' + this.c.id + ' using the current publish prompt. The internal report is left unchanged.',
@@ -547,7 +561,7 @@ function consolidationDetail() {
           this.regeneratingPublish = false;
           return;
         }
-        this.c = { ...this.c, ...data, ready_to_post: 0 };
+        this.c = { ...this.c, ...data, ready_to_post: 0, publish_status: data.publish_status || 'queued' };
         this._startPublishPoll();
       } catch (e) {
         this.postError = String(e.message || e);

@@ -23,7 +23,8 @@
     <div class="flex items-center gap-1">
       <template x-if="chatMode === 'challenge' && chatSession && chatSession.status === 'open'">
         <button type="button" class="rounded px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
-                :disabled="chatBusy" @click="finishChat()" title="Write findings and regenerate publish draft">Done</button>
+                :disabled="chatBusy" @click="finishChat()"
+                title="Write working findings into the consolidation and regenerate the GitHub draft (does not post to GitHub)">Apply findings</button>
       </template>
       <button type="button" class="rounded p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
               @click="chatOpen = false; persistChatOpen()" aria-label="Collapse chat">

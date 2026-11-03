@@ -506,9 +506,18 @@ class ConsolidationRunner:
 
     def enqueue_publish(self, consolidation_id: int) -> None:
         """Re-run only the GitHub publish transform for an existing consolidation."""
+        cid = int(consolidation_id)
         with self._lock:
-            self._publish_only.add(int(consolidation_id))
-        self.enqueue(int(consolidation_id))
+            self._publish_only.add(cid)
+        update_consolidation(
+            self.conn,
+            cid,
+            publish_status="queued",
+            publish_started_at=utcnow(),
+            publish_finished_at=None,
+            ready_to_post=0,
+        )
+        self.enqueue(cid)
 
     def notify_run_finished(self, run_id: int) -> None:
         """Observer: wake dormant consolidations that were waiting on this review run."""
@@ -1282,11 +1291,27 @@ class ConsolidationRunner:
                 consolidation_id,
                 ready_to_post=0,
                 error_message="Cannot regenerate publish draft: internal report is empty",
+                publish_status="failed",
+                publish_finished_at=utcnow(),
             )
             return
         if int(row.get("feedback_provided") or 0):
+            update_consolidation(
+                conn,
+                consolidation_id,
+                publish_status="failed",
+                publish_finished_at=utcnow(),
+                ready_to_post=0,
+            )
             return
         if self._is_cancel_requested(consolidation_id, conn):
+            update_consolidation(
+                conn,
+                consolidation_id,
+                publish_status="failed",
+                publish_finished_at=utcnow(),
+                ready_to_post=0,
+            )
             return
 
         pr = get_pr(conn, int(row["pr_id"]))
@@ -1296,6 +1321,8 @@ class ConsolidationRunner:
                 consolidation_id,
                 ready_to_post=0,
                 error_message="PR not found",
+                publish_status="failed",
+                publish_finished_at=utcnow(),
             )
             return
 
@@ -1369,6 +1396,9 @@ class ConsolidationRunner:
             ready_to_post=0,
             error_message=None,
             workdir_path=str(work_dir),
+            publish_status="running",
+            publish_started_at=row.get("publish_started_at") or utcnow(),
+            publish_finished_at=None,
         )
 
         cfg = get_consolidator_config(conn)
@@ -1388,6 +1418,13 @@ class ConsolidationRunner:
         publish_prompt_path.write_text(publish_prompt_text, encoding="utf-8")
 
         if self._is_cancel_requested(consolidation_id, conn):
+            update_consolidation(
+                conn,
+                consolidation_id,
+                publish_status="failed",
+                publish_finished_at=utcnow(),
+                ready_to_post=0,
+            )
             return
 
         pub_built = build_consolidate_command(
@@ -1407,6 +1444,13 @@ class ConsolidationRunner:
             stdin_text=pub_built.stdin_text,
         )
         if self._is_cancel_requested(consolidation_id, conn):
+            update_consolidation(
+                conn,
+                consolidation_id,
+                publish_status="failed",
+                publish_finished_at=utcnow(),
+                ready_to_post=0,
+            )
             return
 
         publish_body = (
@@ -1439,6 +1483,8 @@ class ConsolidationRunner:
                 ready_to_post=0,
                 publish_body=publish_body or row.get("publish_body"),
                 error_message=pub_err[-2000:],
+                publish_status="failed",
+                publish_finished_at=utcnow(),
             )
             return
 
@@ -1449,6 +1495,8 @@ class ConsolidationRunner:
             publish_body=publish_body,
             ready_to_post=1,
             error_message=None,
+            publish_status="succeeded",
+            publish_finished_at=utcnow(),
         )
 
     def _run_process(

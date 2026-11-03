@@ -816,6 +816,9 @@
           if (typeof this.onChatFindingsUpdated === 'function' && data.session) {
             this.onChatFindingsUpdated(data.session);
           }
+          if (data.applied_findings && typeof this.onChatDone === 'function') {
+            this.onChatDone(data);
+          }
         } catch (e) {
           this.chatError = String(e.message || e);
           this.chatDraft = text;
@@ -830,11 +833,11 @@
         this.chatBusy = true;
         this.chatError = '';
         try {
-          const res = await fetch('/api/sessions/' + this.chatSession.id + '/done', {
+          const res = await fetch('/api/sessions/' + this.chatSession.id + '/apply', {
             method: 'POST',
           });
           const data = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(formatApiDetail(data.detail, 'Done failed'));
+          if (!res.ok) throw new Error(formatApiDetail(data.detail, 'Apply findings failed'));
           if (data.session) this.chatSession = data.session;
           if (typeof this.onChatDone === 'function') this.onChatDone(data);
         } catch (e) {

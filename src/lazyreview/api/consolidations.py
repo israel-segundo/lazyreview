@@ -310,14 +310,14 @@ def regenerate_publish(consolidation_id: int, request: Request):
             detail=f"Consolidator agent {cfg['agent']} binary not available on PATH",
         )
 
-    updated = update_consolidation(
+    update_consolidation(
         conn,
         consolidation_id,
         ready_to_post=0,
         error_message=None,
     )
     request.app.state.consolidations.enqueue_publish(consolidation_id)
-    return updated
+    return get_consolidation(conn, consolidation_id)
 
 
 @router.post("/consolidations/{consolidation_id}/post")

@@ -50,7 +50,7 @@
         <strong class="font-medium text-slate-900 dark:text-slate-100">Interactive chat</strong>
         — Explore a PR (worktree Q&amp;A) or Challenge a consolidation (evolve findings,
         recommended action, report tone, and publish guidance). Right-rail chat, sandboxed
-        to that PR only; Done regenerates the publish draft. Never auto-posts to GitHub.
+        to that PR only; Apply findings writes the working draft into the consolidation and regenerates the GitHub draft. Never auto-posts to GitHub.
       </li>
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Chat safety</strong>
@@ -226,7 +226,7 @@
       <li><strong class="font-medium text-slate-900 dark:text-slate-100">Consolidate</strong> — dedupe across runs and existing PR comments; emit an internal report plus <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">meta.json</code>.</li>
       <li><strong class="font-medium text-slate-900 dark:text-slate-100">Verify</strong> — reproduce or refute each consensus finding in the shared PR worktree; drop false alarms; recompute <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">recommended_action</code>.</li>
       <li><strong class="font-medium text-slate-900 dark:text-slate-100">Publish</strong> — rewrite the verified report into concise GitHub-facing markdown (still local).</li>
-      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Chat (optional)</strong> — Explore the PR worktree, or Challenge findings / recommended action / draft tone (hard preflight + sandbox + reply redaction); Done regenerates the publish draft.</li>
+      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Chat (optional)</strong> — Explore the PR worktree, or Challenge findings / recommended action / draft tone (hard preflight + sandbox + reply redaction); Apply findings writes the working draft into the consolidation and regenerates the GitHub draft.</li>
       <li><strong class="font-medium text-slate-900 dark:text-slate-100">Submit</strong> — you choose the action, edit the draft, and post. Never auto-posted.</li>
     </ol>
   </section>

@@ -47,6 +47,61 @@ _JSON_TRAILER = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 
+# Whole-message commands that apply working findings without an LLM round.
+_APPLY_FINDINGS_COMMANDS = frozenset(
+    {
+        "apply",
+        "apply findings",
+        "apply the findings",
+        "apply these findings",
+        "update findings",
+        "update the findings",
+        "update consolidation",
+        "update the consolidation",
+        "incorporate findings",
+        "incorporate the findings",
+        "save findings",
+        "write findings",
+    }
+)
+
+
+def is_apply_findings_command(text: str) -> bool:
+    """True when the user message is only a request to apply working findings."""
+    t = (text or "").strip().lower()
+    t = re.sub(r"[.!?]+$", "", t).strip()
+    t = re.sub(r"\s+", " ", t)
+    return t in _APPLY_FINDINGS_COMMANDS
+
+
+def _working_differs_from_consolidation(
+    session: dict[str, Any], consol: dict[str, Any]
+) -> bool:
+    """Whether challenge working copy differs from the saved consolidation."""
+    try:
+        working = json.loads(session.get("working_findings_json") or "[]")
+    except json.JSONDecodeError:
+        working = []
+    try:
+        saved = json.loads(consol.get("findings_json") or "[]")
+    except json.JSONDecodeError:
+        saved = []
+    if working != saved:
+        return True
+    w_action = (session.get("working_recommended_action") or "").strip()
+    c_action = (consol.get("recommended_action") or "").strip()
+    if w_action and w_action != c_action:
+        return True
+    w_rat = (session.get("working_recommended_action_rationale") or "").strip()
+    c_rat = (consol.get("recommended_action_rationale") or "").strip()
+    if w_rat and w_rat != c_rat:
+        return True
+    w_body = (session.get("working_body_md") or "").strip()
+    c_body = (consol.get("body") or "").strip()
+    if w_body and w_body != c_body:
+        return True
+    return False
+
 
 def sessions_dir(settings: Settings) -> Path:
     path = settings.data_dir / "sessions"
@@ -354,6 +409,23 @@ class SessionRunner:
         if block:
             raise ValueError(block)
 
+        session = get_chat_session(self._conn, session_id)
+        if not session:
+            raise ValueError("Session not found")
+        if (
+            session.get("mode") == "challenge"
+            and is_apply_findings_command(text)
+        ):
+            with self._lock:
+                if session_id in self._busy:
+                    raise ValueError("Session already has a round in progress")
+                self._busy.add(session_id)
+            try:
+                return self._apply_findings_from_chat(session_id, text)
+            finally:
+                with self._lock:
+                    self._busy.discard(session_id)
+
         with self._lock:
             if session_id in self._busy:
                 raise ValueError("Session already has a round in progress")
@@ -363,6 +435,32 @@ class SessionRunner:
         finally:
             with self._lock:
                 self._busy.discard(session_id)
+
+    def _apply_findings_from_chat(
+        self, session_id: int, user_text: str
+    ) -> dict[str, Any]:
+        """Record the apply command, write findings, enqueue publish — no LLM round."""
+        add_chat_turn(self._conn, session_id=session_id, role="user", text=user_text)
+        applied = self.apply_findings(session_id)
+        reply = (
+            "Applied working findings to the consolidation and queued GitHub draft "
+            "regeneration. The findings list and draft will refresh when that finishes. "
+            "This does **not** post to GitHub."
+        )
+        turn = add_chat_turn(
+            self._conn,
+            session_id=session_id,
+            role="assistant",
+            text=reply,
+        )
+        return {
+            "session": applied.get("session") or get_chat_session(self._conn, session_id),
+            "turn": turn,
+            "exit_code": 0,
+            "applied_findings": True,
+            "consolidation_id": applied.get("consolidation_id"),
+            "consolidation": applied.get("consolidation"),
+        }
 
     def _run_round(
         self, session_id: int, user_text: str, *, soft_warn: str | None
@@ -494,7 +592,20 @@ class SessionRunner:
             recommended_action_rationale=rationale,
         )
         session = get_chat_session(conn, session_id)
-        return {"session": session, "turn": turn, "exit_code": rc}
+        out: dict[str, Any] = {"session": session, "turn": turn, "exit_code": rc}
+
+        want_apply = bool(
+            structured and structured.get("apply_findings") is True
+        )
+        if want_apply and session and session.get("mode") == "challenge":
+            applied = self.apply_findings(session_id)
+            out["session"] = applied.get("session") or get_chat_session(
+                conn, session_id
+            )
+            out["applied_findings"] = True
+            out["consolidation_id"] = applied.get("consolidation_id")
+            out["consolidation"] = applied.get("consolidation")
+        return out
 
     def _build_prompt(
         self,
@@ -563,6 +674,14 @@ class SessionRunner:
         )
         if mode == "challenge":
             findings = session.get("working_findings_json") or "[]"
+            consol = None
+            if session.get("consolidation_id"):
+                consol = get_consolidation(
+                    self._conn, int(session["consolidation_id"])
+                )
+            draft_dirty = bool(
+                consol and _working_differs_from_consolidation(session, consol)
+            )
             parts.extend(
                 [
                     "## Working findings (JSON)",
@@ -575,11 +694,23 @@ class SessionRunner:
                     session.get("working_recommended_action_rationale") or "",
                     "",
                     "## Working internal report (`working_body_md`)",
-                    session.get("working_body_md") or "(empty — build from findings on Done)",
+                    session.get("working_body_md")
+                    or "(empty — build from findings when applying)",
                     "",
                     "## Working publish guidance",
                     (session.get("working_publish_guidance") or "").strip()
                     or "(none)",
+                    "",
+                    "## Draft status",
+                    (
+                        "Working findings/body **differ** from the saved consolidation "
+                        "(still a draft). Remind once if helpful: findings are still a "
+                        "working draft — say **apply findings** (or use **Apply findings**) "
+                        "to write them into the consolidation and regenerate the GitHub "
+                        "draft. Never claim they are already applied."
+                        if draft_dirty
+                        else "Working copy matches the saved consolidation (applied)."
+                    ),
                     "",
                 ]
             )
@@ -757,20 +888,17 @@ class SessionRunner:
             self._procs.pop(session_id, None)
         return int(proc.returncode if proc.returncode is not None else -1)
 
-    def finish_session(self, session_id: int) -> dict[str, Any]:
-        """Done: write findings + action to consolidation, enqueue publish."""
+    def apply_findings(self, session_id: int) -> dict[str, Any]:
+        """Write working findings into the consolidation and enqueue publish draft regen.
+
+        Keeps the challenge session open so chat can continue. Does not post to GitHub.
+        """
         conn = self._conn
         session = get_chat_session(conn, session_id)
         if not session:
             raise ValueError("Session not found")
         if session.get("mode") != "challenge":
-            update_chat_session(
-                conn,
-                session_id,
-                status="done",
-                finished_at=utcnow(),
-            )
-            return get_chat_session(conn, session_id) or session
+            raise ValueError("Apply findings is only available in challenge mode")
 
         consol_id = session.get("consolidation_id")
         if not consol_id:
@@ -834,7 +962,7 @@ class SessionRunner:
             except OSError:
                 pass
 
-        update_consolidation(
+        updated = update_consolidation(
             conn,
             int(consol_id),
             body=body,
@@ -843,22 +971,38 @@ class SessionRunner:
             recommended_action_rationale=rationale,
             ready_to_post=0,
             publish_body=None,
+            publish_status="queued",
+            publish_started_at=utcnow(),
+            publish_finished_at=None,
         )
         update_chat_session(
             conn,
             session_id,
-            status="done",
-            finished_at=utcnow(),
+            updated_at=utcnow(),
         )
 
         runner = getattr(self, "_consolidation_runner", None)
         if runner is not None:
             runner.enqueue_publish(int(consol_id))
+            updated = get_consolidation(conn, int(consol_id))
+        else:
+            # No worker bound (tests): leave draft stale rather than pretend queued.
+            updated = update_consolidation(
+                conn,
+                int(consol_id),
+                publish_status=None,
+                publish_started_at=None,
+            )
 
         return {
             "session": get_chat_session(conn, session_id),
             "consolidation_id": int(consol_id),
+            "consolidation": updated,
         }
+
+    def finish_session(self, session_id: int) -> dict[str, Any]:
+        """Alias for apply_findings (legacy /done route)."""
+        return self.apply_findings(session_id)
 
     def bind_consolidation_runner(self, runner: Any) -> None:
         self._consolidation_runner = runner
