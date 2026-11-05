@@ -187,7 +187,10 @@ def test_submit_pr_review_payload_includes_comments():
         captured.append(payload)
         return {"ok": True, "id": "1", "html_url": "https://example.com/r/1"}
 
-    with patch("lazyreview.services.gh._post_review", side_effect=_fake_post):
+    with (
+        patch("lazyreview.services.gh._post_review", side_effect=_fake_post),
+        patch("lazyreview.services.gh._discard_pending_reviews", return_value=0),
+    ):
         res = submit_pr_review(
             "o",
             "r",
@@ -238,6 +241,7 @@ def test_submit_pr_review_422_attaches_comments_individually():
     with (
         patch("lazyreview.services.gh._post_review", side_effect=_fake_post),
         patch("lazyreview.services.gh._post_inline_comments_one_review", side_effect=_fake_single),
+        patch("lazyreview.services.gh._discard_pending_reviews", return_value=0),
     ):
         res = submit_pr_review(
             "o",
@@ -261,7 +265,10 @@ def test_submit_pr_review_prefilters_off_diff_paths():
         captured.append(payload)
         return {"ok": True, "id": "1", "html_url": "u"}
 
-    with patch("lazyreview.services.gh._post_review", side_effect=_fake_post):
+    with (
+        patch("lazyreview.services.gh._post_review", side_effect=_fake_post),
+        patch("lazyreview.services.gh._discard_pending_reviews", return_value=0),
+    ):
         res = submit_pr_review(
             "o",
             "r",
@@ -290,10 +297,85 @@ def test_submit_pr_review_body_only_when_no_comments():
         captured.append(payload)
         return {"ok": True, "id": "2", "html_url": "u"}
 
-    with patch("lazyreview.services.gh._post_review", side_effect=_fake_post):
+    with (
+        patch("lazyreview.services.gh._post_review", side_effect=_fake_post),
+        patch("lazyreview.services.gh._discard_pending_reviews", return_value=0),
+    ):
         submit_pr_review("o", "r", 1, "hi", "COMMENT")
     assert json.loads(captured[0]) == {"body": "hi", "event": "COMMENT"}
 
+
+def test_submit_pr_review_retries_after_pending_conflict():
+    calls: list[str] = []
+
+    def _fake_post(owner, repo, number, payload):
+        calls.append(payload)
+        if len(calls) == 1:
+            raise GhError(
+                'gh: Unprocessable Entity (HTTP 422) — User can only have one pending review'
+            )
+        return {"ok": True, "id": "3", "html_url": "https://example.com/r/3"}
+
+    discard = MagicMock(return_value=1)
+    with (
+        patch("lazyreview.services.gh._post_review", side_effect=_fake_post),
+        patch("lazyreview.services.gh._discard_pending_reviews", discard),
+    ):
+        res = submit_pr_review("o", "r", 1, "hi", "COMMENT")
+    assert res["id"] == "3"
+    assert discard.call_count == 2
+    assert len(calls) == 2
+
+
+def test_gh_error_message_rewrites_empty_json_body():
+    from lazyreview.services.gh import _gh_error_message
+
+    msg = _gh_error_message("unexpected end of JSON input", "", fallback="x")
+    assert "empty error body" in msg
+    assert "unexpected end of JSON input" in msg
+
+
+def test_gh_error_message_prefers_github_json_body():
+    from lazyreview.services.gh import _gh_error_message
+
+    stdout = json.dumps(
+        {
+            "message": "Unprocessable Entity",
+            "errors": ["User can only have one pending review per pull request"],
+            "status": "422",
+        }
+    )
+    msg = _gh_error_message("gh: Unprocessable Entity (HTTP 422)", stdout, fallback="x")
+    assert "pending review" in msg
+
+
+def test_post_review_retries_transient_empty_json_error():
+    from lazyreview.services.gh import _post_review
+
+    payload = json.dumps({"body": "x", "event": "COMMENT"})
+    responses = [
+        MagicMock(returncode=1, stderr="unexpected end of JSON input", stdout=""),
+        MagicMock(
+            returncode=0,
+            stderr="",
+            stdout=json.dumps({"id": 99, "html_url": "https://example.com/r/99"}),
+        ),
+    ]
+
+    with (
+        patch("lazyreview.services.gh._require_gh", return_value="gh"),
+        patch("lazyreview.services.gh.subprocess.run", side_effect=responses),
+        patch("lazyreview.services.gh.time.sleep"),
+    ):
+        res = _post_review("o", "r", 1, payload)
+    assert res["id"] == "99"
+
+
+def test_post_review_rejects_empty_payload():
+    from lazyreview.services.gh import _post_review
+
+    with pytest.raises(GhError, match="empty review payload"):
+        _post_review("o", "r", 1, "  ")
 
 def _settings(tmp_path: Path) -> Settings:
     data = tmp_path / "data"

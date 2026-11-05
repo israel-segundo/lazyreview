@@ -7,7 +7,10 @@ import logging
 import re
 import shutil
 import subprocess
+import tempfile
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -38,6 +41,71 @@ def run_gh(args: list[str], *, cwd: str | None = None, timeout: int = 120) -> st
         err = (proc.stderr or proc.stdout or "").strip()
         raise GhError(err or f"gh {' '.join(args)} failed ({proc.returncode})")
     return proc.stdout
+
+
+def _gh_error_message(stderr: str, stdout: str, *, fallback: str) -> str:
+    """Prefer GitHub's JSON error body over opaque gh decoder failures."""
+    stderr = (stderr or "").strip()
+    stdout = (stdout or "").strip()
+    opaque = "unexpected end of json input" in stderr.lower()
+    parsed_bits: list[str] = []
+    if stdout:
+        try:
+            data = json.loads(stdout)
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, dict):
+            msg = data.get("message")
+            if isinstance(msg, str) and msg.strip():
+                parsed_bits.append(msg.strip())
+            errors = data.get("errors")
+            if isinstance(errors, list):
+                for item in errors:
+                    if isinstance(item, str) and item.strip():
+                        parsed_bits.append(item.strip())
+                    elif isinstance(item, dict):
+                        m = item.get("message")
+                        if isinstance(m, str) and m.strip():
+                            parsed_bits.append(m.strip())
+            status = data.get("status")
+            if status is not None and "http" not in stderr.lower():
+                parsed_bits.append(f"HTTP {status}")
+    if opaque and parsed_bits:
+        return "; ".join(parsed_bits)
+    if opaque and not parsed_bits:
+        return (
+            "GitHub API returned an empty error body "
+            "(transient; unexpected end of JSON input)"
+        )
+    if stderr:
+        if parsed_bits and "unprocessable" in stderr.lower():
+            return f"{stderr} — {'; '.join(parsed_bits)}"
+        return stderr
+    if parsed_bits:
+        return "; ".join(parsed_bits)
+    if stdout:
+        return stdout
+    return fallback
+
+
+def _is_transient_gh_error(err: GhError) -> bool:
+    msg = str(err).lower()
+    return any(
+        token in msg
+        for token in (
+            "unexpected end of json input",
+            "empty error body",
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+            "timeout",
+            "temporar",
+            "connection reset",
+            "connection refused",
+            "i/o timeout",
+        )
+    )
 
 
 def auth_status() -> dict[str, Any]:
@@ -414,6 +482,9 @@ def submit_pr_review(
         payload_obj["commit_id"] = sha
         payload_obj["comments"] = cleaned
 
+    # A leftover PENDING review blocks every subsequent create-review call.
+    _discard_pending_reviews(owner, repo, number)
+
     try:
         result = _post_review(owner, repo, number, json.dumps(payload_obj))
         result["dropped_comments"] = list(skipped_off_diff) + list(skipped_bad_line)
@@ -422,6 +493,14 @@ def submit_pr_review(
         result["skipped_bad_line_count"] = len(skipped_bad_line)
         return result
     except GhError as e:
+        if _is_pending_review_conflict(e):
+            _discard_pending_reviews(owner, repo, number)
+            result = _post_review(owner, repo, number, json.dumps(payload_obj))
+            result["dropped_comments"] = list(skipped_off_diff) + list(skipped_bad_line)
+            result["posted_inline_count"] = len(cleaned)
+            result["skipped_off_diff_count"] = len(skipped_off_diff)
+            result["skipped_bad_line_count"] = len(skipped_bad_line)
+            return result
         if not cleaned or not _is_unprocessable(e):
             raise
         logger.warning(
@@ -482,12 +561,59 @@ def _normalize_review_comments(comments: list[dict[str, Any]]) -> list[dict[str,
 
 def _is_unprocessable(err: GhError) -> bool:
     msg = str(err).lower()
+    if _is_pending_review_conflict(err):
+        return False
     return "422" in msg or "unprocessable" in msg or "must be part of the diff" in msg
+
+
+def _is_pending_review_conflict(err: GhError) -> bool:
+    msg = str(err).lower()
+    return "pending review" in msg
+
+
+def _discard_pending_reviews(owner: str, repo: str, number: int) -> int:
+    """Delete the caller's PENDING reviews so create-review is not blocked."""
+    try:
+        raw = run_gh(
+            ["api", f"repos/{owner}/{repo}/pulls/{number}/reviews", "--paginate"]
+        )
+        reviews = json.loads(raw or "[]")
+    except (GhError, json.JSONDecodeError) as e:
+        logger.warning("Could not list reviews before post: %s", e)
+        return 0
+    if not isinstance(reviews, list):
+        return 0
+    deleted = 0
+    for review in reviews:
+        if not isinstance(review, dict):
+            continue
+        if str(review.get("state") or "").upper() != "PENDING":
+            continue
+        rid = review.get("id")
+        if rid is None:
+            continue
+        try:
+            run_gh(
+                [
+                    "api",
+                    "-X",
+                    "DELETE",
+                    f"repos/{owner}/{repo}/pulls/{number}/reviews/{rid}",
+                ]
+            )
+            deleted += 1
+            logger.info("Deleted PENDING review %s on %s/%s#%s", rid, owner, repo, number)
+        except GhError as e:
+            logger.warning("Could not delete PENDING review %s: %s", rid, e)
+    return deleted
 
 
 _INLINE_FOLLOWUP_BODY = (
     "Inline review comments for the review above (posted as one follow-up)."
 )
+
+_POST_REVIEW_ATTEMPTS = 3
+_POST_REVIEW_RETRY_DELAY_SEC = 0.75
 
 
 def _post_inline_comments_one_review(
@@ -534,30 +660,99 @@ def _post_inline_comments_one_review(
 
 
 def _post_review(owner: str, repo: str, number: int, payload: str) -> dict[str, Any]:
+    """POST a pull-request review via ``gh api``.
+
+    Writes the JSON body to a temp file (not stdin). Empty ``--input -`` creates a
+    PENDING review on GitHub and then blocks every later submit with 422.
+    Retries when ``gh`` reports ``unexpected end of JSON input`` — that usually
+    means GitHub returned an empty error body (transient 5xx).
+    """
+    if not (payload or "").strip():
+        raise GhError("refusing to post empty review payload")
+    try:
+        json.loads(payload)
+    except json.JSONDecodeError as e:
+        raise GhError(f"invalid review payload JSON: {e}") from e
+
     gh = _require_gh()
-    proc = subprocess.run(
-        [
-            gh,
-            "api",
-            f"repos/{owner}/{repo}/pulls/{number}/reviews",
-            "-X",
-            "POST",
-            "--input",
-            "-",
-        ],
-        input=payload,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        raise GhError((proc.stderr or proc.stdout or "").strip())
-    data = json.loads(proc.stdout or "{}")
-    return {
-        "ok": True,
-        "id": str(data.get("id", "")),
-        "html_url": data.get("html_url"),
-    }
+    last_err: GhError | None = None
+    for attempt in range(1, _POST_REVIEW_ATTEMPTS + 1):
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            suffix=".json",
+            delete=False,
+        ) as tmp:
+            tmp.write(payload)
+            tmp_path = Path(tmp.name)
+        try:
+            proc = subprocess.run(
+                [
+                    gh,
+                    "api",
+                    f"repos/{owner}/{repo}/pulls/{number}/reviews",
+                    "-X",
+                    "POST",
+                    "--input",
+                    str(tmp_path),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        finally:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+        if proc.returncode != 0:
+            last_err = GhError(
+                _gh_error_message(
+                    proc.stderr,
+                    proc.stdout,
+                    fallback=f"gh api review post failed ({proc.returncode})",
+                )
+            )
+            if attempt < _POST_REVIEW_ATTEMPTS and _is_transient_gh_error(last_err):
+                logger.warning(
+                    "Transient GitHub review post failure (attempt %s/%s): %s",
+                    attempt,
+                    _POST_REVIEW_ATTEMPTS,
+                    last_err,
+                )
+                time.sleep(_POST_REVIEW_RETRY_DELAY_SEC * attempt)
+                continue
+            raise last_err
+
+        try:
+            data = json.loads(proc.stdout or "{}")
+        except json.JSONDecodeError as e:
+            last_err = GhError(
+                f"GitHub review response was not valid JSON: {e}; "
+                f"stdout={proc.stdout[:200]!r}"
+            )
+            if attempt < _POST_REVIEW_ATTEMPTS:
+                logger.warning(
+                    "Unparseable review response (attempt %s/%s): %s",
+                    attempt,
+                    _POST_REVIEW_ATTEMPTS,
+                    last_err,
+                )
+                time.sleep(_POST_REVIEW_RETRY_DELAY_SEC * attempt)
+                continue
+            raise last_err from e
+
+        if not isinstance(data, dict):
+            data = {}
+        return {
+            "ok": True,
+            "id": str(data.get("id", "")),
+            "html_url": data.get("html_url"),
+        }
+
+    assert last_err is not None
+    raise last_err
 
 
 def clone_url(owner: str, repo: str) -> str:
