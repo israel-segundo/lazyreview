@@ -14,7 +14,7 @@ Primary workspace is the **PR worktree** (current head). The consolidation job d
 is also available (write outputs there):
 
 - `findings.json` — consensus findings array
-  `{ "id", "severity" (1|2|3), "title", "body", "path"?, "line"?, "disposition"? }`
+  `{ "id", "severity" (1|2|3), "category", "labels", "title", "body", "path"?, "line"?, "disposition"?, "origin"? }`
 - `body.md` — internal consensus report to rewrite
 - `meta.json` — current `{ "recommended_action", "rationale" }` (recompute after verify)
 - `analysis-brief.md` — orientation brief (context only)
@@ -71,10 +71,19 @@ comments at post time). Pathless findings stay in the summary body only.
 
 Put `{ "recommended_action", "rationale" }` in `{meta_json_path}`. Do **not** post.
 
+## Taxonomy (preserve; closed vocabulary)
+
+Keep each finding's `category` / `labels` / `origin` / `human_edited` when present.
+Categories: `correctness`|`security`|`architecture`|`quality`|`housekeeping`.
+Labels only from that category's closed set (bug, edge-case, security, compliance,
+arch-gap, scalability, test, performance, maintainability, docs, nit, cleanup).
+Do **not** invent freestyle categories. Severity stays 1|2|3 (High|Medium|Low).
+
 ## Output files (required)
 
 1. Rewrite **kept** findings to `{findings_json_path}` (main list only — not false alarms).
    Remint stable IDs as `C1`, `C2`, … ordered by severity (High → Medium → Low).
+   Include `category`, `labels`, `origin` on every object.
 2. Rewrite the internal report to `{body_path}` (shape below).
 3. Rewrite `{meta_json_path}` as above.
 
@@ -91,7 +100,8 @@ Keep the consolidator’s overall shape, with these rules:
    worktree. Summarize what survived vs what was rejected.
 
 **3. Findings** — severity-ranked paragraphs for **kept** findings only (same format as
-   consolidation: `**C<n> · <Severity> — <claim>.**` + ≤3 sentences + disposition italics).
+   consolidation: `**C<n> · <Severity> · <category>/<label> — <claim>.**` + ≤3 sentences +
+   disposition italics).
 
 **4. Already addressed** — preserve from input `body.md` when present (do not re-litigate).
 

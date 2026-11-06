@@ -7,6 +7,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from lazyreview.findings_taxonomy import normalize_category, normalize_labels, severity_word
+
 _BLOCKING_DISPOSITION = re.compile(
     r"fix\s+before\s+merge|blocker|blocks?\s+merge|"
     r"compromises?\s+(the\s+)?(build|ac|acceptance)|"
@@ -18,6 +20,11 @@ _NONBLOCKING_DISPOSITION = re.compile(
     r"fast[- ]follow|author'?s\s+call|out\s+of\s+scope|follow[_ ]?up",
     re.I,
 )
+_SOURCES_TAG_RE = re.compile(
+    r"<!--\s*lazyreview-sources:\s*(?P<label>.*?)\s*-->",
+    re.I | re.DOTALL,
+)
+_DEDUP_SOURCES_RE = re.compile(r"\(([^()\n]+)\)\s*$")
 
 
 def parse_findings_list(raw: str | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -248,6 +255,16 @@ def _review_body_includes_finding(body: str, finding_id: str) -> bool:
     return bool(re.search(rf"\*\*{fid}(?:\s|[·—]|\*\*)", body))
 
 
+def finding_taxonomy_suffix(finding: dict[str, Any]) -> str:
+    """`` · High · correctness/bug`` fragment for mineable finding leads."""
+    sev = severity_word(finding.get("severity"))
+    cat = normalize_category(finding.get("category"))
+    labels = normalize_labels(finding.get("labels"), category=cat)
+    if labels:
+        return f" · {sev} · {cat}/{'+'.join(labels)}"
+    return f" · {sev} · {cat}"
+
+
 def format_summary_only_findings_md(
     findings: list[dict[str, Any]],
     *,
@@ -256,17 +273,14 @@ def format_summary_only_findings_md(
     """Markdown blocks for findings that cannot be posted as inline diff comments."""
     if not findings:
         return ""
-    sev_name = {1: "High", 2: "Medium", 3: "Low"}
     lines = ["", "## Findings (included in review body)", ""]
     for i, f in enumerate(findings):
-        sev = int(f.get("severity") or 3)
         claim = (f.get("title") or finding_display_id(f, index=i)).strip()
         body = (f.get("body") or "").strip()
         fid = finding_display_id(f, index=i)
         disposition = str(f.get("disposition") or "").strip()
-        lines.append(
-            f"**{fid} · {sev_name.get(sev, 'Low')} — {claim}.** {body}".strip()
-        )
+        tax = finding_taxonomy_suffix(f)
+        lines.append(f"**{fid}{tax} — {claim}.** {body}".strip())
         if disposition and disposition not in body:
             lines.append(disposition)
         path = finding_path(f)
@@ -305,7 +319,7 @@ def merge_summary_findings_into_review_body(
 
 
 def inline_comment_body(finding: dict[str, Any]) -> str:
-    """Short inline review comment body (1–3 sentences), led by finding id."""
+    """Short inline review comment body (1–3 sentences), led by finding id + taxonomy."""
     fid = str(finding.get("id") or "").strip() or "?"
     title = str(finding.get("title") or "").strip()
     body = str(finding.get("body") or "").strip()
@@ -324,7 +338,74 @@ def inline_comment_body(finding: dict[str, Any]) -> str:
         detail = f"{detail} {disposition}".strip()
     if not detail:
         detail = "See consolidation finding."
-    return f"**{fid}** — {detail}"
+    tax = finding_taxonomy_suffix(finding)
+    return f"**{fid}{tax}** — {detail}"
+
+
+def source_runs_label_from_dedup_summary(summary: str | None) -> str:
+    """Extract ``agent/model/effort, …`` from a dedup_summary trailing paren."""
+    text = (summary or "").strip()
+    if not text:
+        return ""
+    m = _DEDUP_SOURCES_RE.search(text)
+    if not m:
+        return ""
+    label = m.group(1).strip()
+    if not label or label == "(none)" or "→" in label:
+        return ""
+    return label
+
+
+def resolve_source_runs_label(
+    *,
+    work_dir: Path | None = None,
+    dedup_summary: str | None = None,
+    fallback: str | None = None,
+) -> str:
+    """Prefer workdir ``source-runs.txt``, then dedup_summary, then explicit fallback."""
+    if work_dir is not None:
+        path = work_dir / "source-runs.txt"
+        if path.exists():
+            text = path.read_text(encoding="utf-8", errors="replace").strip()
+            if text and text != "(none)":
+                return text
+    from_dedup = source_runs_label_from_dedup_summary(dedup_summary)
+    if from_dedup:
+        return from_dedup
+    fb = (fallback or "").strip()
+    return fb if fb and fb != "(none)" else ""
+
+
+def write_source_runs_file(work_dir: Path, label: str) -> None:
+    text = (label or "").strip() or "(none)"
+    (work_dir / "source-runs.txt").write_text(text + "\n", encoding="utf-8")
+
+
+def ensure_publish_sources_disclosure(body: str, source_runs_label: str) -> str:
+    """Guarantee a brief, mineable source agent/model/effort mention on the draft.
+
+    Keeps any existing prose disclosure; always ensures an HTML comment tag for mining:
+    ``<!-- lazyreview-sources: agent/model/effort, … -->``.
+    """
+    label = (source_runs_label or "").strip()
+    if not label or label == "(none)":
+        return body or ""
+    text = body or ""
+    tag = f"<!-- lazyreview-sources: {label} -->"
+    if _SOURCES_TAG_RE.search(text):
+        # Refresh tag contents if present but empty/stale without the label.
+        if label in text:
+            return text
+        return _SOURCES_TAG_RE.sub(tag, text, count=1)
+
+    # Short human line when the model omitted sources entirely.
+    if label not in text:
+        text = (
+            text.rstrip()
+            + "\n\n"
+            + f"> **How this was produced:** Orchestrated agentic code review — `{label}`.\n"
+        )
+    return text.rstrip() + "\n\n" + tag + "\n"
 
 
 def filter_comments_for_changed_paths(

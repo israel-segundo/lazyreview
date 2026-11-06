@@ -31,6 +31,11 @@ from lazyreview.db import (
     update_consolidation,
     utcnow,
 )
+from lazyreview.findings_taxonomy import (
+    coerce_findings_for_persist,
+    findings_to_json,
+    severity_word,
+)
 from lazyreview.services.credentials import subprocess_env
 from lazyreview.services.pr_workspace import hold_worktree
 from lazyreview.services.session_safety import (
@@ -172,14 +177,19 @@ def findings_to_body_md(
         lines.append("_No kept findings._")
         lines.append("")
     else:
-        sev_name = {1: "High", 2: "Medium", 3: "Low"}
         for i, f in enumerate(findings, start=1):
-            sev = int(f.get("severity") or 3)
             claim = (f.get("title") or f.get("id") or f"Finding {i}").strip()
             body = (f.get("body") or "").strip()
             fid = f.get("id") or f"C{i}"
+            cat = str(f.get("category") or "").strip()
+            labels = f.get("labels") if isinstance(f.get("labels"), list) else []
+            tax = ""
+            if cat and labels:
+                tax = f" · {cat}/{'+'.join(str(x) for x in labels)}"
+            elif cat:
+                tax = f" · {cat}"
             lines.append(
-                f"**{fid} · {sev_name.get(sev, 'Low')} — {claim}.** {body}".strip()
+                f"**{fid} · {severity_word(f.get('severity'))}{tax} — {claim}.** {body}".strip()
             )
             lines.append("")
     return "\n".join(lines).rstrip() + "\n"
@@ -557,7 +567,13 @@ class SessionRunner:
             if "working_findings" in structured and isinstance(
                 structured["working_findings"], list
             ):
-                findings_delta = json.dumps(structured["working_findings"])
+                prior_raw = (session or {}).get("working_findings_json")
+                normalized = coerce_findings_for_persist(
+                    structured["working_findings"],
+                    default_origin="human",
+                    prior=prior_raw,
+                )
+                findings_delta = findings_to_json(normalized, indent=None)
                 fields["working_findings_json"] = findings_delta
             if structured.get("recommended_action"):
                 action = str(structured["recommended_action"]).strip()
@@ -913,12 +929,12 @@ class SessionRunner:
         findings_json = session.get("working_findings_json") or "[]"
         action = session.get("working_recommended_action") or "comment"
         rationale = session.get("working_recommended_action_rationale") or ""
-        try:
-            findings = json.loads(findings_json)
-        except json.JSONDecodeError:
-            findings = []
-        if not isinstance(findings, list):
-            findings = []
+        findings = coerce_findings_for_persist(
+            findings_json,
+            default_origin="human",
+            prior=consol.get("findings_json"),
+        )
+        findings_json_out = findings_to_json(findings)
 
         working_body = (session.get("working_body_md") or "").strip()
         if working_body:
@@ -937,9 +953,7 @@ class SessionRunner:
         )
         work_dir.mkdir(parents=True, exist_ok=True)
         (work_dir / "body.md").write_text(body, encoding="utf-8")
-        (work_dir / "findings.json").write_text(
-            json.dumps(findings, indent=2) + "\n", encoding="utf-8"
-        )
+        (work_dir / "findings.json").write_text(findings_json_out, encoding="utf-8")
         (work_dir / "meta.json").write_text(
             json.dumps(
                 {"recommended_action": action, "rationale": rationale}, indent=2
@@ -966,7 +980,7 @@ class SessionRunner:
             conn,
             int(consol_id),
             body=body,
-            findings_json=json.dumps(findings),
+            findings_json=findings_json_out,
             recommended_action=action,
             recommended_action_rationale=rationale,
             ready_to_post=0,
@@ -978,6 +992,7 @@ class SessionRunner:
         update_chat_session(
             conn,
             session_id,
+            working_findings_json=findings_json_out,
             updated_at=utcnow(),
         )
 

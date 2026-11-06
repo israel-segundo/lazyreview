@@ -34,13 +34,42 @@ from lazyreview.db import (
 from lazyreview.db.schema import connect
 from lazyreview.services.credentials import subprocess_env
 from lazyreview.services.gh import GhError, list_pr_comments
-from lazyreview.services.review_post import parse_findings_list, write_github_post_plan_file
+from lazyreview.findings_taxonomy import (
+    coerce_findings_for_persist,
+    findings_to_json,
+)
+from lazyreview.services.review_post import (
+    ensure_publish_sources_disclosure,
+    parse_findings_list,
+    resolve_source_runs_label,
+    write_github_post_plan_file,
+    write_source_runs_file,
+)
 from lazyreview.services.pr_workspace import hold_worktree
 from lazyreview.services.settings import (
     get_consolidator_config,
     get_publish_config,
     get_verify_config,
 )
+
+
+def _persist_normalized_findings(
+    findings_json: str | None,
+    *,
+    findings_out: Path | None = None,
+    prior_json: str | None = None,
+    default_origin: str = "model",
+) -> str:
+    """Normalize findings JSON, optionally rewrite workdir file; return JSON string."""
+    normalized = coerce_findings_for_persist(
+        findings_json,
+        default_origin=default_origin,
+        prior=prior_json,
+    )
+    text = findings_to_json(normalized)
+    if findings_out is not None:
+        findings_out.write_text(text, encoding="utf-8")
+    return text
 
 logger = logging.getLogger(__name__)
 
@@ -800,6 +829,7 @@ class ConsolidationRunner:
             )
 
             source_runs_label = format_source_runs_label(findings_by_run)
+            write_source_runs_file(work_dir, source_runs_label)
             prompt_text = render_consolidator_prompt(
                 cfg["prompt"],
                 body_path=body_path,
@@ -878,7 +908,11 @@ class ConsolidationRunner:
             body = body_path.read_text(encoding="utf-8") if body_path.exists() else ""
             findings_json = None
             if findings_out.exists():
-                findings_json = findings_out.read_text(encoding="utf-8")
+                findings_json = _persist_normalized_findings(
+                    findings_out.read_text(encoding="utf-8"),
+                    findings_out=findings_out,
+                    default_origin="model",
+                )
 
             cost_usd = parsed.cost_usd
             if cost_usd is None:
@@ -957,8 +991,14 @@ class ConsolidationRunner:
 
             # Re-read artifacts after verify (or unchanged if verify was skipped).
             body = body_path.read_text(encoding="utf-8") if body_path.exists() else body
+            prior_findings_json = findings_json
             if findings_out.exists():
-                findings_json = findings_out.read_text(encoding="utf-8")
+                findings_json = _persist_normalized_findings(
+                    findings_out.read_text(encoding="utf-8"),
+                    findings_out=findings_out,
+                    prior_json=prior_findings_json,
+                    default_origin="model",
+                )
             meta_raw = meta_path.read_text(encoding="utf-8") if meta_path.exists() else meta_raw
             recommended_action, rationale = parse_consolidation_meta(meta_raw)
             update_consolidation(
@@ -1026,6 +1066,16 @@ class ConsolidationRunner:
                 if publish_body_path.exists()
                 else ""
             )
+            if publish_body.strip():
+                publish_body = ensure_publish_sources_disclosure(
+                    publish_body,
+                    resolve_source_runs_label(
+                        work_dir=work_dir,
+                        dedup_summary=dedup_summary,
+                        fallback=source_runs_label,
+                    ),
+                )
+                publish_body_path.write_text(publish_body, encoding="utf-8")
             if pub_rc != 0 or not publish_body.strip():
                 pub_err = ""
                 if publish_stderr_path.exists():
@@ -1265,7 +1315,10 @@ class ConsolidationRunner:
         pr: dict[str, Any],
         findings_json: str | None,
     ) -> None:
-        findings = parse_findings_list(findings_json)
+        findings = coerce_findings_for_persist(
+            parse_findings_list(findings_json),
+            default_origin="model",
+        )
         try:
             write_github_post_plan_file(
                 work_dir,
@@ -1343,11 +1396,17 @@ class ConsolidationRunner:
 
         # Refresh inputs from DB so republish works even if the workdir was pruned.
         body_path.write_text(body + ("\n" if not body.endswith("\n") else ""), encoding="utf-8")
-        findings_json = row.get("findings_json")
-        if findings_json:
-            findings_out.write_text(str(findings_json), encoding="utf-8")
-        elif not findings_out.exists():
-            findings_out.write_text("[]\n", encoding="utf-8")
+        findings_json = _persist_normalized_findings(
+            row.get("findings_json"),
+            findings_out=findings_out,
+            default_origin="model",
+        )
+        source_runs_label = resolve_source_runs_label(
+            work_dir=work_dir,
+            dedup_summary=row.get("dedup_summary"),
+        )
+        if source_runs_label:
+            write_source_runs_file(work_dir, source_runs_label)
         meta_path.write_text(
             json.dumps(
                 {
@@ -1458,6 +1517,16 @@ class ConsolidationRunner:
             if publish_body_path.exists()
             else ""
         )
+        if publish_body.strip():
+            publish_body = ensure_publish_sources_disclosure(
+                publish_body,
+                resolve_source_runs_label(
+                    work_dir=work_dir,
+                    dedup_summary=row.get("dedup_summary"),
+                    fallback=source_runs_label,
+                ),
+            )
+            publish_body_path.write_text(publish_body, encoding="utf-8")
         if pub_rc != 0 or not publish_body.strip():
             pub_err = ""
             if publish_stderr_path.exists():

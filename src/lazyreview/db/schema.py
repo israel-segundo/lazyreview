@@ -98,6 +98,10 @@ CREATE TABLE IF NOT EXISTS findings (
   path TEXT,
   line INTEGER,
   disposition TEXT,
+  category TEXT NOT NULL DEFAULT 'quality',
+  labels_json TEXT NOT NULL DEFAULT '[]',
+  origin TEXT NOT NULL DEFAULT 'model',
+  human_edited INTEGER NOT NULL DEFAULT 0,
   raw_json TEXT,
   UNIQUE(run_id, external_id)
 );
@@ -313,7 +317,7 @@ DEFAULT_SETTINGS = {
     "session_effort": EffortLevel.HIGH.value,
 }
 
-SCHEMA_VERSION = 27
+SCHEMA_VERSION = 29
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -868,6 +872,60 @@ def init_db(conn: sqlite3.Connection) -> None:
         ):
             if col not in consol_cols:
                 conn.execute(f"ALTER TABLE consolidations ADD COLUMN {col} {decl}")
+
+    if prev is not None and prev < 28:
+        # Finding taxonomy: category, labels, model/human provenance.
+        finding_cols = {
+            r["name"]
+            for r in conn.execute("PRAGMA table_info(findings)").fetchall()
+        }
+        for col, decl in (
+            ("category", "TEXT NOT NULL DEFAULT 'quality'"),
+            ("labels_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("origin", "TEXT NOT NULL DEFAULT 'model'"),
+            ("human_edited", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if col not in finding_cols:
+                conn.execute(f"ALTER TABLE findings ADD COLUMN {col} {decl}")
+        # Refresh prompts that define finding taxonomy / severity.
+        if prompt_seed:
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'consolidator_prompt'",
+                (prompt_seed,),
+            )
+        verify_prompt_seed = _default_verify_prompt()
+        if verify_prompt_seed:
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("verify_prompt", verify_prompt_seed),
+            )
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'verify_prompt'",
+                (verify_prompt_seed,),
+            )
+        publish_prompt_seed = _default_publish_prompt()
+        if publish_prompt_seed:
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("publish_prompt", publish_prompt_seed),
+            )
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'publish_prompt'",
+                (publish_prompt_seed,),
+            )
+
+    if prev is not None and prev < 29:
+        # Require brief source agent/model/effort disclosure on GitHub drafts.
+        publish_prompt_seed = _default_publish_prompt()
+        if publish_prompt_seed:
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                ("publish_prompt", publish_prompt_seed),
+            )
+            conn.execute(
+                "UPDATE settings SET value = ? WHERE key = 'publish_prompt'",
+                (publish_prompt_seed,),
+            )
 
     if prev is not None and prev < 10 and prompt_seed:
         conn.execute(

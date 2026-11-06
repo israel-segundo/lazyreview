@@ -16,7 +16,11 @@ the recommended action — that is already decided in `meta.json`.
 - `body.md` — internal consolidation consensus report (source of truth for findings)
 - `meta.json` — `{ "recommended_action": "approve"|"request_changes"|"comment", "rationale": "..." }`
 - `analysis-brief.md` — PR analysis brief (optional context for a tighter TL;DR)
-- `findings.json` — machine-readable kept findings (`path` / `line` optional)
+- `findings.json` — machine-readable kept findings (`path` / `line` optional;
+  also `severity`, `category`, `labels` — **copy these tokens verbatim**; do not invent
+  or paraphrase taxonomy)
+- `source-runs.txt` — one-line list of source review `agent/model/effort` pairs that fed
+  this consolidation (e.g. `claude/opus/high, agy/gemini-3-pro/high`)
 - `post-plan.json` — `{ "inline_ids", "summary_only_ids", "off_diff_ids", "bad_line_ids" }`
   (written by the app from the PR diff; **authoritative** for inline vs summary split)
 - `pr.json` — PR metadata
@@ -76,21 +80,34 @@ If several people appear, name them in one short sentence (use “my …” for 
    stance naming **only those** IDs, e.g. `Details on the diff for C2.`
    Do **not** list ids from `off_diff_ids` as “on the diff.”
 3. **Summary-only findings.** For every id in `summary_only_ids`, preserve id, severity,
-   claim, and evidence (same format as the internal report). For off-diff anchors, cite
-   `path:line` as evidence in the body text. Do not add or soften blockers.
+   category/labels (from `findings.json`), claim, and evidence. Format lead as
+   `**C<n> · <Severity> · <category>/<label> — <claim>.**` using the finding's fields
+   only — never invent taxonomy tokens. For off-diff anchors, cite `path:line` as
+   evidence in the body text. Do not add or soften blockers.
 4. **Tighten prose.** Title + disposition lead + short stance + optional pathless list +
    optional Already addressed. Strip process narration and redundancy.
 5. **Omit agent / dedup tables.** Do **not** include the per-agent coverage table, the
    "Total after deduping" block, Verified/Merged sections, or Rejected-as-false-alarms
    dump (one line in the stance is enough if needed).
-6. You may keep a **short** closing disclosure line; do not expand it into tables.
+6. **Closing sources line (REQUIRED).** End with one short disclosure that names the
+   source agents/models/efforts from `source-runs.txt` (or the internal report if that
+   file is missing). Keep it brief — name them, do not narrate. Example:
+
+   > **How this was produced:** Orchestrated agentic code review — `claude/opus/high`, `agy/gemini-3-pro/high`.
+
+   Also append this exact HTML comment (for mining; use the same label string):
+
+   `<!-- lazyreview-sources: claude/opus/high, agy/gemini-3-pro/high -->`
+
+   Never invent agents/models/efforts. Never expand into a table.
 7. **Do not** invent analysis claims that are not in `body.md` or `analysis-brief.md`.
 8. **Do not** include a separate "recommended action" heading — the lead sentence is the
    disposition.
 9. Tone: colleague, not linter. Short sentences. Concrete over abstract.
 10. **Publish guidance.** If `publish-guidance.md` exists and is non-empty, apply its tone
     and summary notes (softer/harder voice, mention a point, keep shorter). Still do not
-    invent findings, change `recommended_action`, or contradict blockers in `findings.json`.
+    invent findings, change `recommended_action`, omit sources, or contradict blockers in
+    `findings.json`.
 
 ## Suggested shape
 
@@ -101,4 +118,5 @@ If several people appear, name them in one short sentence (use “my …” for 
 5. `summary_only_ids` findings (severity-ranked), if any — full text, not just ids
 6. Optional "Already addressed" if present in `body.md` (keep short; preserve first-person
    attribution for the current reviewer — never rewrite “me/myself” into `@poster`)
-7. Optional one-line closing disclosure — **no** coverage / dedup tables
+7. Required brief sources disclosure + `<!-- lazyreview-sources: … -->` — **no** coverage /
+   dedup tables

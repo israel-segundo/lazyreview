@@ -347,7 +347,12 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
     if not text.strip():
         raise HTTPException(status_code=400, detail="Empty publish body")
 
-    findings = parse_findings_list(row.get("findings_json") or row.get("findings"))
+    from lazyreview.findings_taxonomy import coerce_findings_for_persist
+
+    findings = coerce_findings_for_persist(
+        parse_findings_list(row.get("findings_json") or row.get("findings")),
+        default_origin="model",
+    )
     head_sha = str(pr.get("head_sha") or row.get("head_sha") or "").strip()
 
     gh_url = None

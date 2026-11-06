@@ -574,6 +574,55 @@ html {
   font-weight: 600;
   line-height: 1.4;
 }
+.lr-finding-meta {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  max-width: 45%;
+}
+.lr-finding-cat,
+.lr-finding-origin {
+  flex-shrink: 0;
+  border-radius: 0.25rem;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+  text-transform: lowercase;
+}
+.lr-finding-cat {
+  background: var(--color-slate-100, #f1f5f9);
+  color: var(--color-slate-700, #334155);
+}
+.dark .lr-finding-cat {
+  background: var(--color-slate-800, #1e293b);
+  color: var(--color-slate-300, #cbd5e1);
+}
+.lr-finding-origin {
+  background: transparent;
+  border: 1px solid var(--color-slate-300, #cbd5e1);
+  color: var(--color-slate-500, #64748b);
+}
+.dark .lr-finding-origin {
+  border-color: var(--color-slate-600, #475569);
+  color: var(--color-slate-400, #94a3b8);
+}
+.lr-finding-origin.is-human {
+  border-color: var(--color-sky-400, #38bdf8);
+  color: var(--color-sky-700, #0369a1);
+}
+.dark .lr-finding-origin.is-human {
+  border-color: var(--color-sky-600, #0284c7);
+  color: var(--color-sky-300, #7dd3fc);
+}
+.lr-finding-origin.is-edited::after {
+  content: "*";
+  margin-left: 0.1rem;
+}
 .lr-finding-path {
   margin-top: 0.15rem;
   min-width: 0;

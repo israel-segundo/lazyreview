@@ -1112,6 +1112,8 @@ def dormant_consolidation_run_ids(conn: sqlite3.Connection, pr_id: int) -> set[i
 def _normalize_consolidation(row: dict[str, Any] | None) -> dict[str, Any] | None:
     if row is None:
         return None
+    from lazyreview.findings_taxonomy import normalize_finding
+
     out = dict(row)
     try:
         out["source_run_ids"] = [int(x) for x in json.loads(out.get("source_run_ids") or "[]")]
@@ -1119,9 +1121,15 @@ def _normalize_consolidation(row: dict[str, Any] | None) -> dict[str, Any] | Non
         out["source_run_ids"] = []
     if out.get("findings_json"):
         try:
-            out["findings"] = json.loads(out["findings_json"])
+            raw = json.loads(out["findings_json"])
         except json.JSONDecodeError:
-            out["findings"] = []
+            raw = []
+        # Read path: coerce taxonomy tokens but preserve stored origin/human_edited.
+        out["findings"] = [
+            normalize_finding(f, default_origin="model")
+            for f in raw
+            if isinstance(f, dict)
+        ]
     else:
         out["findings"] = []
     return out
@@ -1132,22 +1140,35 @@ def replace_findings(
     run_id: int,
     findings: list[dict[str, Any]],
 ) -> None:
+    from lazyreview.findings_taxonomy import normalize_findings_list
+
+    normalized = normalize_findings_list(findings, default_origin="model")
     conn.execute("DELETE FROM findings WHERE run_id = ?", (run_id,))
-    for f in findings:
+    for f in normalized:
+        external_id = f.get("external_id") or f.get("id")
+        if not external_id:
+            continue
         conn.execute(
             """
-            INSERT INTO findings (run_id, external_id, severity, title, body, path, line, disposition, raw_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO findings (
+              run_id, external_id, severity, title, body, path, line, disposition,
+              category, labels_json, origin, human_edited, raw_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
-                f["external_id"],
-                f["severity"],
-                f["title"],
+                str(external_id),
+                int(f["severity"]),
+                f.get("title") or "",
                 f.get("body", ""),
                 f.get("path"),
                 f.get("line"),
                 f.get("disposition"),
+                f.get("category") or "quality",
+                json.dumps(list(f.get("labels") or [])),
+                f.get("origin") or "model",
+                1 if f.get("human_edited") else 0,
                 json.dumps(f.get("raw") or f),
             ),
         )
@@ -1155,12 +1176,35 @@ def replace_findings(
 
 
 def list_findings(conn: sqlite3.Connection, run_id: int) -> list[dict[str, Any]]:
-    return rows_to_list(
+    from lazyreview.findings_taxonomy import normalize_finding
+
+    rows = rows_to_list(
         conn.execute(
             "SELECT * FROM findings WHERE run_id = ? ORDER BY severity ASC, id ASC",
             (run_id,),
         ).fetchall()
     )
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        labels_raw = item.get("labels_json")
+        try:
+            labels = json.loads(labels_raw) if labels_raw else []
+        except (TypeError, json.JSONDecodeError):
+            labels = []
+        item["labels"] = labels if isinstance(labels, list) else []
+        norm = normalize_finding(item, default_origin=str(item.get("origin") or "model"))
+        item.update(
+            {
+                "severity": norm["severity"],
+                "category": norm["category"],
+                "labels": norm["labels"],
+                "origin": norm["origin"],
+                "human_edited": bool(norm["human_edited"]),
+            }
+        )
+        out.append(item)
+    return out
 
 
 def create_feedback_action(
@@ -2660,13 +2704,21 @@ def mark_all_notifications_read(conn: sqlite3.Connection) -> int:
 def _normalize_chat_session(row: dict[str, Any] | None) -> dict[str, Any] | None:
     if row is None:
         return None
+    from lazyreview.findings_taxonomy import normalize_finding
+
     out = dict(row)
     raw = out.get("working_findings_json")
     if raw:
         try:
-            out["working_findings"] = json.loads(raw)
+            parsed = json.loads(raw)
         except json.JSONDecodeError:
-            out["working_findings"] = []
+            parsed = []
+        # Read path: coerce taxonomy tokens but preserve stored origin/human_edited.
+        out["working_findings"] = [
+            normalize_finding(f, default_origin="model")
+            for f in parsed
+            if isinstance(f, dict)
+        ]
     else:
         out["working_findings"] = []
     return out

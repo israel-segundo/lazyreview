@@ -94,9 +94,12 @@ Instructions:
 4. Write findings to this exact file (markdown) — create/overwrite it:
    {findings_path}
    Use sections like:
-   ## F1 — [High] short title
+   ## F1 — [High] [correctness:bug] short title
    - what the gap is and the cheapest fix
    - ground it in a file:line or test/CI evidence
+   Severity: High|Medium|Low. Category (closed): correctness|security|architecture|quality|housekeeping.
+   Labels (closed, under category): bug,edge-case | security,compliance | arch-gap,scalability |
+   test,performance,maintainability | docs,nit,cleanup. Do not invent categories/labels.
 5. Also write an HTML report to:
    {report_path}
 6. Do NOT post comments to GitHub. Do NOT approve or request changes. Do NOT ask the user anything — this is a batch run.

@@ -19,7 +19,8 @@ confirm before posting.
   intent, coverage, diagrams). Use it for context. If it is only a stub saying analysis
   is missing, say so once and proceed from the findings alone.
 - `findings-by-run.json` — array of `{ run, findings[] }` from selected review runs
-  (`run.agent`, `run.model`, `run.effort`; findings have `severity` 1|2|3)
+  (`run.agent`, `run.model`, `run.effort`; findings have `severity` 1|2|3 plus optional
+  `category` / `labels` from the closed taxonomy below)
 - `pr.json` — PR metadata (`url`, `owner`, `repo`, `number`, `title`, `head_sha`, …)
 - `pr-comments.json` — optional snapshot of comments (may be stale or empty)
 
@@ -77,7 +78,8 @@ allows (new head, remaining gaps, or re-check) — do not invent history you can
 1. **Across runs:** merge equivalent findings (same underlying gap). Prefer higher
    severity and stronger evidence (file:line, test/CI). Remint stable IDs as
    `C1`, `C2`, … ordered by severity (High → Medium → Low). Severity: 1 = S1/High,
-   2 = S2/Medium, 3 = S3/Low.
+   2 = S2/Medium, 3 = S3/Low. Carry forward / choose the best `category` + `labels`
+   from the closed taxonomy (do not invent new ones).
 2. **Against existing PR feedback (from `gh`):** if a finding is already covered by an
    unresolved human comment/review (title/claim overlap or same path+issue):
    - **S1 / S2 (High / Medium):** do **not** put it in the main findings list. Record it
@@ -107,6 +109,27 @@ when the claim anchors to a changed line (inline comments use them at post time)
 
 Do **not** post. Only recommend. Put the choice in `meta.json` (below).
 
+## Finding taxonomy (closed — required)
+
+Use **only** these values. The server will coerce anything else; improvised categories
+will be dropped.
+
+| Category | Labels | Typical action |
+| --- | --- | --- |
+| `correctness` | `bug`, `edge-case` | Must fix before merge (blocking) |
+| `security` | `security`, `compliance` | High priority; security sign-off |
+| `architecture` | `arch-gap`, `scalability` | Discussion; may need refactor task |
+| `quality` | `test`, `performance`, `maintainability` | Standard feedback; blocks if critical |
+| `housekeeping` | `docs`, `nit`, `cleanup` | Non-blocking or quick wins |
+
+| Severity | Definition | Action |
+| --- | --- | --- |
+| **1 / High** | Critical defect, security issue, or merge blocker | Fix before merge |
+| **2 / Medium** | Real gap; may compromise ACs or quality | Fix soon / fast-follow |
+| **3 / Low** | Nit, docs, cleanup | Author's call / non-blocking |
+
+Set `origin` to `"model"` on every kept finding (humans may later edit via challenge).
+
 ## Output files (required)
 
 1. Write the **internal consensus report** markdown to exactly:
@@ -114,7 +137,7 @@ Do **not** post. Only recommend. Put the choice in `meta.json` (below).
 2. Write machine-readable kept findings to exactly:
    `{findings_json_path}`
    as a JSON array of objects (main findings only — not the already-addressed duplicates):
-   `{ "id", "severity" (1|2|3), "title", "body", "path"?, "line"?, "disposition"? }`
+   `{ "id", "severity" (1|2|3), "category", "labels" (string[]), "title", "body", "path"?, "line"?, "disposition"?, "origin": "model" }`
 3. Write recommendation metadata to exactly:
    `{meta_json_path}`
    as a JSON object:
@@ -142,15 +165,16 @@ radius if any. On a 2nd+ pass, say so in plain language.
 (new / not already covered by humans):
 
 ```
-**C1 · High — bold one-line claim.** Evidence and failure mode, grounded in a file:line,
-a test name, or a CI line. _Fix before merge._
+**C1 · High · correctness/bug — bold one-line claim.** Evidence and failure mode, grounded
+in a file:line, a test name, or a CI line. _Fix before merge._
 
-**C2 · Low — bold one-line claim.** Evidence, cheapest fix. _Author's call._
+**C2 · Low · housekeeping/nit — bold one-line claim.** Evidence, cheapest fix. _Author's call._
 ```
 
-Lead with `**C<n> · <Severity> — <claim>.**`, then **at most three sentences**, then
-disposition in italics (`_Fix before merge._`, `_Fast-follow._`, `_Author's call._`,
-`_Out of scope._`). Order by severity. Never put finding write-ups in a markdown table.
+Lead with `**C<n> · <Severity> · <category>/<label> — <claim>.**` (omit `/<label>` when
+no labels), then **at most three sentences**, then disposition in italics
+(`_Fix before merge._`, `_Fast-follow._`, `_Author's call._`, `_Out of scope._`). Order by
+severity. Never put finding write-ups in a markdown table.
 
 **4. Already addressed (REQUIRED when any S1/S2 duplicates exist; omit the whole
 section if none).** After the main findings list. Only **S1 and S2** agent findings

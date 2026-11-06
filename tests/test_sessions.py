@@ -92,7 +92,7 @@ def test_schema_has_chat_tables(tmp_path: Path):
     conn = connect(db)
     init_db(conn)
     ver = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert ver == SCHEMA_VERSION == 27
+    assert ver == SCHEMA_VERSION == 29
     tables = {
         r["name"]
         for r in conn.execute(
@@ -359,6 +359,65 @@ def test_round_persists_body_and_guidance_from_trailer(tmp_path: Path):
     assert updated.get("working_publish_guidance") == "Keep it short."
     assert updated.get("working_recommended_action") == "approve"
     assert int((updated.get("working_findings") or [{}])[0].get("severity") or 0) == 3
+
+
+def test_challenge_trailer_normalizes_taxonomy_and_provenance(tmp_path: Path):
+    conn = _conn(tmp_path)
+    settings = _settings(tmp_path)
+    settings.ensure_dirs()
+    _, consol, _work = _pr_and_consol(conn, tmp_path)
+    runner = SessionRunner(settings, conn)
+    session = runner.create_challenge_session(int(consol["id"]))
+    sid = int(session["id"])
+
+    assistant = (
+        "Adjusted.\n\n"
+        "```json\n"
+        '{"working_findings":['
+        '{"id":"C1","severity":"High","category":"reliability","labels":["bug","ux"],'
+        '"title":"Broken","body":"Still real."},'
+        '{"id":"C2","severity":3,"category":"housekeeping","labels":["nit"],'
+        '"title":"Spacing","body":"minor"}'
+        '],'
+        '"recommended_action":"request_changes",'
+        '"recommended_action_rationale":"kept S1"}\n'
+        "```"
+    )
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    cm = MagicMock()
+    cm.__enter__.return_value = wt
+    cm.__exit__.return_value = None
+    with (
+        patch.object(runner, "_run_proc", return_value=0),
+        patch.object(runner, "_build_command", return_value=(["true"], None)),
+        patch("lazyreview.services.session_jobs.hold_worktree", return_value=cm),
+        patch(
+            "lazyreview.services.session_jobs._extract_assistant_text",
+            return_value=assistant,
+        ),
+    ):
+        result = runner.send_message(sid, "keep C1, add a nit")
+
+    findings = result["session"].get("working_findings") or []
+    assert len(findings) == 2
+    c1 = next(f for f in findings if f.get("id") == "C1")
+    c2 = next(f for f in findings if f.get("id") == "C2")
+    assert c1["origin"] == "model"
+    assert c1["human_edited"] is True  # severity/title/body or taxonomy changed vs seed
+    assert c1["category"] == "correctness"
+    assert c1["labels"] == ["bug"]
+    assert c1["severity"] == 1
+    assert c2["origin"] == "human"
+    assert c2["category"] == "housekeeping"
+    assert c2["labels"] == ["nit"]
+
+    applied = runner.apply_findings(sid)
+    consol_findings = (applied.get("consolidation") or {}).get("findings") or []
+    assert len(consol_findings) == 2
+    assert all(f.get("category") in {
+        "correctness", "security", "architecture", "quality", "housekeeping"
+    } for f in consol_findings)
 
 
 def test_is_apply_findings_command():

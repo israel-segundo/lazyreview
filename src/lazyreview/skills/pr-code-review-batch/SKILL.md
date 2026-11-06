@@ -155,11 +155,27 @@ Walk `references/safety-scan.md` dimensions that the diff can reach. Append to
 `$FINDINGS_PATH` as you go:
 
 ```
-## F<n> — [High|Medium|Low] short title
+## F<n> — [High|Medium|Low] [category:label,...] short title
 - what the gap is, the failure mode, and the cheapest fix
 - ground it in a file:line, test name, CI/plan line, or doc rule
 - if it overlaps existing reviews, note "already raised by <reviewer>"
 ```
+
+**Taxonomy (closed vocabulary only — do not invent categories or labels):**
+
+| Category | Labels |
+| --- | --- |
+| `correctness` | `bug`, `edge-case` |
+| `security` | `security`, `compliance` |
+| `architecture` | `arch-gap`, `scalability` |
+| `quality` | `test`, `performance`, `maintainability` |
+| `housekeeping` | `docs`, `nit`, `cleanup` |
+
+| Severity | Meaning |
+| --- | --- |
+| **High** | Critical defect / security / merge blocker — must fix before merge |
+| **Medium** | Real gap; fix soon or fast-follow; may block if it compromises ACs |
+| **Low** | Nit / docs / cleanup — non-blocking or quick win |
 
 Zero findings is valid — leave a short note at the top of `$FINDINGS_PATH` that the
 scan completed with nothing to raise.
@@ -168,7 +184,7 @@ scan completed with nothing to raise.
 
 **Mandatory. This is the end of the run.**
 
-1. Finalize `$FINDINGS_PATH` (stable IDs, severities, dispositions).
+1. Finalize `$FINDINGS_PATH` (stable IDs, severities, category/labels, dispositions).
 2. Render `$REPORT_PATH` from `references/findings-report-template.html` (or equivalent)
    per `references/report-format.md` table sections: header, central claim, verified,
    existing reviews (stale-scan note), findings table, raised-by-others (even if empty).

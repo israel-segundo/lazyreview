@@ -225,8 +225,16 @@
                   <div class="lr-finding-title">
                     <span class="lr-finding-id" x-show="f.external_id" x-text="f.external_id"></span><span x-show="f.external_id"> </span><span x-html="renderedFindingTitle(f, idx)"></span>
                   </div>
-                  <span class="lr-finding-sev" :class="findingSeverityClass(f.severity)"
-                        x-text="findingSeverityLabel(f.severity)"></span>
+                  <div class="lr-finding-meta" :title="findingTaxonomyTitle(f)">
+                    <span class="lr-finding-sev" :class="findingSeverityClass(f.severity)"
+                          x-text="findingSeverityLabel(f.severity)"></span>
+                    <span class="lr-finding-cat" x-show="findingCategoryLabel(f)"
+                          x-text="findingCategoryLabel(f)"></span>
+                    <span class="lr-finding-origin"
+                          :class="findingOriginClass(f)"
+                          x-show="findingOriginLabel(f)"
+                          x-text="findingOriginLabel(f)"></span>
+                  </div>
                 </div>
                 <div class="lr-finding-path"
                      x-show="f.path"
@@ -391,6 +399,47 @@ function runDetail(runId) {
       if (label === 'High') return 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200';
       if (label === 'Medium') return 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200';
       return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+    },
+    findingLabels(f) {
+      const raw = f && (f.labels || f.Labels);
+      if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
+      if (typeof raw === 'string' && raw.trim()) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+        } catch (e) { /* ignore */ }
+        return raw.split(/[,;]/).map(s => s.trim()).filter(Boolean);
+      }
+      return [];
+    },
+    findingCategoryLabel(f) {
+      const cat = String((f && (f.category || f.Category)) || '').trim();
+      const labs = this.findingLabels(f);
+      if (cat && labs.length) return cat + '/' + labs[0];
+      if (cat) return cat;
+      if (labs.length) return labs[0];
+      return '';
+    },
+    findingOriginLabel(f) {
+      const origin = String((f && (f.origin || f.Origin)) || '').trim().toLowerCase();
+      if (origin === 'human' || origin === 'model') return origin;
+      return '';
+    },
+    findingOriginClass(f) {
+      const origin = this.findingOriginLabel(f);
+      const edited = !!(f && (f.human_edited || f.humanEdited));
+      return { 'is-human': origin === 'human', 'is-edited': edited && origin === 'model' };
+    },
+    findingTaxonomyTitle(f) {
+      const parts = [];
+      const cat = String((f && (f.category || f.Category)) || '').trim();
+      const labs = this.findingLabels(f);
+      if (cat) parts.push('category: ' + cat);
+      if (labs.length) parts.push('labels: ' + labs.join(', '));
+      const origin = this.findingOriginLabel(f);
+      if (origin) parts.push('origin: ' + origin);
+      if (f && (f.human_edited || f.humanEdited)) parts.push('human edited');
+      return parts.join(' · ');
     },
     findingsForTab(tab) {
       const label = tab || this.findingsTab || 'High';

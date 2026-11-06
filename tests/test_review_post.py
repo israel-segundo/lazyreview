@@ -21,6 +21,7 @@ from lazyreview.services.review_post import (
     build_github_post_plan,
     build_review_comments,
     count_inline_post_plan,
+    ensure_publish_sources_disclosure,
     filter_comments_for_changed_paths,
     finding_is_blocking,
     inline_comment_body,
@@ -28,7 +29,10 @@ from lazyreview.services.review_post import (
     parse_findings_list,
     partition_findings_for_github_post,
     recommended_action_from_findings,
+    resolve_source_runs_label,
+    source_runs_label_from_dedup_summary,
     split_findings_for_post,
+    write_source_runs_file,
 )
 
 
@@ -115,7 +119,7 @@ def test_merge_summary_findings_appends_off_diff():
         changed_paths=frozenset({"app/page.tsx"}),
     )
     assert n == 1
-    assert "**C1 · Medium — Server gap.**" in body
+    assert "**C1 · Medium · quality — Server gap.**" in body
     assert "not on this PR's diff" in body
 
 
@@ -167,10 +171,58 @@ def test_split_and_inline_bodies():
             "path": "a.py",
             "line": 10,
             "side": "RIGHT",
-            "body": "**C1** — bad guard. Wrong branch.",
+            "body": "**C1 · Medium · quality** — bad guard. Wrong branch.",
         }
     ]
-    assert inline_comment_body({"id": "C9", "title": "t"}).startswith("**C9** —")
+    assert inline_comment_body({"id": "C9", "title": "t"}).startswith(
+        "**C9 · Medium · quality** —"
+    )
+    tax_body = inline_comment_body(
+        {
+            "id": "C1",
+            "severity": 1,
+            "category": "correctness",
+            "labels": ["bug"],
+            "title": "broken",
+            "body": "fails on empty input.",
+        }
+    )
+    assert tax_body.startswith("**C1 · High · correctness/bug** —")
+
+
+def test_ensure_publish_sources_disclosure_adds_brief_line_and_tag():
+    body = "## Review\n\nApproved.\n"
+    out = ensure_publish_sources_disclosure(body, "claude/opus/high, agy/gemini/high")
+    assert "`claude/opus/high, agy/gemini/high`" in out
+    assert "<!-- lazyreview-sources: claude/opus/high, agy/gemini/high -->" in out
+
+
+def test_ensure_publish_sources_disclosure_keeps_prose_adds_tag():
+    body = (
+        "## Review\n\nApproved.\n\n"
+        "> **How this was produced:** Orchestrated agentic code review — "
+        "`claude/opus/high`.\n"
+    )
+    out = ensure_publish_sources_disclosure(body, "claude/opus/high")
+    assert out.count("How this was produced") == 1
+    assert "<!-- lazyreview-sources: claude/opus/high -->" in out
+
+
+def test_resolve_source_runs_label_prefers_workdir(tmp_path: Path):
+    write_source_runs_file(tmp_path, "claude/opus/high")
+    assert (
+        resolve_source_runs_label(
+            work_dir=tmp_path,
+            dedup_summary="Consolidated 1 runs → 2 findings (other/model/low)",
+        )
+        == "claude/opus/high"
+    )
+    assert (
+        source_runs_label_from_dedup_summary(
+            "Consolidated 2 runs → 1 findings (claude/opus/high, agy/g/high)"
+        )
+        == "claude/opus/high, agy/g/high"
+    )
 
 
 def test_parse_findings_list():
@@ -543,7 +595,7 @@ def test_post_sends_inline_comments(tmp_path: Path):
     assert len(captured["args"]["comments"]) == 1
     assert captured["args"]["comments"][0]["path"] == "src/a.py"
     assert captured["args"]["comments"][0]["line"] == 12
-    assert "**C1**" in captured["args"]["comments"][0]["body"]
+    assert "**C1 · Medium · quality**" in captured["args"]["comments"][0]["body"]
 
 
 def test_post_appends_off_diff_finding_to_body(tmp_path: Path):
@@ -662,6 +714,6 @@ def test_post_appends_off_diff_finding_to_body(tmp_path: Path):
             data = res.json()
             assert data["inline_comments"] == 1
 
-    assert "**C1 · Medium — Off diff.**" in captured["body"]
+    assert "**C1 · Medium · quality — Off diff.**" in captured["body"]
     assert len(captured["comments"]) == 1
     assert captured["comments"][0]["path"] == "src/a.py"

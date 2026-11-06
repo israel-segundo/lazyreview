@@ -20,7 +20,8 @@ evidence you checked.
 
 ### Write and open
 
-1. Finish `$WORK/findings.md` with stable IDs (`F1`, `F2`, …), severities, and dispositions.
+1. Finish `$WORK/findings.md` with stable IDs (`F1`, `F2`, …), severities, closed-set
+   category/labels (see skill Step 6), and dispositions.
 2. Render `$WORK/findings-report.html` from `references/findings-report-template.html` (copy
    the template into `$WORK` and fill placeholders) or write equivalent HTML that meets the
    table spec below.
@@ -157,9 +158,9 @@ what the findings are about, and which (if any) touch its purpose or blast radiu
 IDs, severity and disposition folded into the text:
 
 ```
-**F1 · High — bold one-line claim.** Then the evidence and failure mode, grounded in a file:line, a test name, or a CI line. _Fix before merge._
+**F1 · High · correctness/bug — bold one-line claim.** Then the evidence and failure mode, grounded in a file:line, a test name, or a CI line. _Fix before merge._
 
-**F2 · Low — bold one-line claim.** Evidence, failure mode, cheapest fix. _Author's call._
+**F2 · Low · housekeeping/nit — bold one-line claim.** Evidence, failure mode, cheapest fix. _Author's call._
 ```
 
 **Never put findings in a markdown table on GitHub — this is the formatting rule that
