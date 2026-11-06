@@ -1182,14 +1182,21 @@
                 </button>
               </div>
 
-              <label class="mt-4 flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/60">
-                <span class="text-sm font-medium text-slate-800 dark:text-slate-200">Use in dropdowns</span>
-                <input type="checkbox"
-                       class="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500 dark:border-slate-600 dark:bg-slate-800"
-                       :checked="!!agentEnabled[p.id]"
-                       @change="toggleAgentEnabled(p.id, $event.target.checked)"
-                       :disabled="!!enabledBusy[p.id]" />
-              </label>
+              <div class="mt-4 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/60">
+                <span class="text-sm font-medium text-slate-800 dark:text-slate-200"
+                      :id="'agent-enabled-label-' + p.id">Use in dropdowns</span>
+                <button type="button"
+                        role="switch"
+                        :aria-checked="(!!agentEnabled[p.id]).toString()"
+                        :aria-labelledby="'agent-enabled-label-' + p.id"
+                        :disabled="!!enabledBusy[p.id]"
+                        @click="toggleAgentEnabled(p.id, !agentEnabled[p.id])"
+                        class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full bg-slate-300 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-600"
+                        :class="agentEnabled[p.id] ? 'bg-blue-600 dark:bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'">
+                  <span class="pointer-events-none inline-block h-5 w-5 translate-x-0.5 rounded-full bg-white shadow transition duration-200"
+                        :class="agentEnabled[p.id] ? 'translate-x-5' : 'translate-x-0.5'"></span>
+                </button>
+              </div>
               <p class="mt-1 text-xs text-slate-500 dark:text-slate-400"
                  x-show="enabledMsgs[p.id]" x-text="enabledMsgs[p.id]"></p>
 

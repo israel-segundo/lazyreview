@@ -19,6 +19,15 @@ from lazyreview.agents.base import (
 from lazyreview.agents.names import AgentName
 from lazyreview.services.cost import extract_cost_usd_from_json
 
+# Cursor's full --list-models catalog includes premium third-party models that
+# bill extra. Only surface the included Composer / Grok families in UI pickers.
+_ALLOWED_CURSOR_MODEL_PREFIXES = ("composer", "grok", "cursor-grok")
+
+
+def _is_allowed_cursor_model(model_id: str) -> bool:
+    mid = (model_id or "").strip().lower()
+    return mid.startswith(_ALLOWED_CURSOR_MODEL_PREFIXES)
+
 
 class CursorAdapter:
     name = AgentName.CURSOR.value
@@ -48,10 +57,15 @@ class CursorAdapter:
                 continue
             if " - " in line:
                 mid, label = line.split(" - ", 1)
+                mid = mid.strip()
+                if not _is_allowed_cursor_model(mid):
+                    continue
                 # Cursor model IDs already encode effort/variant (e.g. composer-2.5-fast).
                 # Do not offer a separate effort axis — appending -[effort] invents invalid IDs.
-                models.append(ModelInfo(id=mid.strip(), label=label.strip(), efforts=[]))
+                models.append(ModelInfo(id=mid, label=label.strip(), efforts=[]))
             else:
+                if not _is_allowed_cursor_model(line):
+                    continue
                 models.append(ModelInfo(id=line, label=line, efforts=[]))
         return models
 
