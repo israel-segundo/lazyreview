@@ -1435,10 +1435,18 @@
 
       <p class="mt-3 text-sm text-red-600 dark:text-red-400" x-show="batchMessage" x-text="batchMessage"></p>
       <div class="mt-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
-        <button type="button" @click="addBatchRow()" :disabled="batchBusy || batchRows.length >= 20"
-                class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
-          Add run
-        </button>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" @click="addBatchRow()" :disabled="batchBusy || batchRows.length >= 20"
+                  class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+            Add run
+          </button>
+          <button type="button" @click="randomizeBatchRows()"
+                  :disabled="batchBusy || !batchCanRandomize()"
+                  title="One run per enabled agent, with a random model and effort"
+                  class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+            Randomize
+          </button>
+        </div>
         <div class="flex gap-2">
           <button type="button" @click="closeBatchModal()" :disabled="batchBusy"
                   class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
@@ -2797,6 +2805,53 @@ function reviewForm() {
     removeBatchRow(idx) {
       this.batchCloseCombo();
       this.batchRows.splice(idx, 1);
+    },
+    _pickRandom(arr) {
+      if (!arr || !arr.length) return null;
+      return arr[Math.floor(Math.random() * arr.length)];
+    },
+    _selectableAgentsForBatch() {
+      return (this.agents || []).filter(
+        a => this.agentSelectable(a) && Array.isArray(a.models) && a.models.length
+      );
+    },
+    batchCanRandomize() {
+      return this._agentsReady && this._selectableAgentsForBatch().length > 0;
+    },
+    randomizeBatchRows() {
+      if (this.batchBusy || !this.batchCanRandomize()) return;
+      const agents = this._selectableAgentsForBatch();
+      if (!agents.length) {
+        this.batchMessage = 'No enabled agents with models available to randomize.';
+        return;
+      }
+      this.batchCloseCombo();
+      this.batchMessage = '';
+      // Exactly one run per enabled (selectable) agent; only model/effort vary.
+      this.batchRows = agents.map(a => {
+        const row = {
+          key: this._batchKeySeq++,
+          agent: a.name,
+          model: '',
+          effort: null,
+          models: [],
+          efforts: [],
+          agentQuery: '',
+          modelQuery: '',
+          effortQuery: '',
+        };
+        this._batchApplyAgent(row, false);
+        const model = this._pickRandom(row.models);
+        if (model) {
+          row.model = model.id;
+          this._batchApplyModel(row, true);
+          if (row.efforts.length) {
+            row.effort = this._pickRandom(row.efforts);
+          }
+        }
+        this.batchSyncQueriesForRow(row);
+        return row;
+      });
     },
     _batchApplyAgent(row, resetModel) {
       const a = this.agents.find(x => x.name === row.agent);
