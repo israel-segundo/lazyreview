@@ -11,6 +11,8 @@ from lazyreview.config import Settings
 from lazyreview.db import (
     NOTIFICATION_KIND_ANALYSIS,
     NOTIFICATION_KIND_CONSOLIDATION,
+    NOTIFICATION_KIND_PR_NEEDS_REREVIEW,
+    NOTIFICATION_KIND_PR_NEEDS_REVIEW,
     NOTIFICATION_KIND_RUN,
     count_unread_notifications,
     create_consolidation,
@@ -21,6 +23,7 @@ from lazyreview.db import (
     mark_all_notifications_read,
     mark_notification_read,
     mark_notifications_read_for_pr,
+    mark_consolidation_feedback_provided,
     record_analysis_finished_event,
     update_consolidation,
     update_pr_analysis,
@@ -70,13 +73,14 @@ def _pr(conn):
 def test_schema_has_notifications(tmp_path: Path):
     conn = _conn(tmp_path)
     ver = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert ver == SCHEMA_VERSION == 30
+    assert ver == SCHEMA_VERSION == 31
     cols = {
         r["name"] for r in conn.execute("PRAGMA table_info(notifications)").fetchall()
     }
     assert "kind" in cols
     assert "read_at" in cols
     assert "run_id" in cols
+    assert "head_sha" in cols
     conn.close()
 
 
@@ -163,8 +167,98 @@ def test_analysis_and_consolidation_notifications(tmp_path: Path):
         conn, int(consol["id"]), status="succeeded", finished_at=utcnow()
     )
     assert count_unread_notifications(conn) == 2
-    kinds = {n["kind"] for n in list_notifications(conn)["items"]}
+    items = list_notifications(conn)["items"]
+    kinds = {n["kind"] for n in items}
     assert NOTIFICATION_KIND_CONSOLIDATION in kinds
+    consol_n = next(n for n in items if n["kind"] == NOTIFICATION_KIND_CONSOLIDATION)
+    assert consol_n["title"] == "Findings ready for GitHub"
+    assert consol_n["desktop"] is True
+    conn.close()
+
+
+def test_pr_needs_review_and_rereview_notifications(tmp_path: Path):
+    conn = _conn(tmp_path)
+    pr = upsert_pr(
+        conn,
+        owner="o",
+        repo="r",
+        number=99,
+        url="https://example.com/o/r/pull/99",
+        title="Queue me",
+        base_ref="main",
+        head_ref="feat",
+        head_sha="head1",
+        review_requested=True,
+    )
+    items = list_notifications(conn)["items"]
+    assert len(items) == 1
+    assert items[0]["kind"] == NOTIFICATION_KIND_PR_NEEDS_REVIEW
+    assert items[0]["title"] == "Needs review"
+    assert items[0]["desktop"] is True
+    assert items[0]["href"].endswith("?tab=overview")
+
+    # Same head must not duplicate.
+    upsert_pr(
+        conn,
+        owner="o",
+        repo="r",
+        number=99,
+        url="https://example.com/o/r/pull/99",
+        title="Queue me",
+        base_ref="main",
+        head_ref="feat",
+        head_sha="head1",
+        review_requested=True,
+    )
+    assert count_unread_notifications(conn) == 1
+
+    run_cur = conn.execute(
+        """
+        INSERT INTO review_runs (pr_id, status, agent, model, head_sha, workdir_path)
+        VALUES (?, 'succeeded', 'claude', 'opus', 'head1', ?)
+        """,
+        (pr["id"], str(tmp_path / "rw")),
+    )
+    conn.commit()
+    consol = create_consolidation(
+        conn,
+        pr_id=pr["id"],
+        head_sha="head1",
+        source_run_ids=[int(run_cur.lastrowid)],
+        agent="claude",
+        model="haiku",
+        effort="low",
+        workdir_path=str(tmp_path / "c"),
+    )
+    update_consolidation(
+        conn, int(consol["id"]), status="succeeded", finished_at=utcnow()
+    )
+    mark_consolidation_feedback_provided(
+        conn, int(consol["id"]), gh_action="approve"
+    )
+
+    # New head after approve → needs re-review (plus consolidation finished).
+    upsert_pr(
+        conn,
+        owner="o",
+        repo="r",
+        number=99,
+        url="https://example.com/o/r/pull/99",
+        title="Queue me",
+        base_ref="main",
+        head_ref="feat",
+        head_sha="head2",
+        review_requested=True,
+    )
+    kinds = {n["kind"] for n in list_notifications(conn)["items"]}
+    assert NOTIFICATION_KIND_PR_NEEDS_REREVIEW in kinds
+    rereview = next(
+        n
+        for n in list_notifications(conn)["items"]
+        if n["kind"] == NOTIFICATION_KIND_PR_NEEDS_REREVIEW
+    )
+    assert rereview["title"] == "Needs re-review"
+    assert rereview["head_sha"] == "head2"
     conn.close()
 
 
@@ -259,7 +353,10 @@ def test_notifications_api(tmp_path: Path):
         with TestClient(app) as client:
             res = client.get("/api/notifications/unread-count")
             assert res.status_code == 200
-            assert res.json()["unread_count"] == 1
+            payload = res.json()
+            assert payload["unread_count"] == 1
+            assert "pr_needs_review" in payload["desktop_kinds"]
+            assert "consolidation_finished" in payload["desktop_kinds"]
 
             res = client.get("/api/notifications?limit=15")
             assert res.status_code == 200

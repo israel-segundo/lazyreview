@@ -43,7 +43,7 @@ def _conn(tmp_path: Path):
 def test_schema_seeds_agent_enabled(tmp_path: Path):
     conn = _conn(tmp_path)
     ver = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert ver == SCHEMA_VERSION == 30
+    assert ver == SCHEMA_VERSION == 31
     enabled = get_agent_enabled_map(conn)
     assert enabled["agy"] is True
     assert enabled["claude"] is True

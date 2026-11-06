@@ -1922,16 +1922,25 @@ function reviewForm() {
       return null;
     },
     markTabNotificationsRead() {
+      if (!this.prId) return;
       const kind = this.notificationKindForTab(this.tab);
-      if (!kind || !this.prId) return;
-      if (window.Alpine && Alpine.store('notifications')) {
-        Alpine.store('notifications').markPrRead(this.prId, kind);
-      } else {
-        fetch('/api/notifications/read-pr/' + this.prId, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ kind }),
-        }).catch(() => {});
+      const queueKinds = ['pr_needs_review', 'pr_needs_rereview'];
+      const kinds = [];
+      if (kind) kinds.push(kind);
+      for (const k of queueKinds) kinds.push(k);
+      const store = (window.Alpine && Alpine.store('notifications'))
+        ? Alpine.store('notifications')
+        : null;
+      for (const k of kinds) {
+        if (store) {
+          store.markPrRead(this.prId, k);
+        } else {
+          fetch('/api/notifications/read-pr/' + this.prId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: k }),
+          }).catch(() => {});
+        }
       }
     },
     initPrChrome() {

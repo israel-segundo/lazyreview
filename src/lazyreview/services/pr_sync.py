@@ -10,8 +10,10 @@ from typing import Any
 from lazyreview.db import (
     clear_feedback_for_head,
     clear_stale_review_requests,
+    get_pr,
     get_setting,
     list_stale_review_request_prs,
+    maybe_notify_pr_attention,
     pr_internal_status,
     pr_previously_approved,
     record_external_pr_review,
@@ -203,6 +205,14 @@ def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
                     invalidated += 1
                 if result["reactivated"]:
                     reactivated += 1
+                if result["invalidated"] or result["reactivated"]:
+                    fresh = get_pr(conn, int(pr["id"])) or pr
+                    maybe_notify_pr_attention(
+                        conn,
+                        fresh,
+                        invalidated=result["invalidated"],
+                        reactivated=result["reactivated"],
+                    )
             upserted.append(pr)
         except GhError as e:
             try:
@@ -269,11 +279,18 @@ def sync_pending_review_prs(conn: sqlite3.Connection) -> dict[str, Any]:
             # Re-read after clear_stale so review_requested reflects DB state.
             fresh = dict(pr)
             fresh["review_requested"] = 0
-            _accumulate(
-                _reconcile_github_review_state(
-                    conn, fresh, data, login=login, in_pending_queue=False
-                )
+            result = _reconcile_github_review_state(
+                conn, fresh, data, login=login, in_pending_queue=False
             )
+            _accumulate(result)
+            if result["invalidated"] or result["reactivated"]:
+                current = get_pr(conn, int(pr["id"])) or fresh
+                maybe_notify_pr_attention(
+                    conn,
+                    current,
+                    invalidated=result["invalidated"],
+                    reactivated=result["reactivated"],
+                )
 
     # Re-fetch every remaining open local PR so merged/closed GitHub state
     # lands even when review_requested was already cleared (e.g. after an

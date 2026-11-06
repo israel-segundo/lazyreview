@@ -143,6 +143,32 @@
                       :disabled="!$store.notifications.unreadCount"
                       @click="$store.notifications.markAllRead()">Mark all as read</button>
             </div>
+            <div x-show="$store.notifications.desktopSupported && $store.notifications.permission !== 'granted'"
+                 x-cloak
+                 class="border-b border-amber-100 bg-amber-50 px-3 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/40">
+              <p class="text-xs text-amber-900 dark:text-amber-100">
+                Enable desktop notifications for new PRs and ready findings.
+              </p>
+              <button type="button"
+                      class="mt-1.5 text-xs font-medium text-sky-700 hover:underline dark:text-sky-300"
+                      @click="$store.notifications.enableDesktop()">
+                Allow browser notifications
+              </button>
+            </div>
+            <div x-show="$store.notifications.desktopSupported && $store.notifications.permission === 'granted'"
+                 x-cloak
+                 class="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 dark:border-slate-800">
+              <span class="text-xs text-slate-500 dark:text-slate-400">Desktop alerts</span>
+              <button type="button"
+                      role="switch"
+                      :aria-checked="($store.notifications.desktopEnabled).toString()"
+                      @click="$store.notifications.setDesktopEnabled(!$store.notifications.desktopEnabled)"
+                      class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full bg-slate-300 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-slate-600"
+                      :class="$store.notifications.desktopEnabled ? 'bg-blue-600 dark:bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'">
+                <span class="pointer-events-none inline-block h-4 w-4 translate-x-0.5 rounded-full bg-white shadow transition duration-200"
+                      :class="$store.notifications.desktopEnabled ? 'translate-x-4' : 'translate-x-0.5'"></span>
+              </button>
+            </div>
             <ul class="divide-y divide-slate-100 overflow-y-auto overscroll-contain dark:divide-slate-800">
               <template x-for="item in $store.notifications.items" :key="item.id">
                 <li>
@@ -314,12 +340,138 @@
         items: [],
         unreadCount: 0,
         loading: false,
+        desktopSupported: typeof window !== 'undefined' && 'Notification' in window,
+        permission: (typeof window !== 'undefined' && 'Notification' in window)
+          ? Notification.permission
+          : 'denied',
+        desktopEnabled: false,
         _timer: null,
         _loadedOnce: false,
+        _desktopPrimed: false,
+        _lastDesktopId: 0,
+        _desktopKinds: {
+          pr_needs_review: true,
+          pr_needs_rereview: true,
+          consolidation_finished: true,
+        },
         init() {
           var self = this;
+          self._loadDesktopPrefs();
           self.refreshCount();
           self._timer = setInterval(function () { self.refreshCount(); }, 15000);
+          if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', function () {
+              if (document.visibilityState === 'visible') self.refreshCount();
+            });
+          }
+        },
+        _lsGet(key, fallback) {
+          try {
+            var v = localStorage.getItem(key);
+            return v == null ? fallback : v;
+          } catch (_) {
+            return fallback;
+          }
+        },
+        _lsSet(key, value) {
+          try { localStorage.setItem(key, value); } catch (_) { /* ignore */ }
+        },
+        _loadDesktopPrefs() {
+          if (!this.desktopSupported) {
+            this.desktopEnabled = false;
+            return;
+          }
+          this.permission = Notification.permission;
+          this.desktopEnabled = this.permission === 'granted'
+            && this._lsGet('lr-desktop-notif', '1') !== '0';
+          this._lastDesktopId = parseInt(this._lsGet('lr-desktop-notif-last-id', '0'), 10) || 0;
+          this._desktopPrimed = this._lsGet('lr-desktop-notif-primed', '0') === '1';
+        },
+        setDesktopEnabled(on) {
+          this.desktopEnabled = !!on && this.permission === 'granted';
+          this._lsSet('lr-desktop-notif', this.desktopEnabled ? '1' : '0');
+          if (this.desktopEnabled) this.pollDesktop();
+        },
+        async enableDesktop() {
+          if (!this.desktopSupported) return false;
+          try {
+            var result = await Notification.requestPermission();
+            this.permission = result;
+            if (result !== 'granted') {
+              this.desktopEnabled = false;
+              this._lsSet('lr-desktop-notif', '0');
+              return false;
+            }
+            this.desktopEnabled = true;
+            this._lsSet('lr-desktop-notif', '1');
+            // Prime so existing unread items do not flood the OS tray.
+            await this.pollDesktop({ primeOnly: true });
+            return true;
+          } catch (_) {
+            return false;
+          }
+        },
+        _isDesktopWorthy(item) {
+          if (!item) return false;
+          if (typeof item.desktop === 'boolean') return item.desktop;
+          var kind = item.kind || '';
+          if (!this._desktopKinds[kind]) return false;
+          if (kind === 'consolidation_finished') {
+            return (item.status || '') === 'succeeded';
+          }
+          return true;
+        },
+        _showDesktop(item) {
+          if (!this.desktopSupported || this.permission !== 'granted') return;
+          if (!this.desktopEnabled || !this._isDesktopWorthy(item)) return;
+          try {
+            var n = new Notification(item.title || 'lazyreview', {
+              body: item.body || '',
+              tag: 'lazyreview-' + item.id,
+              renotify: false,
+            });
+            n.onclick = function () {
+              try { window.focus(); } catch (_) { /* ignore */ }
+              if (item.href) window.location.href = item.href;
+              try { n.close(); } catch (_) { /* ignore */ }
+            };
+          } catch (_) { /* ignore */ }
+        },
+        async pollDesktop(opts) {
+          var o = opts || {};
+          if (!this.desktopSupported || this.permission !== 'granted') return;
+          if (!this.desktopEnabled && !o.primeOnly) return;
+          try {
+            var res = await fetch('/api/notifications?unread_only=true&limit=25&offset=0');
+            if (!res.ok) return;
+            var data = await res.json();
+            var items = data.items || [];
+            var maxId = this._lastDesktopId;
+            for (var i = 0; i < items.length; i++) {
+              var item = items[i];
+              var id = Number(item.id || 0);
+              if (id > maxId) maxId = id;
+            }
+            if (o.primeOnly || !this._desktopPrimed) {
+              this._lastDesktopId = maxId;
+              this._desktopPrimed = true;
+              this._lsSet('lr-desktop-notif-last-id', String(this._lastDesktopId));
+              this._lsSet('lr-desktop-notif-primed', '1');
+              return;
+            }
+            // API returns newest-first; show oldest-first for natural order.
+            var fresh = items
+              .filter(function (it) {
+                return Number(it.id || 0) > this._lastDesktopId && this._isDesktopWorthy(it);
+              }.bind(this))
+              .slice()
+              .reverse();
+            for (var j = 0; j < fresh.length; j++) this._showDesktop(fresh[j]);
+            if (maxId > this._lastDesktopId) {
+              this._lastDesktopId = maxId;
+              this._lsSet('lr-desktop-notif-last-id', String(this._lastDesktopId));
+            }
+          } catch (_) { /* ignore */ }
         },
         badgeLabel() {
           var n = Number(this.unreadCount || 0);
@@ -338,7 +490,17 @@
             if (!res.ok) return;
             var data = await res.json();
             this.setUnread(data.unread_count || 0);
+            if (Array.isArray(data.desktop_kinds)) {
+              var map = {};
+              for (var i = 0; i < data.desktop_kinds.length; i++) {
+                map[data.desktop_kinds[i]] = true;
+              }
+              this._desktopKinds = map;
+            }
           } catch (_) { /* ignore */ }
+          if (this.desktopEnabled && this.permission === 'granted') {
+            await this.pollDesktop();
+          }
         },
         async loadPanel() {
           this.loading = true;

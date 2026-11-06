@@ -6,8 +6,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from lazyreview.db import (
+    DESKTOP_NOTIFICATION_KINDS,
     NOTIFICATION_KIND_ANALYSIS,
     NOTIFICATION_KIND_CONSOLIDATION,
+    NOTIFICATION_KIND_PR_NEEDS_REREVIEW,
+    NOTIFICATION_KIND_PR_NEEDS_REVIEW,
     NOTIFICATION_KIND_RUN,
     count_unread_notifications,
     get_notification,
@@ -30,6 +33,10 @@ _KIND_ALIASES = {
     "run_finished": NOTIFICATION_KIND_RUN,
     "consolidation": NOTIFICATION_KIND_CONSOLIDATION,
     "consolidation_finished": NOTIFICATION_KIND_CONSOLIDATION,
+    "pr_needs_review": NOTIFICATION_KIND_PR_NEEDS_REVIEW,
+    "pr_needs_rereview": NOTIFICATION_KIND_PR_NEEDS_REREVIEW,
+    "needs_review": NOTIFICATION_KIND_PR_NEEDS_REVIEW,
+    "needs_rereview": NOTIFICATION_KIND_PR_NEEDS_REREVIEW,
     # PR page tabs → notification kinds
     "overview": NOTIFICATION_KIND_ANALYSIS,
     "runs": NOTIFICATION_KIND_RUN,
@@ -71,7 +78,10 @@ def get_notifications(
 
 @router.get("/notifications/unread-count")
 def get_unread_count(request: Request):
-    return {"unread_count": count_unread_notifications(request.app.state.db)}
+    return {
+        "unread_count": count_unread_notifications(request.app.state.db),
+        "desktop_kinds": sorted(DESKTOP_NOTIFICATION_KINDS),
+    }
 
 
 @router.post("/notifications/{notification_id}/read")

@@ -257,6 +257,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   analysis_id INTEGER,
   run_id INTEGER,
   consolidation_id INTEGER,
+  head_sha TEXT NOT NULL DEFAULT '',
   agent TEXT,
   model TEXT,
   effort TEXT,
@@ -319,7 +320,7 @@ DEFAULT_SETTINGS = {
     # agent_enabled seeded in init_db (JSON map of agent → bool; default all true)
 }
 
-SCHEMA_VERSION = 30
+SCHEMA_VERSION = 31
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -474,6 +475,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   analysis_id INTEGER,
   run_id INTEGER,
   consolidation_id INTEGER,
+  head_sha TEXT NOT NULL DEFAULT '',
   agent TEXT,
   model TEXT,
   effort TEXT,
@@ -943,6 +945,17 @@ def init_db(conn: sqlite3.Connection) -> None:
             "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
             ("agent_enabled", enabled_json),
         )
+
+    if prev is not None and prev < 31:
+        # Dedup PR queue notifications per head_sha (needs review / re-review).
+        notif_cols = {
+            r["name"]
+            for r in conn.execute("PRAGMA table_info(notifications)").fetchall()
+        }
+        if "head_sha" not in notif_cols:
+            conn.execute(
+                "ALTER TABLE notifications ADD COLUMN head_sha TEXT NOT NULL DEFAULT ''"
+            )
 
     if prev is not None and prev < 10 and prompt_seed:
         conn.execute(

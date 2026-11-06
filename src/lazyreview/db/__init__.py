@@ -184,6 +184,7 @@ def upsert_pr(
     from lazyreview.services.lifecycle import on_pr_upserted
 
     on_pr_upserted(conn, pr, is_new=is_new)
+    maybe_notify_pr_attention(conn, pr, is_new=is_new, head_moved=head_moved)
     return pr
 
 
@@ -2297,11 +2298,24 @@ _JOB_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 NOTIFICATION_KIND_ANALYSIS = "analysis_finished"
 NOTIFICATION_KIND_RUN = "run_finished"
 NOTIFICATION_KIND_CONSOLIDATION = "consolidation_finished"
+NOTIFICATION_KIND_PR_NEEDS_REVIEW = "pr_needs_review"
+NOTIFICATION_KIND_PR_NEEDS_REREVIEW = "pr_needs_rereview"
 
 _NOTIFICATION_KINDS = frozenset(
     {
         NOTIFICATION_KIND_ANALYSIS,
         NOTIFICATION_KIND_RUN,
+        NOTIFICATION_KIND_CONSOLIDATION,
+        NOTIFICATION_KIND_PR_NEEDS_REVIEW,
+        NOTIFICATION_KIND_PR_NEEDS_REREVIEW,
+    }
+)
+
+# Kinds the browser should surface as OS desktop notifications when permitted.
+DESKTOP_NOTIFICATION_KINDS = frozenset(
+    {
+        NOTIFICATION_KIND_PR_NEEDS_REVIEW,
+        NOTIFICATION_KIND_PR_NEEDS_REREVIEW,
         NOTIFICATION_KIND_CONSOLIDATION,
     }
 )
@@ -2329,6 +2343,11 @@ def notification_href(row: dict[str, Any]) -> str:
         if cid and (row.get("status") or "") == "succeeded":
             return f"/prs/{pr_id}?tab=findings&consolidation={int(cid)}"
         return f"/prs/{pr_id}?tab=activity"
+    if kind in (
+        NOTIFICATION_KIND_PR_NEEDS_REVIEW,
+        NOTIFICATION_KIND_PR_NEEDS_REREVIEW,
+    ):
+        return f"/prs/{pr_id}?tab=overview"
     return f"/prs/{pr_id}"
 
 
@@ -2336,6 +2355,10 @@ def _notification_dict(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     d = dict(row)
     d["unread"] = not d.get("read_at")
     d["href"] = notification_href(d)
+    d["desktop"] = (d.get("kind") in DESKTOP_NOTIFICATION_KINDS) and (
+        d.get("kind") != NOTIFICATION_KIND_CONSOLIDATION
+        or (d.get("status") or "") == "succeeded"
+    )
     return d
 
 
@@ -2346,6 +2369,8 @@ def _notification_already_exists(
     analysis_id: int | None = None,
     run_id: int | None = None,
     consolidation_id: int | None = None,
+    pr_id: int | None = None,
+    head_sha: str | None = None,
 ) -> bool:
     if kind == NOTIFICATION_KIND_ANALYSIS and analysis_id is not None:
         row = conn.execute(
@@ -2377,6 +2402,19 @@ def _notification_already_exists(
             (kind, int(consolidation_id)),
         ).fetchone()
         return row is not None
+    if kind in (
+        NOTIFICATION_KIND_PR_NEEDS_REVIEW,
+        NOTIFICATION_KIND_PR_NEEDS_REREVIEW,
+    ) and pr_id is not None:
+        row = conn.execute(
+            """
+            SELECT 1 AS ok FROM notifications
+            WHERE kind = ? AND pr_id = ? AND COALESCE(head_sha, '') = ?
+            LIMIT 1
+            """,
+            (kind, int(pr_id), (head_sha or "").strip()),
+        ).fetchone()
+        return row is not None
     return False
 
 
@@ -2391,21 +2429,25 @@ def create_notification(
     analysis_id: int | None = None,
     run_id: int | None = None,
     consolidation_id: int | None = None,
+    head_sha: str | None = None,
     agent: str | None = None,
     model: str | None = None,
     effort: str | None = None,
     created_at: str | None = None,
     commit: bool = True,
 ) -> dict[str, Any] | None:
-    """Insert a job-finished notification. Dedupes per job id. Returns None if skipped."""
+    """Insert a notification. Dedupes per job id or PR+head for queue kinds."""
     if kind not in _NOTIFICATION_KINDS:
         return None
+    head = (head_sha or "").strip()
     if _notification_already_exists(
         conn,
         kind=kind,
         analysis_id=analysis_id,
         run_id=run_id,
         consolidation_id=consolidation_id,
+        pr_id=pr_id,
+        head_sha=head,
     ):
         return None
     when = created_at or utcnow()
@@ -2413,10 +2455,10 @@ def create_notification(
         """
         INSERT INTO notifications (
           kind, status, title, body, pr_id,
-          analysis_id, run_id, consolidation_id,
+          analysis_id, run_id, consolidation_id, head_sha,
           agent, model, effort, created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             kind,
@@ -2427,6 +2469,7 @@ def create_notification(
             int(analysis_id) if analysis_id is not None else None,
             int(run_id) if run_id is not None else None,
             int(consolidation_id) if consolidation_id is not None else None,
+            head,
             agent,
             model,
             effort,
@@ -2523,25 +2566,98 @@ def create_notification_for_consolidation(
     if (consolidation.get("agent") or "").strip().lower() == "external":
         return None
     pr = get_pr(conn, int(consolidation["pr_id"]))
-    verb = {
-        "succeeded": "finished",
-        "failed": "failed",
-        "cancelled": "cancelled",
-    }[status]
+    if status == "succeeded":
+        title = "Findings ready for GitHub"
+    else:
+        verb = {"failed": "failed", "cancelled": "cancelled"}[status]
+        title = f"Consolidation {verb}"
     return create_notification(
         conn,
         kind=NOTIFICATION_KIND_CONSOLIDATION,
         pr_id=int(consolidation["pr_id"]),
         status=status,
-        title=f"Consolidation {verb}",
+        title=title,
         body=_pr_notification_body(pr),
         consolidation_id=int(consolidation["id"]),
+        head_sha=(consolidation.get("head_sha") or None),
         agent=consolidation.get("agent") or None,
         model=consolidation.get("model") or None,
         effort=consolidation.get("effort") or None,
         created_at=consolidation.get("finished_at") or None,
         commit=commit,
     )
+
+
+def create_notification_for_pr_attention(
+    conn: sqlite3.Connection,
+    pr: dict[str, Any],
+    *,
+    rereview: bool,
+    commit: bool = True,
+) -> dict[str, Any] | None:
+    """Notify that a PR needs (re-)review for the current head."""
+    state = (pr.get("state") or "").lower()
+    if state and state != "open":
+        return None
+    kind = (
+        NOTIFICATION_KIND_PR_NEEDS_REREVIEW
+        if rereview
+        else NOTIFICATION_KIND_PR_NEEDS_REVIEW
+    )
+    title = "Needs re-review" if rereview else "Needs review"
+    return create_notification(
+        conn,
+        kind=kind,
+        pr_id=int(pr["id"]),
+        status="needs_review",
+        title=title,
+        body=_pr_notification_body(pr),
+        head_sha=(pr.get("head_sha") or None),
+        commit=commit,
+    )
+
+
+def maybe_notify_pr_attention(
+    conn: sqlite3.Connection,
+    pr: dict[str, Any],
+    *,
+    is_new: bool = False,
+    head_moved: bool = False,
+    reactivated: bool = False,
+    invalidated: bool = False,
+    commit: bool = True,
+) -> dict[str, Any] | None:
+    """
+    Create a PR queue notification when attention is newly required.
+
+    - New open PR with a review request → needs review
+    - New head after a prior approval, or GitHub dismissal / reactivation → re-review
+    """
+    if not pr or not pr.get("id"):
+        return None
+    state = (pr.get("state") or "").lower()
+    if state and state != "open":
+        return None
+    if not int(pr.get("review_requested") or 0):
+        return None
+    status = pr_internal_status(conn, pr)["status"]
+    if status != "needs_review":
+        return None
+    prior = pr_previously_approved(conn, pr)
+
+    if is_new:
+        return create_notification_for_pr_attention(
+            conn, pr, rereview=False, commit=commit
+        )
+    if head_moved and prior:
+        return create_notification_for_pr_attention(
+            conn, pr, rereview=True, commit=commit
+        )
+    if reactivated or invalidated:
+        return create_notification_for_pr_attention(
+            conn, pr, rereview=bool(prior), commit=commit
+        )
+    return None
 
 
 def _maybe_notify_run_finished(
