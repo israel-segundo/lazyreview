@@ -24,6 +24,29 @@ html {
 /* Notification dropdown shell (keep Tailwind from dropping panel constraints). */
 .lr-notif-panel {
   min-width: 18rem;
+  max-height: min(28rem, calc(100dvh - 5rem));
+  display: flex;
+  flex-direction: column;
+}
+.lr-notif-panel > ul {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* Phone: pin to the viewport. absolute+right-0 on the bell sits left of
+   theme/hamburger, so a 22rem panel overflows the left edge. */
+@media (max-width: 640px) {
+  .lr-notif-panel {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 3.5rem);
+    left: max(0.75rem, env(safe-area-inset-left, 0px));
+    right: max(0.75rem, env(safe-area-inset-right, 0px));
+    width: auto;
+    max-width: none;
+    min-width: 0;
+    margin-top: 0;
+    max-height: calc(100dvh - 4.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    z-index: 50;
+  }
 }
 
 /* Modal shells — explicit sizes so a stale Tailwind scan can't drop constraints. */
@@ -62,10 +85,10 @@ html {
   background: var(--color-slate-900, #0f172a);
 }
 .lr-modal-panel--batch {
-  max-width: min(100%, 64rem);
-  width: min(100%, 64rem);
+  max-width: min(100%, 40rem);
+  width: min(100%, 40rem);
   height: auto;
-  max-height: min(80vh, 80dvh);
+  max-height: min(90vh, 90dvh);
   min-height: 0;
 }
 /* Wide modals (consolidation view/submit, logs, run findings): same content-sized height. */
@@ -95,6 +118,7 @@ html {
 .dark .lr-modal-footer {
   border-top-color: var(--color-slate-700, #334155);
 }
+/* Settings still uses the table layout for batch defaults. */
 .lr-batch-table-wrap {
   flex: 1 1 auto;
   min-height: 0;
@@ -149,6 +173,284 @@ html {
 .lr-batch-table .lr-batch-actions {
   width: 2.75rem;
   text-align: right;
+}
+/* Home PR list — cards on narrow viewports, table on desktop. */
+.lr-home-prs {
+  min-width: 0;
+}
+.lr-home-pr-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  background: #fff;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.dark .lr-home-pr-cards {
+  border-color: #334155;
+  background: #0f172a;
+  box-shadow: none;
+}
+.lr-home-pr-card {
+  display: block;
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  color: inherit;
+  text-decoration: none;
+  min-width: 0;
+}
+.dark .lr-home-pr-card {
+  border-bottom-color: #1e293b;
+}
+.lr-home-pr-card:last-child {
+  border-bottom: 0;
+}
+.lr-home-pr-card:hover {
+  background: #f8fafc;
+}
+.dark .lr-home-pr-card:hover {
+  background: rgba(30, 41, 59, 0.55);
+}
+.lr-home-pr-card:active {
+  background: #f1f5f9;
+}
+.dark .lr-home-pr-card:active {
+  background: rgba(30, 41, 59, 0.8);
+}
+.lr-home-pr-card__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+.lr-home-pr-card__id {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #2563eb;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.dark .lr-home-pr-card__id {
+  color: #60a5fa;
+}
+.lr-home-pr-card__age {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  color: #64748b;
+  white-space: nowrap;
+}
+.dark .lr-home-pr-card__age {
+  color: #94a3b8;
+}
+.lr-home-pr-card__title {
+  margin: 0.35rem 0 0;
+  font-size: 0.9375rem;
+  line-height: 1.35;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.dark .lr-home-pr-card__title {
+  color: #e2e8f0;
+}
+.lr-home-pr-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.45rem;
+  font-size: 0.75rem;
+  color: #64748b;
+  min-width: 0;
+}
+.dark .lr-home-pr-card__meta {
+  color: #94a3b8;
+}
+.lr-home-pr-card__author {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.lr-home-pr-card__diff {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.lr-home-pr-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+}
+.lr-home-pr-card__activity {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.15rem;
+}
+.lr-home-pr-empty {
+  margin: 0;
+  padding: 2rem 1rem;
+  text-align: center;
+  font-size: 0.875rem;
+  color: #64748b;
+}
+.dark .lr-home-pr-empty {
+  color: #94a3b8;
+}
+.lr-home-pr-table-wrap {
+  display: none;
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.dark .lr-home-pr-table-wrap {
+  border-color: #334155;
+  background: #0f172a;
+  box-shadow: none;
+}
+@media (min-width: 960px) {
+  .lr-home-pr-cards {
+    display: none;
+  }
+  .lr-home-pr-table-wrap {
+    display: block;
+  }
+}
+
+/* Start Code Review modal — stacked cards (mobile-first, no horizontal table). */
+.lr-batch-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  margin-top: 1rem;
+  border: 1px solid var(--color-slate-200, #e2e8f0);
+  border-radius: 0.75rem;
+  background: var(--color-slate-50, #f8fafc);
+}
+.dark .lr-batch-list {
+  border-color: var(--color-slate-700, #334155);
+  background: color-mix(in oklab, var(--color-slate-950, #020617) 55%, transparent);
+}
+.lr-batch-list__hint {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-size: 0.8125rem;
+  color: var(--color-slate-500, #64748b);
+  border-bottom: 1px solid var(--color-slate-200, #e2e8f0);
+}
+.dark .lr-batch-list__hint {
+  border-bottom-color: var(--color-slate-700, #334155);
+  color: var(--color-slate-400, #94a3b8);
+}
+.lr-batch-card {
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid var(--color-slate-200, #e2e8f0);
+  background: var(--color-white, #fff);
+}
+.dark .lr-batch-card {
+  border-bottom-color: var(--color-slate-700, #334155);
+  background: var(--color-slate-900, #0f172a);
+}
+.lr-batch-card:last-child {
+  border-bottom: 0;
+}
+.lr-batch-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.lr-batch-card__num {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-slate-500, #64748b);
+}
+.dark .lr-batch-card__num {
+  color: var(--color-slate-400, #94a3b8);
+}
+.lr-batch-card__fields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+@media (min-width: 640px) {
+  .lr-batch-card__fields {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.5fr) minmax(0, 0.8fr);
+    align-items: end;
+  }
+}
+.lr-batch-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.lr-batch-field__label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-slate-500, #64748b);
+}
+.dark .lr-batch-field__label {
+  color: var(--color-slate-400, #94a3b8);
+}
+.lr-batch-field__control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-slate-300, #cbd5e1);
+  background: var(--color-white, #fff);
+  padding: 0.5rem 0.625rem;
+}
+.dark .lr-batch-field__control {
+  border-color: var(--color-slate-600, #475569);
+  background: var(--color-slate-950, #020617);
+}
+.lr-batch-field__control--open {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--color-slate-400, #94a3b8) 40%, transparent);
+}
+.lr-batch-field__input {
+  min-width: 0;
+  width: 100%;
+  flex: 1 1 auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 0.875rem;
+  outline: none;
+  color: inherit;
+}
+.lr-batch-field__input--boxed {
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-slate-300, #cbd5e1);
+  background: var(--color-white, #fff);
+  padding: 0.5rem 0.625rem;
+}
+.dark .lr-batch-field__input--boxed {
+  border-color: var(--color-slate-600, #475569);
+  background: var(--color-slate-950, #020617);
+}
+.lr-batch-empty {
+  padding: 2.5rem 1rem;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--color-slate-500, #64748b);
 }
 .lr-batch-combo-menu {
   position: fixed;
@@ -418,6 +720,10 @@ html {
   align-items: flex-end;
   justify-content: space-between;
   gap: 1rem;
+  min-width: 0;
+}
+.lr-analytics-header > div:first-child {
+  min-width: 0;
 }
 .lr-analytics-period {
   flex-shrink: 0;
@@ -440,12 +746,120 @@ html {
 .lr-analytics-summary-cell {
   padding: 0.75rem 1rem;
   border-right: 1px solid var(--color-slate-200, #e2e8f0);
+  min-width: 0;
 }
 .lr-analytics-summary-cell:last-child {
   border-right: none;
 }
 .dark .lr-analytics-summary-cell {
   border-right-color: var(--color-slate-700, #334155);
+}
+.lr-analytics-combo-cards {
+  display: none;
+}
+.lr-analytics-combo-card {
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid var(--color-slate-200, #e2e8f0);
+}
+.dark .lr-analytics-combo-card {
+  border-bottom-color: var(--color-slate-700, #334155);
+}
+.lr-analytics-combo-card:last-child {
+  border-bottom: 0;
+}
+.lr-analytics-combo-card__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-slate-900, #0f172a);
+  overflow-wrap: anywhere;
+}
+.dark .lr-analytics-combo-card__title {
+  color: var(--color-slate-100, #f1f5f9);
+}
+.lr-analytics-combo-card__model {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-slate-600, #475569);
+}
+.dark .lr-analytics-combo-card__model {
+  color: var(--color-slate-300, #cbd5e1);
+}
+.lr-analytics-combo-card__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem 0.75rem;
+  margin-top: 0.65rem;
+}
+.lr-analytics-combo-card__stat {
+  min-width: 0;
+}
+.lr-analytics-combo-card__stat dt {
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-slate-500, #64748b);
+}
+.lr-analytics-combo-card__stat dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--color-slate-800, #1e293b);
+  overflow-wrap: anywhere;
+}
+.dark .lr-analytics-combo-card__stat dd {
+  color: var(--color-slate-200, #e2e8f0);
+}
+.lr-analytics-combo-empty {
+  margin: 0;
+  padding: 2rem 1rem;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--color-slate-500, #64748b);
+}
+@media (max-width: 767px) {
+  .lr-analytics-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .lr-analytics-period {
+    margin-left: 0;
+    text-align: left;
+  }
+  .lr-analytics-period select {
+    width: 100%;
+  }
+  .lr-analytics-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .lr-analytics-summary-cell {
+    border-right: 1px solid var(--color-slate-200, #e2e8f0);
+    border-bottom: 1px solid var(--color-slate-200, #e2e8f0);
+  }
+  .dark .lr-analytics-summary-cell {
+    border-right-color: var(--color-slate-700, #334155);
+    border-bottom-color: var(--color-slate-700, #334155);
+  }
+  .lr-analytics-summary-cell:nth-child(2n) {
+    border-right: none;
+  }
+  .lr-analytics-summary-cell:nth-last-child(-n + 2) {
+    border-bottom: none;
+  }
+  .lr-analytics-combo-table {
+    display: none;
+  }
+  .lr-analytics-combo-cards {
+    display: block;
+  }
+  /* Tall bubble charts crush phones — keep them readable without forcing H-scroll. */
+  .lr-analytics-bubble {
+    height: 22rem !important;
+  }
 }
 
 .lr-pr-layout {
@@ -504,6 +918,53 @@ html {
 @keyframes lr-status-flicker {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.2; }
+}
+
+/* Activity feed — stacked rows that wrap cleanly on phones (no min-width table). */
+.lr-activity-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.75rem 1rem;
+  min-width: 0;
+}
+.lr-activity-item__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.lr-activity-item__when {
+  margin-left: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.lr-activity-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.65rem;
+  padding-left: 1.15rem;
+  min-width: 0;
+  color: var(--color-slate-600, #475569);
+}
+@media (min-width: 768px) {
+  .lr-activity-item {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.65rem;
+    padding: 0.625rem 1rem;
+  }
+  .lr-activity-item__row {
+    display: contents;
+  }
+  .lr-activity-item__meta {
+    display: contents;
+  }
+  .lr-activity-item__when {
+    order: 99;
+  }
 }
 
 /* —— Settings shell (sidebar + main), inspired by Untitled UI layout language —— */
@@ -652,6 +1113,111 @@ html {
   border-color: var(--color-slate-700, #334155);
   background: var(--color-slate-900, #0f172a);
   box-shadow: none;
+}
+
+/* Mobile section picker — custom listbox (native <select> popups misalign
+   under Chrome’s device-frame transform). */
+.lr-settings-tabs-select {
+  display: none;
+  position: relative;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+  min-width: 0;
+  z-index: 5;
+}
+.lr-settings-tabs-select__label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-slate-500, #64748b);
+}
+.lr-settings-tabs-select__control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
+  border-radius: 0.65rem;
+  border: 1px solid var(--color-slate-300, #cbd5e1);
+  background: var(--color-white, #fff);
+  color: var(--color-slate-900, #0f172a);
+  padding: 0.65rem 0.75rem;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+}
+.dark .lr-settings-tabs-select__control {
+  border-color: var(--color-slate-600, #475569);
+  background: var(--color-slate-950, #020617);
+  color: var(--color-slate-100, #f1f5f9);
+}
+.lr-settings-tabs-select__control:focus-visible {
+  outline: 2px solid #94a3b8;
+  outline-offset: 2px;
+}
+.lr-settings-tabs-select__chevron {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  color: var(--color-slate-500, #64748b);
+  transition: transform 0.15s ease;
+}
+.lr-settings-tabs-select__chevron.is-open {
+  transform: rotate(180deg);
+}
+.lr-settings-tabs-select__menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 0.35rem;
+  list-style: none;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-slate-200, #e2e8f0);
+  background: var(--color-white, #fff);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
+  max-height: min(18rem, 55dvh);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  z-index: 20;
+}
+.dark .lr-settings-tabs-select__menu {
+  border-color: var(--color-slate-700, #334155);
+  background: var(--color-slate-900, #0f172a);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.lr-settings-tabs-select__option {
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--color-slate-700, #334155);
+  cursor: pointer;
+}
+.dark .lr-settings-tabs-select__option {
+  color: var(--color-slate-200, #e2e8f0);
+}
+.lr-settings-tabs-select__option:hover,
+.lr-settings-tabs-select__option:focus-visible {
+  background: var(--color-slate-100, #f1f5f9);
+}
+.dark .lr-settings-tabs-select__option:hover,
+.dark .lr-settings-tabs-select__option:focus-visible {
+  background: var(--color-slate-800, #1e293b);
+}
+.lr-settings-tabs-select__option.is-active {
+  background: var(--color-slate-900, #0f172a);
+  color: #fff;
+}
+.dark .lr-settings-tabs-select__option.is-active {
+  background: var(--color-slate-100, #f1f5f9);
+  color: var(--color-slate-900, #0f172a);
 }
 
 /* Pill tabs (segmented control) */
@@ -1169,28 +1735,67 @@ html {
     height: auto;
     min-height: 0;
     overflow: visible;
+    border-radius: 0.75rem;
   }
   .lr-settings-nav {
     width: 100%;
+    padding: 0.75rem 0.75rem 0.65rem;
     border-right: none;
     border-bottom: 1px solid var(--color-slate-200, #e2e8f0);
   }
   .dark .lr-settings-nav {
     border-bottom-color: var(--color-slate-800, #1e293b);
   }
+  .lr-settings-nav-brand {
+    display: none;
+  }
+  /* Mobile category nav: scrollable pill strip (don't wrap — wrapping looks broken). */
   .lr-settings-nav-list {
     flex-direction: row;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    gap: 0.25rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    padding-bottom: 0.15rem;
+  }
+  .lr-settings-nav-list::-webkit-scrollbar {
+    display: none;
   }
   .lr-settings-nav-item {
     width: auto;
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 0.45rem 0.75rem;
+  }
+  .lr-settings-nav-item svg {
+    display: none;
   }
   .lr-settings-nav-foot {
     display: none;
   }
   .lr-settings-main {
-    padding: 1.25rem 1rem;
+    padding: 1rem 0.85rem 1.25rem;
     overflow: visible;
+  }
+  .lr-settings-title {
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+  }
+  .lr-settings-sub {
+    overflow-wrap: anywhere;
+  }
+  .lr-settings-card {
+    padding: 1rem;
+  }
+  /* Secondary tabs: native select on phones (6 pills clip with no discoverable scroll). */
+  .lr-settings-tabs {
+    display: none;
+  }
+  .lr-settings-tabs-select {
+    display: flex;
   }
   /* Drop nested flex-fill on mobile so page scroll works and editors keep height. */
   .lr-settings-panel--agents,
@@ -1201,6 +1806,10 @@ html {
     flex: none !important;
     min-height: 0 !important;
     overflow: visible !important;
+  }
+  .lr-batch-list {
+    max-height: none;
+    overflow: visible;
   }
   .lr-prompt-editor {
     height: min(55dvh, 24rem);
@@ -2183,42 +2792,164 @@ html.lr-chat-open .lr-pr-page {
   background: #1e3a8a;
   border-color: #3b82f6;
 }
+/* Mobile chat: full-viewport sheet. The stacked 50dvh rail left almost no room
+   for turns and clipped the send button under the browser chrome. */
 @media (max-width: 900px) {
   .lr-page-with-chat,
   .lr-page-with-chat--open {
     flex-direction: column;
     align-items: stretch;
   }
+  html.lr-chat-open body > header {
+    display: none;
+  }
+  html.lr-chat-open body > main {
+    padding: 0 !important;
+  }
+  html.lr-chat-open .lr-pr-page {
+    /* Drop the page chrome; the sheet owns the viewport. */
+    padding: 0;
+  }
+  html.lr-chat-open .lr-pr-page > .mb-4,
+  html.lr-chat-open .lr-pr-page > .flex.flex-wrap.items-center {
+    display: none;
+  }
   .lr-page-with-chat--open {
-    /* Keep the open row viewport-locked on small screens too. */
-    overflow: hidden;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    width: 100%;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
     min-height: 0;
+    overflow: hidden;
+    background: #fff;
+  }
+  .dark .lr-page-with-chat--open {
+    background: #0f172a;
   }
   .lr-page-with-chat--open .lr-page-with-chat__main {
-    flex: 1 1 0%;
-    min-height: 0;
-    height: auto;
-    overflow: auto;
+    display: none;
   }
   .lr-chat-rail,
-  .lr-page-with-chat--open .lr-chat-rail {
-    flex: 0 0 auto;
-    width: 100% !important;
-    max-width: none;
-    margin-left: 0;
-    margin-top: 0.75rem;
-    position: relative;
-    top: auto;
-    /* Cap the stacked rail so head + composer stay on screen. */
-    height: min(50dvh, 28rem);
-    max-height: min(50dvh, 28rem);
-    align-self: stretch;
-  }
+  .lr-page-with-chat--open .lr-chat-rail,
   html.lr-chat-open .lr-page-with-chat--open .lr-chat-rail {
-    height: var(--lr-chat-height, min(50dvh, 28rem));
-    max-height: var(--lr-chat-height, min(50dvh, 28rem));
+    position: absolute;
+    inset: 0;
+    flex: 1 1 auto;
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    height: 100% !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    border: 0;
+    border-radius: 0;
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    padding-top: env(safe-area-inset-top, 0px);
   }
   .lr-chat-rail__resize {
+    display: none;
+  }
+  .lr-chat-rail__turns {
+    flex: 1 1 0%;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+  html.lr-chat-open,
+  html.lr-chat-open body {
+    overflow: hidden;
+    height: 100%;
+    overscroll-behavior: none;
+    touch-action: none;
+  }
+  html.lr-chat-open .lr-page-with-chat--open {
+    touch-action: auto;
+  }
+  .lr-chat-rail__composer {
+    flex: 0 0 auto;
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+  }
+  .lr-chat-box__bar {
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .lr-chat-box__left {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .lr-chat-box__right {
+    flex: 0 0 auto;
+  }
+  .lr-chat-model-pill {
+    max-width: min(9.5rem, 46vw);
+  }
+  .lr-chat-send {
+    /* Bigger tap target; stays outside the agent/model group so it never clips. */
+    width: 2.5rem;
+    height: 2.5rem;
+    flex: 0 0 auto;
+  }
+  .lr-chat-send svg {
+    width: 1.15rem;
+    height: 1.15rem;
+  }
+  .lr-chat-input {
+    min-height: 2.75rem;
+    max-height: 7rem;
+  }
+  .lr-chat-close {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 0.5rem;
+    padding: 0.4rem 0.65rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #334155;
+    background: #f1f5f9;
+  }
+  .dark .lr-chat-close {
+    color: #e2e8f0;
+    background: #1e293b;
+  }
+  .lr-chat-close__label {
+    display: inline;
+  }
+  .lr-chat-close__chevron {
+    display: none;
+  }
+  .lr-chat-close__x {
+    display: inline;
+  }
+}
+@media (min-width: 901px) {
+  .lr-chat-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.375rem;
+    padding: 0.375rem;
+    color: #64748b;
+  }
+  .lr-chat-close:hover {
+    background: #f1f5f9;
+  }
+  .dark .lr-chat-close:hover {
+    background: #1e293b;
+  }
+  .lr-chat-close__label {
+    display: none;
+  }
+  .lr-chat-close__chevron {
+    display: inline;
+  }
+  .lr-chat-close__x {
     display: none;
   }
 }

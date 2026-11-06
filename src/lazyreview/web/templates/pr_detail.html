@@ -981,22 +981,44 @@
         <button type="button" class="lr-modal-close" @click="closeBatchModal()" aria-label="Close">Close</button>
       </div>
 
-      <div class="lr-batch-table-wrap" @click.stop>
-        <table class="lr-batch-table">
-          <thead>
-            <tr>
-              <th class="lr-batch-num">#</th>
-              <th>Agent</th>
-              <th>Model</th>
-              <th>Effort</th>
-              <th class="lr-batch-actions"><span class="sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            <template x-for="(row, idx) in batchRows" :key="row.key">
-              <tr>
-                <td class="lr-batch-num" x-text="idx + 1"></td>
-                <td>
+      <div class="lr-batch-list" @click.stop>
+        <p class="lr-batch-list__hint" x-show="!_agentsReady" x-cloak>Loading agents…</p>
+        <template x-for="(row, idx) in batchRows" :key="row.key">
+          <div class="lr-batch-card">
+            <div class="lr-batch-card__head">
+              <span class="lr-batch-card__num" x-text="'Run ' + (idx + 1)"></span>
+              <button type="button" @click="removeBatchRow(idx)"
+                      :disabled="batchBusy"
+                      title="Remove run"
+                      aria-label="Remove run"
+                      class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 dark:hover:bg-red-950/40 dark:hover:text-red-300">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                </svg>
+              </button>
+            </div>
+            <div class="lr-batch-card__fields">
+              <label class="lr-batch-field">
+                <span class="lr-batch-field__label">Agent</span>
+                <div class="lr-batch-field__control"
+                     :class="batchCombo === row.key + ':agent' && 'lr-batch-field__control--open'">
+                  <span class="inline-flex shrink-0 items-center" x-show="row.agent" x-cloak aria-hidden="true">
+                    <img x-show="agentKey(row.agent) === LR.AgentName.CLAUDE" x-cloak
+                         src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain" />
+                    <img x-show="agentKey(row.agent) === LR.AgentName.AGY" x-cloak
+                         src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain" />
+                    <img x-show="agentKey(row.agent) === LR.AgentName.CODEX" x-cloak
+                         src="/static/img/agents/codex.svg" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain" />
+                    <img x-show="agentKey(row.agent) === LR.AgentName.CURSOR" x-cloak
+                         src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+                    <img x-show="agentKey(row.agent) === LR.AgentName.CURSOR" x-cloak
+                         src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                         class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+                  </span>
                   <input type="text" autocomplete="off" role="combobox"
                          :id="'batch-agent-' + row.key"
                          :aria-expanded="batchCombo === row.key + ':agent'"
@@ -1009,66 +1031,55 @@
                          @keydown.arrow-up.prevent="batchComboMove(idx, 'agent', -1)"
                          @keydown.enter.prevent="batchComboConfirm(idx, 'agent')"
                          @keydown.escape.stop="batchCloseCombo()"
-                         placeholder="Filter agents…"
-                         class="w-full min-w-[8rem] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950" />
-                </td>
-                <td>
-                  <input type="text" autocomplete="off" role="combobox"
-                         :id="'batch-model-' + row.key"
-                         :aria-expanded="batchCombo === row.key + ':model'"
-                         :aria-label="'Model for run ' + (idx + 1)"
-                         x-model="row.modelQuery"
-                         @focus="batchOpenCombo(idx, 'model', $event)"
-                         @click.stop="batchOpenCombo(idx, 'model', $event)"
-                         @input="batchOpenCombo(idx, 'model', $event)"
-                         @keydown.arrow-down.prevent="batchComboMove(idx, 'model', 1)"
-                         @keydown.arrow-up.prevent="batchComboMove(idx, 'model', -1)"
-                         @keydown.enter.prevent="batchComboConfirm(idx, 'model')"
-                         @keydown.escape.stop="batchCloseCombo()"
-                         placeholder="Filter models…"
-                         class="w-full min-w-[12rem] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950" />
-                </td>
-                <td>
-                  <input type="text" autocomplete="off" role="combobox"
-                         :id="'batch-effort-' + row.key"
-                         :aria-expanded="batchCombo === row.key + ':effort'"
-                         :aria-label="'Effort for run ' + (idx + 1)"
-                         x-model="row.effortQuery"
-                         :disabled="!row.efforts.length"
-                         @focus="batchOpenCombo(idx, 'effort', $event)"
-                         @click.stop="batchOpenCombo(idx, 'effort', $event)"
-                         @input="batchOpenCombo(idx, 'effort', $event)"
-                         @keydown.arrow-down.prevent="batchComboMove(idx, 'effort', 1)"
-                         @keydown.arrow-up.prevent="batchComboMove(idx, 'effort', -1)"
-                         @keydown.enter.prevent="batchComboConfirm(idx, 'effort')"
-                         @keydown.escape.stop="batchCloseCombo()"
-                         :placeholder="row.efforts.length ? 'Filter…' : 'n/a'"
-                         :title="row.efforts.length ? '' : 'Effort is built into this model id'"
-                         class="w-full min-w-[6rem] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm disabled:opacity-50 dark:border-slate-600 dark:bg-slate-950" />
-                </td>
-                <td class="lr-batch-actions">
-                  <button type="button" @click="removeBatchRow(idx)"
-                          :disabled="batchBusy"
-                          title="Remove run"
-                          aria-label="Remove run"
-                          class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 dark:hover:bg-red-950/40 dark:hover:text-red-300">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4" aria-hidden="true">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                    </svg>
-                  </button>
-                </td>
-              </tr>
-            </template>
-            <tr x-show="!batchRows.length">
-              <td colspan="5" class="px-4 py-10 text-center text-slate-500">
-                No runs yet. Click <span class="font-medium text-slate-700 dark:text-slate-300">Add run</span> to begin.
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                         :placeholder="_agentsReady ? 'Filter agents…' : 'Loading agents…'"
+                         class="lr-batch-field__input" />
+                </div>
+              </label>
+              <label class="lr-batch-field">
+                <span class="lr-batch-field__label">Model</span>
+                <input type="text" autocomplete="off" role="combobox"
+                       :id="'batch-model-' + row.key"
+                       :aria-expanded="batchCombo === row.key + ':model'"
+                       :aria-label="'Model for run ' + (idx + 1)"
+                       x-model="row.modelQuery"
+                       @focus="batchOpenCombo(idx, 'model', $event)"
+                       @click.stop="batchOpenCombo(idx, 'model', $event)"
+                       @input="batchOpenCombo(idx, 'model', $event)"
+                       @keydown.arrow-down.prevent="batchComboMove(idx, 'model', 1)"
+                       @keydown.arrow-up.prevent="batchComboMove(idx, 'model', -1)"
+                       @keydown.enter.prevent="batchComboConfirm(idx, 'model')"
+                       @keydown.escape.stop="batchCloseCombo()"
+                       placeholder="Filter models…"
+                       class="lr-batch-field__input lr-batch-field__input--boxed" />
+              </label>
+              <label class="lr-batch-field lr-batch-field--effort">
+                <span class="lr-batch-field__label">Effort</span>
+                <input type="text" autocomplete="off" role="combobox"
+                       :id="'batch-effort-' + row.key"
+                       :aria-expanded="batchCombo === row.key + ':effort'"
+                       :aria-label="'Effort for run ' + (idx + 1)"
+                       x-model="row.effortQuery"
+                       :disabled="!row.efforts.length"
+                       @focus="batchOpenCombo(idx, 'effort', $event)"
+                       @click.stop="batchOpenCombo(idx, 'effort', $event)"
+                       @input="batchOpenCombo(idx, 'effort', $event)"
+                       @keydown.arrow-down.prevent="batchComboMove(idx, 'effort', 1)"
+                       @keydown.arrow-up.prevent="batchComboMove(idx, 'effort', -1)"
+                       @keydown.enter.prevent="batchComboConfirm(idx, 'effort')"
+                       @keydown.escape.stop="batchCloseCombo()"
+                       :placeholder="row.efforts.length ? 'Filter…' : 'n/a'"
+                       :title="row.efforts.length ? '' : 'Effort is built into this model id'"
+                       class="lr-batch-field__input lr-batch-field__input--boxed disabled:opacity-50" />
+              </label>
+            </div>
+          </div>
+        </template>
+        <div class="lr-batch-empty" x-show="!batchRows.length">
+          No runs yet. Click <span class="font-medium text-slate-700 dark:text-slate-300">Add run</span> to begin.
+        </div>
       </div>
 
-      <!-- Fixed-position combo menu (escapes table overflow clipping) -->
+      <!-- Fixed-position combo menu (escapes overflow clipping) -->
       <ul x-show="batchCombo" x-cloak
           class="lr-batch-combo-menu"
           :style="batchComboStyle"
@@ -1078,10 +1089,29 @@
           <li role="option"
               @mousedown.prevent="batchPickOption(opt)"
               @mouseenter="batchComboHighlight = oidx"
-              :class="batchOptionClass(oidx, batchOptionDisabled(opt))"
-              x-text="batchOptionLabel(opt)"></li>
+              :class="batchOptionClass(oidx, batchOptionDisabled(opt))">
+            <span class="inline-flex shrink-0 items-center" x-show="batchComboWhich() === 'agent'" x-cloak aria-hidden="true">
+              <img x-show="agentKey(opt.name) === LR.AgentName.CLAUDE" x-cloak
+                   src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                   class="h-4 w-4 shrink-0 object-contain" />
+              <img x-show="agentKey(opt.name) === LR.AgentName.AGY" x-cloak
+                   src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                   class="h-4 w-4 shrink-0 object-contain" />
+              <img x-show="agentKey(opt.name) === LR.AgentName.CODEX" x-cloak
+                   src="/static/img/agents/codex.svg" alt="" width="16" height="16"
+                   class="h-4 w-4 shrink-0 object-contain" />
+              <img x-show="agentKey(opt.name) === LR.AgentName.CURSOR" x-cloak
+                   src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                   class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+              <img x-show="agentKey(opt.name) === LR.AgentName.CURSOR" x-cloak
+                   src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                   class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+            </span>
+            <span x-text="batchOptionLabel(opt)"></span>
+          </li>
         </template>
-        <li x-show="!batchComboOptions().length" class="px-3 py-2 text-sm text-slate-500">No matches</li>
+        <li x-show="!batchComboOptions().length" class="px-3 py-2 text-sm text-slate-500"
+            x-text="batchComboEmptyLabel()"></li>
       </ul>
 
       <p class="mt-3 text-sm text-red-600 dark:text-red-400" x-show="batchMessage" x-text="batchMessage"></p>
@@ -1502,11 +1532,15 @@ function reviewForm() {
           this.agents = (data.agents || []).slice().sort((a, b) =>
             String(a.display_name || a.name).localeCompare(String(b.display_name || b.name), undefined, { sensitivity: 'base' })
           );
+          // Modal may have opened against an empty catalog (slow /api/agents).
+          // Re-resolve display names + model lists once the catalog arrives.
+          this._refreshOpenBatchRowsFromAgents();
         })
         .catch(() => {})
         .finally(() => {
           // Batch modal waits on this; never block the page on agent discovery.
           this._agentsReady = true;
+          this._refreshOpenBatchRowsFromAgents();
         });
     },
     setTab(id) {
@@ -2243,11 +2277,28 @@ function reviewForm() {
       this._loadBatchDefaultsAndOpen();
     },
     async _awaitAgentsReady() {
-      // /api/agents can be slow (agy model list). Opening the modal before the
-      // catalog arrives builds rows against []; the next open resolves against
-      // the full catalog and the predefined agents look "different".
-      for (let i = 0; i < 100 && !this._agentsReady; i++) {
+      // /api/agents can be slow (agy model list). Prefer waiting for the catalog
+      // so predefined agents get display names + model lists; fall through after
+      // a bounded wait and refresh rows when the fetch finally completes.
+      for (let i = 0; i < 200 && !this._agentsReady; i++) {
         await new Promise(r => setTimeout(r, 50));
+      }
+    },
+    _refreshOpenBatchRowsFromAgents() {
+      if (!this.batchOpen || !this.agents.length) return;
+      for (const row of this.batchRows) {
+        const keepModel = row.model;
+        const keepEffort = row.effort;
+        this._batchApplyAgent(row, false);
+        if (keepModel) {
+          row.model = this._resolveModelId(row.models, keepModel);
+          this._batchApplyModel(row, false);
+        }
+        if (keepEffort && row.efforts.includes(keepEffort)) {
+          row.effort = keepEffort;
+        }
+        // batchSyncQueriesForRow already skips the field currently being filtered.
+        this.batchSyncQueriesForRow(row);
       }
     },
     async _loadBatchDefaultsAndOpen() {
@@ -2272,6 +2323,8 @@ function reviewForm() {
         this.batchRows = [this._newBatchRow()];
       }
       this.batchOpen = true;
+      // Catalog may have landed while we were fetching settings.
+      this._refreshOpenBatchRowsFromAgents();
     },
     _resolveModelId(models, wanted) {
       if (!wanted) return models[0] ? models[0].id : '';
@@ -2397,6 +2450,14 @@ function reviewForm() {
       const row = this.batchRows[idx];
       if (!row) return;
       if (which === 'effort' && !row.efforts.length) return;
+      // Don't wipe the selected agent label just to show an empty "No matches"
+      // menu while /api/agents is still loading.
+      if (which === 'agent' && !this.agents.length) {
+        this.batchCombo = row.key + ':agent';
+        this.batchComboHighlight = -1;
+        this.$nextTick(() => this._positionBatchCombo(evt && evt.target));
+        return;
+      }
       const key = row.key + ':' + which;
       const alreadyOpen = this.batchCombo === key;
       this.batchCombo = key;
@@ -2412,11 +2473,22 @@ function reviewForm() {
     _positionBatchCombo(el) {
       if (!el || !el.getBoundingClientRect) return;
       const r = el.getBoundingClientRect();
+      const width = Math.max(r.width, Math.min(280, window.innerWidth - 24));
+      let left = r.left;
+      if (left + width > window.innerWidth - 8) {
+        left = Math.max(8, window.innerWidth - width - 8);
+      }
       this.batchComboStyle = {
         top: (r.bottom + 4) + 'px',
-        left: r.left + 'px',
-        width: r.width + 'px',
+        left: left + 'px',
+        width: width + 'px',
       };
+    },
+    batchComboEmptyLabel() {
+      const which = this.batchComboWhich();
+      if (which === 'agent' && !this._agentsReady) return 'Loading agents…';
+      if (which === 'agent' && !this.agents.length) return 'No agents available';
+      return 'No matches';
     },
     batchCloseCombo() {
       if (!this.batchCombo) return;
@@ -2471,7 +2543,7 @@ function reviewForm() {
       return this.batchComboWhich() === 'agent' && opt && !opt.available;
     },
     batchOptionClass(idx, disabled) {
-      const base = 'cursor-pointer px-3 py-2 text-sm ';
+      const base = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-sm ';
       if (disabled) return base + 'cursor-not-allowed text-slate-400 dark:text-slate-500';
       if (this.batchComboHighlight === idx) {
         return base + 'bg-blue-50 text-blue-900 dark:bg-blue-950 dark:text-blue-100';

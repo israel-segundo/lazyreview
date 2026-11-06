@@ -26,9 +26,13 @@
                 :disabled="chatBusy" @click="finishChat()"
                 title="Write working findings into the consolidation and regenerate the GitHub draft (does not post to GitHub)">Apply findings</button>
       </template>
-      <button type="button" class="rounded p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-              @click="chatOpen = false; persistChatOpen()" aria-label="Collapse chat">
-        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+      <button type="button" class="lr-chat-close"
+              @click="chatOpen = false; persistChatOpen()" aria-label="Close chat">
+        <span class="lr-chat-close__label">Close</span>
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path class="lr-chat-close__chevron" d="M9 18l6-6-6-6"/>
+          <path class="lr-chat-close__x" d="M6 6l12 12M18 6L6 18"/>
+        </svg>
       </button>
     </div>
   </header>
@@ -145,9 +149,7 @@
               </template>
             </ul>
           </div>
-        </div>
 
-        <div class="lr-chat-box__right">
           <div class="lr-chat-combo lr-chat-combo--model"
                :class="(chatOpenCombo === 'model' || chatOpenCombo === 'effort') ? 'lr-chat-combo--open' : ''"
                @click.outside="chatCloseCombo('model'); chatCloseCombo('effort')"
@@ -219,7 +221,9 @@
               </ul>
             </div>
           </div>
+        </div>
 
+        <div class="lr-chat-box__right">
           <button type="submit" class="lr-chat-send"
                   :disabled="chatBusy || !chatDraft.trim() || (chatSession && chatSession.status !== 'open')"
                   aria-label="Send">

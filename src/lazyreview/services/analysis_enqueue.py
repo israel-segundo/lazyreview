@@ -12,10 +12,18 @@ from lazyreview.db import (
     get_current_pr_analysis,
     get_pr,
 )
+from lazyreview.services.analysis_eligibility import (
+    analysis_ineligible_reason,
+    refresh_pr_analysis_flags,
+)
 from lazyreview.services.analysis_jobs import AnalysisRunner, analyses_dir
 from lazyreview.services.settings import get_pr_analysis_config
 
 logger = logging.getLogger(__name__)
+
+
+class AnalysisSkipped(RuntimeError):
+    """PR is not eligible for analysis (merged / draft / merge queue / …)."""
 
 
 def ensure_analysis_for_pr(
@@ -25,16 +33,37 @@ def ensure_analysis_for_pr(
     pr_id: int,
     *,
     force: bool = False,
+    allow_draft: bool | None = None,
+    refresh: bool = False,
 ) -> dict[str, Any] | None:
     """
     Ensure a pr_analyses row exists for the PR's current head and enqueue it.
 
     If force=True, re-queue failed/cancelled (and replace succeeded) for a fresh run.
     Returns the analysis row, or None if the PR has no head_sha.
+
+    Raises AnalysisSkipped when the PR is merged, closed, in the merge queue,
+    or (for auto-kick) a draft.
     """
     pr = get_pr(conn, pr_id)
     if not pr:
         return None
+    if refresh:
+        # Live flags for the gate only — do not upsert (that re-enters lifecycle).
+        pr = refresh_pr_analysis_flags(dict(pr))
+        _persist_analysis_flags(conn, pr)
+
+    # Manual run/retry may analyze drafts; auto-kick may not.
+    draft_ok = bool(force) if allow_draft is None else bool(allow_draft)
+    skip = analysis_ineligible_reason(pr, allow_draft=draft_ok)
+    if skip:
+        if runner is not None:
+            try:
+                runner.cancel_for_pr(pr_id, reason=f"Skipped: {skip}")
+            except Exception:
+                logger.exception("failed cancelling analyses for ineligible PR %s", pr_id)
+        raise AnalysisSkipped(skip)
+
     head_sha = (pr.get("head_sha") or "").strip()
     if not head_sha:
         return None
@@ -104,6 +133,25 @@ def ensure_analysis_for_pr(
     if runner is not None and row["status"] == "queued":
         runner.enqueue(int(row["id"]))
     return row
+
+
+def _persist_analysis_flags(conn: sqlite3.Connection, pr: dict[str, Any]) -> None:
+    """Write state/draft/merge-queue without going through upsert_pr lifecycle hooks."""
+    pr_id = int(pr["id"])
+    conn.execute(
+        """
+        UPDATE prs
+        SET state = ?, is_draft = ?, in_merge_queue = ?, updated_at = datetime('now')
+        WHERE id = ?
+        """,
+        (
+            (pr.get("state") or "open"),
+            1 if pr.get("is_draft") else 0,
+            1 if pr.get("in_merge_queue") else 0,
+            pr_id,
+        ),
+    )
+    conn.commit()
 
 
 def _record_analysis_triggered(conn: sqlite3.Connection, row: dict[str, Any]) -> None:

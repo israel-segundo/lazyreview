@@ -12,7 +12,7 @@ from lazyreview.db import (
     list_pr_analyses,
     list_pr_events,
 )
-from lazyreview.services.analysis_enqueue import ensure_analysis_for_pr
+from lazyreview.services.analysis_enqueue import AnalysisSkipped, ensure_analysis_for_pr
 
 router = APIRouter(tags=["analyses"])
 
@@ -46,7 +46,19 @@ def start_pr_analysis(pr_id: int, request: Request):
     if not (pr.get("head_sha") or "").strip():
         raise HTTPException(status_code=400, detail="PR has no head_sha")
     runner = getattr(request.app.state, "analyses", None)
-    row = ensure_analysis_for_pr(conn, settings, runner, pr_id, force=False)
+    try:
+        # Manual run may analyze drafts; still refuses merged/closed/merge-queue.
+        row = ensure_analysis_for_pr(
+            conn,
+            settings,
+            runner,
+            pr_id,
+            force=False,
+            allow_draft=True,
+            refresh=True,
+        )
+    except AnalysisSkipped as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     if not row:
         raise HTTPException(status_code=400, detail="Could not enqueue analysis")
     return row
@@ -60,7 +72,18 @@ def retry_pr_analysis(pr_id: int, request: Request):
     if not pr:
         raise HTTPException(status_code=404, detail="PR not found")
     runner = getattr(request.app.state, "analyses", None)
-    row = ensure_analysis_for_pr(conn, settings, runner, pr_id, force=True)
+    try:
+        row = ensure_analysis_for_pr(
+            conn,
+            settings,
+            runner,
+            pr_id,
+            force=True,
+            allow_draft=True,
+            refresh=True,
+        )
+    except AnalysisSkipped as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     if not row:
         raise HTTPException(status_code=400, detail="Could not enqueue analysis")
     return row

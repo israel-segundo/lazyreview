@@ -51,8 +51,18 @@ def on_pr_head_changed(conn: Any, pr_id: int) -> None:
             pass
 
 
+def _cancel_analyses(pr_id: int, reason: str) -> None:
+    if _analyses is None:
+        return
+    try:
+        _analyses.cancel_for_pr(pr_id, reason=reason)
+    except Exception:
+        pass
+
+
 def on_pr_upserted(conn: Any, pr: dict[str, Any], *, is_new: bool = False) -> None:
     """Enqueue analysis only when a PR is first added; prune workspace when terminal."""
+    from lazyreview.services.analysis_eligibility import analysis_ineligible_reason
     from lazyreview.services.pr_workspace import queue_workspace_deletion
 
     state = (pr.get("state") or "").lower()
@@ -61,6 +71,11 @@ def on_pr_upserted(conn: Any, pr: dict[str, Any], *, is_new: bool = False) -> No
             queue_workspace_deletion(conn, int(pr["id"]))
         except Exception:
             pass
+
+    # Stop burning tokens once the PR is no longer reviewable.
+    skip = analysis_ineligible_reason(pr, allow_draft=False)
+    if skip:
+        _cancel_analyses(int(pr["id"]), f"Skipped: {skip}")
         return
 
     # Analysis is kicked off once at create time. Later head moves do not re-run it
@@ -71,9 +86,11 @@ def on_pr_upserted(conn: Any, pr: dict[str, Any], *, is_new: bool = False) -> No
         return
     if _settings is None:
         return
-    from lazyreview.services.analysis_enqueue import ensure_analysis_for_pr
+    from lazyreview.services.analysis_enqueue import AnalysisSkipped, ensure_analysis_for_pr
 
     try:
         ensure_analysis_for_pr(conn, _settings, _analyses, int(pr["id"]), force=False)
+    except AnalysisSkipped:
+        pass
     except Exception:
         pass

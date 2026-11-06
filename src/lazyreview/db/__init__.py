@@ -56,6 +56,7 @@ def upsert_pr(
     review_requested: bool | None = None,
     author: str | None = None,
     is_draft: bool | None = None,
+    in_merge_queue: bool | None = None,
     additions: int | None = None,
     deletions: int | None = None,
     changed_files: int | None = None,
@@ -83,6 +84,15 @@ def upsert_pr(
     draft_v = int(bool(is_draft)) if is_draft is not None else (
         int(existing["is_draft"]) if existing is not None else 0
     )
+    if in_merge_queue is not None:
+        merge_queue_v = int(bool(in_merge_queue))
+    elif existing is not None:
+        try:
+            merge_queue_v = int(existing["in_merge_queue"] or 0)
+        except (KeyError, IndexError, TypeError):
+            merge_queue_v = 0
+    else:
+        merge_queue_v = 0
     additions_v = _keep("additions", additions)
     deletions_v = _keep("deletions", deletions)
     changed_v = _keep("changed_files", changed_files)
@@ -103,10 +113,10 @@ def upsert_pr(
         """
         INSERT INTO prs (
           owner, repo, number, url, title, author, base_ref, head_ref, head_sha,
-          state, is_draft, additions, deletions, changed_files,
+          state, is_draft, in_merge_queue, additions, deletions, changed_files,
           review_requested, head_updated_at, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(owner, repo, number) DO UPDATE SET
           url = excluded.url,
           title = excluded.title,
@@ -116,6 +126,7 @@ def upsert_pr(
           head_sha = excluded.head_sha,
           state = excluded.state,
           is_draft = excluded.is_draft,
+          in_merge_queue = excluded.in_merge_queue,
           additions = excluded.additions,
           deletions = excluded.deletions,
           changed_files = excluded.changed_files,
@@ -135,6 +146,7 @@ def upsert_pr(
             head_sha,
             state,
             draft_v,
+            merge_queue_v,
             additions_v,
             deletions_v,
             changed_v,

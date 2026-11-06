@@ -160,6 +160,43 @@ def parse_pr_url(url_or_ref: str) -> PrRef:
     raise GhError(f"Could not parse PR reference: {url_or_ref}")
 
 
+def _pr_in_merge_queue(owner: str, repo: str, number: int) -> bool:
+    """GitHub merge-queue membership (not exposed by ``gh pr view --json``)."""
+    query = (
+        "query($owner:String!,$repo:String!,$number:Int!){"
+        "repository(owner:$owner,name:$repo){"
+        "pullRequest(number:$number){isInMergeQueue}"
+        "}}"
+    )
+    try:
+        raw = run_gh(
+            [
+                "api",
+                "graphql",
+                "-F",
+                f"owner={owner}",
+                "-F",
+                f"repo={repo}",
+                "-F",
+                f"number={int(number)}",
+                "-f",
+                f"query={query}",
+            ]
+        )
+        data = json.loads(raw or "{}")
+        pr = ((data.get("data") or {}).get("repository") or {}).get("pullRequest") or {}
+        return bool(pr.get("isInMergeQueue"))
+    except (GhError, TypeError, ValueError, json.JSONDecodeError) as e:
+        logger.warning(
+            "Could not resolve merge-queue state for %s/%s#%s: %s",
+            owner,
+            repo,
+            number,
+            e,
+        )
+        return False
+
+
 def view_pr(url_or_ref: str) -> dict[str, Any]:
     ref = parse_pr_url(url_or_ref)
     raw = run_gh(
@@ -183,6 +220,9 @@ def view_pr(url_or_ref: str) -> dict[str, Any]:
         author = author_obj
     head_sha = data.get("headRefOid") or ""
     head_updated_at = _head_committed_at(data.get("commits") or [], head_sha)
+    in_merge_queue = False
+    if state == "open":
+        in_merge_queue = _pr_in_merge_queue(ref.owner, ref.repo, int(data["number"]))
     return {
         "owner": ref.owner,
         "repo": ref.repo,
@@ -196,6 +236,7 @@ def view_pr(url_or_ref: str) -> dict[str, Any]:
         "head_updated_at": head_updated_at,
         "state": state,
         "is_draft": bool(data.get("isDraft")),
+        "in_merge_queue": in_merge_queue,
         "additions": data.get("additions"),
         "deletions": data.get("deletions"),
         "changed_files": data.get("changedFiles"),

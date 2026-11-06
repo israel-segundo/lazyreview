@@ -153,7 +153,9 @@ class AnalysisRunner:
     def enqueue(self, analysis_id: int) -> None:
         self._queue.put(int(analysis_id))
 
-    def cancel(self, analysis_id: int) -> dict[str, Any]:
+    def cancel(
+        self, analysis_id: int, *, reason: str = "Cancelled by user"
+    ) -> dict[str, Any]:
         with self._lock:
             self._cancel_requested.add(analysis_id)
             proc = self._procs.get(analysis_id)
@@ -167,7 +169,7 @@ class AnalysisRunner:
             analysis_id,
             status="cancelled",
             finished_at=utcnow(),
-            error_message="Cancelled by user",
+            error_message=(reason or "Cancelled by user").strip() or "Cancelled by user",
         )
         if proc is not None and proc.poll() is None:
             try:
@@ -178,7 +180,9 @@ class AnalysisRunner:
         record_analysis_finished_event(self.conn, updated)
         return updated
 
-    def cancel_for_pr(self, pr_id: int) -> list[int]:
+    def cancel_for_pr(
+        self, pr_id: int, *, reason: str = "Cancelled by user"
+    ) -> list[int]:
         rows = self.conn.execute(
             """
             SELECT id FROM pr_analyses
@@ -191,7 +195,7 @@ class AnalysisRunner:
         for r in rows:
             aid = int(r["id"])
             try:
-                self.cancel(aid)
+                self.cancel(aid, reason=reason)
                 cancelled.append(aid)
             except (KeyError, ValueError):
                 continue
@@ -290,6 +294,32 @@ class AnalysisRunner:
                 status="failed",
                 finished_at=utcnow(),
                 error_message="PR not found",
+            )
+            return
+
+        # Bail before spawning an agent when the PR is no longer worth analyzing.
+        from lazyreview.services.analysis_eligibility import (
+            analysis_ineligible_reason,
+            refresh_pr_analysis_flags,
+        )
+
+        # Drafts may be analyzed via manual Run/Retry; only refuse terminal /
+        # merge-queue PRs here so we do not burn tokens after the PR lands.
+        live = refresh_pr_analysis_flags(dict(pr))
+        skip = analysis_ineligible_reason(live, allow_draft=True)
+        if skip:
+            logger.info(
+                "Skipping analysis %s for PR %s: %s",
+                analysis_id,
+                pr.get("id"),
+                skip,
+            )
+            self._mark_terminal(
+                conn,
+                analysis_id,
+                status="cancelled",
+                finished_at=utcnow(),
+                error_message=f"Skipped: {skip}",
             )
             return
 

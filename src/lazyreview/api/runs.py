@@ -92,6 +92,7 @@ def create_review_run(body: CreateRunBody, request: Request):
             head_sha=data["head_sha"],
             state=data.get("state") or "open",
             is_draft=bool(data.get("is_draft")),
+            in_merge_queue=bool(data.get("in_merge_queue")),
             additions=data.get("additions"),
             deletions=data.get("deletions"),
             changed_files=data.get("changed_files"),

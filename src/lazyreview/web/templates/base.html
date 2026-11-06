@@ -136,14 +136,14 @@
                @click.outside="$store.notifications.close()"
                class="lr-notif-panel absolute right-0 z-40 mt-2 w-[22rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
                role="menu" aria-label="Notifications">
-            <div class="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5 dark:border-slate-800">
-              <span class="text-sm font-semibold text-slate-900 dark:text-slate-100">Notifications</span>
+            <div class="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-3 py-2.5 dark:border-slate-800">
+              <span class="min-w-0 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">Notifications</span>
               <button type="button"
-                      class="text-xs text-sky-600 hover:underline disabled:opacity-40 dark:text-sky-400"
+                      class="shrink-0 text-xs text-sky-600 hover:underline disabled:opacity-40 dark:text-sky-400"
                       :disabled="!$store.notifications.unreadCount"
                       @click="$store.notifications.markAllRead()">Mark all as read</button>
             </div>
-            <ul class="max-h-[min(24rem,60dvh)] divide-y divide-slate-100 overflow-y-auto overscroll-contain dark:divide-slate-800">
+            <ul class="divide-y divide-slate-100 overflow-y-auto overscroll-contain dark:divide-slate-800">
               <template x-for="item in $store.notifications.items" :key="item.id">
                 <li>
                   <a class="flex gap-2.5 px-3 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60"

@@ -203,6 +203,10 @@
         };
         window.addEventListener('resize', this._onChatWindowResize);
         window.addEventListener('scroll', this._onChatViewport, { passive: true });
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', this._onChatViewport);
+          window.visualViewport.addEventListener('scroll', this._onChatViewport);
+        }
 
         this.$nextTick(() => {
           this.restoreChatWidth();
@@ -288,7 +292,20 @@
         return w;
       },
 
+      _chatIsMobileSheet() {
+        try {
+          return window.matchMedia('(max-width: 900px)').matches;
+        } catch (e) {
+          return false;
+        }
+      },
+
       chatRailStyle() {
+        // Mobile sheet is sized entirely by CSS (fullscreen). Inline width from
+        // the desktop resizer would fight that layout.
+        if (this._chatIsMobileSheet()) {
+          return {};
+        }
         // Width/flex via plain properties (Alpine CSS-vars are unreliable).
         // Height comes from the row: rail stretches to 100% so it can never
         // outgrow the row and clip the composer border (overflow:hidden).
@@ -318,15 +335,43 @@
           if (row) {
             row.style.height = '';
             row.style.maxHeight = '';
+            row.style.top = '';
           }
           if (rail) {
             rail.style.height = '';
             rail.style.maxHeight = '';
+            rail.style.width = '';
+            rail.style.flexBasis = '';
+            rail.style.minWidth = '';
             rail.style.removeProperty('--lr-chat-height');
           }
           return;
         }
         if (!row || this._chatResizing) return;
+        // Full-viewport sheet on phones. Prefer visualViewport so the soft
+        // keyboard does not bury the composer / send button.
+        if (this._chatIsMobileSheet()) {
+          const vv = window.visualViewport;
+          const h = Math.max(
+            240,
+            Math.round((vv && vv.height) || window.innerHeight || 0)
+          );
+          this.chatHeightPx = h;
+          const pxH = h + 'px';
+          row.style.height = pxH;
+          row.style.maxHeight = pxH;
+          row.style.top = ((vv && vv.offsetTop) || 0) + 'px';
+          if (rail) {
+            rail.style.height = '100%';
+            rail.style.maxHeight = '100%';
+            rail.style.width = '';
+            rail.style.flexBasis = '';
+            rail.style.minWidth = '';
+            rail.style.removeProperty('--lr-chat-height');
+          }
+          return;
+        }
+        row.style.top = '';
         const top = row.getBoundingClientRect().top;
         let bottom = window.innerHeight - 4;
         const page = row.parentElement;

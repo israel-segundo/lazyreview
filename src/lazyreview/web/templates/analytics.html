@@ -217,7 +217,7 @@
       <p class="mt-0.5 text-xs text-slate-500">
         X = PR diff lines (additions + deletions) · Y = review duration · bubble size = total findings · color = model
       </p>
-      <div class="relative mt-3 h-[48rem]">
+      <div class="lr-analytics-bubble relative mt-3 h-[48rem]">
         <canvas id="chart-bubble"></canvas>
       </div>
     </section>
@@ -227,7 +227,7 @@
       <p class="mt-0.5 text-xs text-slate-500">
         X = PR diff lines · Y = run cost (USD) · bubble size = total findings · color = model · runs without cost omitted
       </p>
-      <div class="relative mt-3 h-[48rem]">
+      <div class="lr-analytics-bubble relative mt-3 h-[48rem]">
         <canvas id="chart-bubble-cost"></canvas>
       </div>
     </section>
@@ -238,7 +238,45 @@
       <h2 class="text-sm font-semibold">Combo table</h2>
       <p class="text-xs text-slate-500">All finished runs in period (succeeded + failed)</p>
     </div>
-    <div class="overflow-x-auto">
+    <div class="lr-analytics-combo-cards">
+      <template x-for="c in table" :key="'card-' + c.agent + '|' + c.model + '|' + c.effort">
+        <article class="lr-analytics-combo-card">
+          <div class="lr-analytics-combo-card__title">
+            <span x-text="c.agent"></span>
+            <span class="lr-analytics-combo-card__model" x-text="c.model"></span>
+            <span class="text-xs font-normal text-slate-500" x-text="c.effort || '—'"></span>
+          </div>
+          <dl class="lr-analytics-combo-card__grid">
+            <div class="lr-analytics-combo-card__stat">
+              <dt>Runs</dt>
+              <dd x-text="c.runs"></dd>
+            </div>
+            <div class="lr-analytics-combo-card__stat">
+              <dt>OK / fail</dt>
+              <dd x-text="(c.succeeded || 0) + ' / ' + (c.failed || 0)"></dd>
+            </div>
+            <div class="lr-analytics-combo-card__stat">
+              <dt>Avg duration</dt>
+              <dd x-text="fmtDuration(c.avg_duration_ms)"></dd>
+            </div>
+            <div class="lr-analytics-combo-card__stat">
+              <dt>Avg / total cost</dt>
+              <dd x-text="fmtCost(c.avg_cost_usd) + ' / ' + fmtCost(c.total_cost_usd)"></dd>
+            </div>
+            <div class="lr-analytics-combo-card__stat">
+              <dt>Avg tokens</dt>
+              <dd x-text="c.avg_total_tokens != null ? Math.round(c.avg_total_tokens) : '—'"></dd>
+            </div>
+            <div class="lr-analytics-combo-card__stat">
+              <dt>Avg H/M/L</dt>
+              <dd x-text="fmtAvg(c.avg_sev1) + ' / ' + fmtAvg(c.avg_sev2) + ' / ' + fmtAvg(c.avg_sev3)"></dd>
+            </div>
+          </dl>
+        </article>
+      </template>
+      <p x-show="!table.length" class="lr-analytics-combo-empty">No finished runs in this period.</p>
+    </div>
+    <div class="lr-analytics-combo-table overflow-x-auto">
       <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
         <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
           <tr>
@@ -254,7 +292,7 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-          <template x-for="c in table" :key="c.agent + '|' + c.model + '|' + c.effort">
+          <template x-for="c in table" :key="'row-' + c.agent + '|' + c.model + '|' + c.effort">
             <tr>
               <td class="px-4 py-3" x-text="c.agent"></td>
               <td class="px-4 py-3 font-mono text-xs" x-text="c.model"></td>

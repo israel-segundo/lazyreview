@@ -35,72 +35,74 @@
 
   <p x-show="error" x-cloak class="text-sm text-red-600 dark:text-red-400" x-text="error"></p>
 
-  <section class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-    <ul class="min-w-[28rem] divide-y divide-slate-100 text-sm dark:divide-slate-800 sm:min-w-0">
+  <section class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+    <ul class="lr-activity-list divide-y divide-slate-100 text-sm dark:divide-slate-800">
       <template x-for="item in items" :key="item.kind + '-' + item.id">
-        <li class="flex flex-wrap items-center gap-2 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/50">
-          <span class="inline-flex items-center gap-1">
-            <span class="lr-status-ball h-2.5 w-2.5"
-                  :class="statusBallClass(item)"
-                  role="img"
-                  :aria-label="item.status || item.kind"
-                  :title="item.status || item.kind"></span>
-            <template x-if="item.deprecated">
-              <span class="lr-status-ball lr-status-ball--deprecated h-2.5 w-2.5"
-                    title="Deprecated" role="img" aria-label="Deprecated"></span>
-            </template>
-            <template x-if="item.consolidated">
-              <span class="lr-status-ball lr-status-ball--consolidated h-2.5 w-2.5"
-                    title="Consolidated" role="img" aria-label="Consolidated"></span>
-            </template>
-          </span>
+        <li class="lr-activity-item hover:bg-slate-50 dark:hover:bg-slate-800/50">
+          <div class="lr-activity-item__row">
+            <span class="inline-flex shrink-0 items-center gap-1">
+              <span class="lr-status-ball h-2.5 w-2.5"
+                    :class="statusBallClass(item)"
+                    role="img"
+                    :aria-label="item.status || item.kind"
+                    :title="item.status || item.kind"></span>
+              <template x-if="item.deprecated">
+                <span class="lr-status-ball lr-status-ball--deprecated h-2.5 w-2.5"
+                      title="Deprecated" role="img" aria-label="Deprecated"></span>
+              </template>
+              <template x-if="item.consolidated">
+                <span class="lr-status-ball lr-status-ball--consolidated h-2.5 w-2.5"
+                      title="Consolidated" role="img" aria-label="Consolidated"></span>
+              </template>
+            </span>
 
-          <a class="font-medium text-blue-600 hover:underline dark:text-blue-400"
-             :href="'/prs/' + item.pr_id"
-             :title="item.title || ''"
-             x-text="item.pr_label"></a>
+            <a class="min-w-0 truncate font-medium text-blue-600 hover:underline dark:text-blue-400"
+               :href="'/prs/' + item.pr_id"
+               :title="item.title || ''"
+               x-text="item.pr_label"></a>
 
-          <a class="font-mono text-blue-600 hover:underline dark:text-blue-400"
-             :href="itemHref(item)"
-             x-text="kindLabel(item)"></a>
+            <span class="lr-activity-item__when text-xs text-slate-400"
+                  :title="formatAbsolute(item.when_at) || ''"
+                  x-text="formatRelative(item.when_at) || ''"></span>
+          </div>
 
-          <span class="text-slate-500" x-text="item.status"></span>
-
-          <span class="inline-flex min-w-0 items-center gap-1.5 text-slate-700 dark:text-slate-300"
-                x-show="item.agent">
-            <img x-show="agentKey(item.agent) === LR.AgentName.CLAUDE" x-cloak
-                 src="/static/img/agents/claude.webp" alt="" width="14" height="14"
-                 class="h-3.5 w-3.5 shrink-0 object-contain" />
-            <img x-show="agentKey(item.agent) === LR.AgentName.AGY" x-cloak
-                 src="/static/img/agents/agy.png" alt="" width="14" height="14"
-                 class="h-3.5 w-3.5 shrink-0 object-contain" />
-            <img x-show="agentKey(item.agent) === LR.AgentName.CODEX" x-cloak
-                 src="/static/img/agents/codex.svg" alt="" width="14" height="14"
-                 class="h-3.5 w-3.5 shrink-0 object-contain" />
-            <img x-show="agentKey(item.agent) === LR.AgentName.CURSOR" x-cloak
-                 src="/static/img/agents/cursor-light.png" alt="" width="14" height="14"
-                 class="h-3.5 w-3.5 shrink-0 object-contain dark:hidden" />
-            <img x-show="agentKey(item.agent) === LR.AgentName.CURSOR" x-cloak
-                 src="/static/img/agents/cursor-dark.png" alt="" width="14" height="14"
-                 class="h-3.5 w-3.5 shrink-0 object-contain hidden dark:inline" />
-            <span class="shrink-0" x-text="agentTitle(item.agent)"></span>
-            <template x-if="item.model">
-              <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
-                <span class="shrink-0 text-slate-400" aria-hidden="true">/</span>
-                <span class="min-w-0 truncate" x-text="item.model"></span>
-              </span>
-            </template>
-            <template x-if="item.effort">
-              <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
-                <span class="shrink-0 text-slate-400" aria-hidden="true">/</span>
-                <span class="min-w-0 truncate" x-text="item.effort"></span>
-              </span>
-            </template>
-          </span>
-
-          <span class="ml-auto text-xs text-slate-400"
-                :title="formatAbsolute(item.when_at) || ''"
-                x-text="formatRelative(item.when_at) || ''"></span>
+          <div class="lr-activity-item__meta">
+            <a class="font-mono text-blue-600 hover:underline dark:text-blue-400"
+               :href="itemHref(item)"
+               x-text="kindLabel(item)"></a>
+            <span class="text-slate-500" x-text="item.status"></span>
+            <span class="inline-flex min-w-0 max-w-full items-center gap-1.5 text-slate-700 dark:text-slate-300"
+                  x-show="item.agent">
+              <img x-show="agentKey(item.agent) === LR.AgentName.CLAUDE" x-cloak
+                   src="/static/img/agents/claude.webp" alt="" width="14" height="14"
+                   class="h-3.5 w-3.5 shrink-0 object-contain" />
+              <img x-show="agentKey(item.agent) === LR.AgentName.AGY" x-cloak
+                   src="/static/img/agents/agy.png" alt="" width="14" height="14"
+                   class="h-3.5 w-3.5 shrink-0 object-contain" />
+              <img x-show="agentKey(item.agent) === LR.AgentName.CODEX" x-cloak
+                   src="/static/img/agents/codex.svg" alt="" width="14" height="14"
+                   class="h-3.5 w-3.5 shrink-0 object-contain" />
+              <img x-show="agentKey(item.agent) === LR.AgentName.CURSOR" x-cloak
+                   src="/static/img/agents/cursor-light.png" alt="" width="14" height="14"
+                   class="h-3.5 w-3.5 shrink-0 object-contain dark:hidden" />
+              <img x-show="agentKey(item.agent) === LR.AgentName.CURSOR" x-cloak
+                   src="/static/img/agents/cursor-dark.png" alt="" width="14" height="14"
+                   class="h-3.5 w-3.5 shrink-0 object-contain hidden dark:inline" />
+              <span class="shrink-0" x-text="agentTitle(item.agent)"></span>
+              <template x-if="item.model">
+                <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
+                  <span class="shrink-0 text-slate-400" aria-hidden="true">/</span>
+                  <span class="min-w-0 truncate" x-text="item.model"></span>
+                </span>
+              </template>
+              <template x-if="item.effort">
+                <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
+                  <span class="shrink-0 text-slate-400" aria-hidden="true">/</span>
+                  <span class="min-w-0 truncate" x-text="item.effort"></span>
+                </span>
+              </template>
+            </span>
+          </div>
         </li>
       </template>
       <li x-show="!loading && !items.length" class="px-4 py-10 text-center text-slate-500">

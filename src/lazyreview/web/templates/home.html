@@ -76,36 +76,22 @@
     </div>
   </div>
 
-  <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-    <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
-      <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
-        <tr>
-          <th class="px-4 py-3 whitespace-nowrap">PR</th>
-          <th class="px-4 py-3 whitespace-nowrap">Title</th>
-          <th class="px-4 py-3 whitespace-nowrap">Author</th>
-          <th class="px-4 py-3 whitespace-nowrap"
-              title="Additions, deletions, and files changed on the PR">Diff</th>
-          <th class="px-4 py-3 whitespace-nowrap">PR status</th>
-          <th class="px-4 py-3 whitespace-nowrap">Review status</th>
-          <th class="px-4 py-3 whitespace-nowrap"
-              title="Any PR analysis, review run, or consolidation activity">Activity</th>
-          <th class="px-4 py-3 whitespace-nowrap" title="Days since the current head started awaiting review">Age</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-        <template x-for="pr in filteredPrs" :key="pr.id">
-          <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-            <td class="px-4 py-3 font-medium whitespace-nowrap">
-              <a class="text-blue-600 hover:underline dark:text-blue-400"
-                 :href="'/prs/' + pr.id"
-                 x-text="pr.repo + '#' + pr.number"></a>
-            </td>
-            <td class="px-4 py-3 text-slate-700 dark:text-slate-300" x-text="pr.title"></td>
-            <td class="px-4 py-3 whitespace-nowrap text-slate-600 dark:text-slate-300" x-text="pr.author || '—'"></td>
-            <td class="px-4 py-3 whitespace-nowrap tabular-nums text-xs"
-                :title="diffTitle(pr)">
+  <div class="lr-home-prs">
+    <!-- Mobile / narrow: stacked cards (no horizontal scroll). -->
+    <div class="lr-home-pr-cards" aria-label="Pull requests">
+      <template x-for="pr in filteredPrs" :key="'card-' + pr.id">
+        <a class="lr-home-pr-card" :href="'/prs/' + pr.id">
+          <div class="lr-home-pr-card__top">
+            <span class="lr-home-pr-card__id" x-text="pr.repo + '#' + pr.number"></span>
+            <span class="lr-home-pr-card__age" :title="pr.head_updated_at || ''"
+                  x-text="ageLabel(pr)"></span>
+          </div>
+          <p class="lr-home-pr-card__title" x-text="pr.title"></p>
+          <div class="lr-home-pr-card__meta">
+            <span class="lr-home-pr-card__author" x-text="pr.author || '—'"></span>
+            <span class="lr-home-pr-card__diff tabular-nums" :title="diffTitle(pr)">
               <template x-if="hasDiff(pr)">
-                <span class="inline-flex items-center gap-1 whitespace-nowrap">
+                <span class="inline-flex items-center gap-1">
                   <span class="text-emerald-700 dark:text-emerald-400"
                         x-text="'+' + Number(pr.additions || 0)"></span>
                   <span class="text-red-700 dark:text-red-400"
@@ -117,43 +103,113 @@
               <template x-if="!hasDiff(pr)">
                 <span class="text-slate-400 dark:text-slate-500">—</span>
               </template>
-            </td>
-            <td class="px-4 py-3 whitespace-nowrap">
-              <span class="rounded-full px-2 py-0.5 text-xs"
-                    :class="prStatusClass(pr)"
-                    x-text="prStatusLabel(pr)"></span>
-            </td>
-            <td class="px-4 py-3 whitespace-nowrap">
-              <span class="inline-flex flex-wrap items-center gap-1.5">
-                <span class="rounded-full px-2 py-0.5 text-xs"
-                      :class="internalStatusClass(pr)"
-                      x-text="pr.internal_status_label || 'needs review'"></span>
-                <span x-show="showPriorApproved(pr)" x-cloak
-                      class="rounded-full px-2 py-0.5 text-xs bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200"
-                      title="You approved an earlier head of this PR">approved</span>
-              </span>
-            </td>
-            <td class="px-4 py-3 whitespace-nowrap">
-              <span class="inline-flex items-center"
-                    :title="activityTitle(pr)"
-                    role="img"
-                    :aria-label="activityTitle(pr)">
-                <span class="lr-status-ball h-2.5 w-2.5"
-                      :class="activityBallClass(pr.activity_status)"></span>
-              </span>
-            </td>
-            <td class="px-4 py-3 whitespace-nowrap text-slate-700 dark:text-slate-300"
-                :title="pr.head_updated_at || ''"
-                x-text="ageLabel(pr)"></td>
+            </span>
+          </div>
+          <div class="lr-home-pr-card__badges">
+            <span class="rounded-full px-2 py-0.5 text-xs"
+                  :class="prStatusClass(pr)"
+                  x-text="prStatusLabel(pr)"></span>
+            <span class="rounded-full px-2 py-0.5 text-xs"
+                  :class="internalStatusClass(pr)"
+                  x-text="pr.internal_status_label || 'needs review'"></span>
+            <span x-show="showPriorApproved(pr)" x-cloak
+                  class="rounded-full px-2 py-0.5 text-xs bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200"
+                  title="You approved an earlier head of this PR">approved</span>
+            <span class="lr-home-pr-card__activity"
+                  :title="activityTitle(pr)"
+                  role="img"
+                  :aria-label="activityTitle(pr)">
+              <span class="lr-status-ball h-2.5 w-2.5"
+                    :class="activityBallClass(pr.activity_status)"></span>
+            </span>
+          </div>
+        </a>
+      </template>
+      <p x-show="filteredPrs.length === 0" x-cloak class="lr-home-pr-empty">
+        No PRs match the current filters.
+      </p>
+    </div>
+
+    <!-- Desktop: dense table. -->
+    <div class="lr-home-pr-table-wrap">
+      <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
+        <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
+          <tr>
+            <th class="px-4 py-3 whitespace-nowrap">PR</th>
+            <th class="px-4 py-3 whitespace-nowrap">Title</th>
+            <th class="px-4 py-3 whitespace-nowrap">Author</th>
+            <th class="px-4 py-3 whitespace-nowrap"
+                title="Additions, deletions, and files changed on the PR">Diff</th>
+            <th class="px-4 py-3 whitespace-nowrap">PR status</th>
+            <th class="px-4 py-3 whitespace-nowrap">Review status</th>
+            <th class="px-4 py-3 whitespace-nowrap"
+                title="Any PR analysis, review run, or consolidation activity">Activity</th>
+            <th class="px-4 py-3 whitespace-nowrap" title="Days since the current head started awaiting review">Age</th>
           </tr>
-        </template>
-        <tr x-show="filteredPrs.length === 0">
-          <td colspan="8" class="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
-            No PRs match the current filters.
-          </td>
-        </tr>
-      </tbody>
-    </table>
+        </thead>
+        <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+          <template x-for="pr in filteredPrs" :key="'row-' + pr.id">
+            <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+              <td class="px-4 py-3 font-medium whitespace-nowrap">
+                <a class="text-blue-600 hover:underline dark:text-blue-400"
+                   :href="'/prs/' + pr.id"
+                   x-text="pr.repo + '#' + pr.number"></a>
+              </td>
+              <td class="px-4 py-3 text-slate-700 dark:text-slate-300" x-text="pr.title"></td>
+              <td class="px-4 py-3 whitespace-nowrap text-slate-600 dark:text-slate-300" x-text="pr.author || '—'"></td>
+              <td class="px-4 py-3 whitespace-nowrap tabular-nums text-xs"
+                  :title="diffTitle(pr)">
+                <template x-if="hasDiff(pr)">
+                  <span class="inline-flex items-center gap-1 whitespace-nowrap">
+                    <span class="text-emerald-700 dark:text-emerald-400"
+                          x-text="'+' + Number(pr.additions || 0)"></span>
+                    <span class="text-red-700 dark:text-red-400"
+                          x-text="'−' + Number(pr.deletions || 0)"></span>
+                    <span class="text-slate-500 dark:text-slate-400"
+                          x-text="diffFilesLabel(pr)"></span>
+                  </span>
+                </template>
+                <template x-if="!hasDiff(pr)">
+                  <span class="text-slate-400 dark:text-slate-500">—</span>
+                </template>
+              </td>
+              <td class="px-4 py-3 whitespace-nowrap">
+                <span class="rounded-full px-2 py-0.5 text-xs"
+                      :class="prStatusClass(pr)"
+                      x-text="prStatusLabel(pr)"></span>
+              </td>
+              <td class="px-4 py-3 whitespace-nowrap">
+                <span class="inline-flex flex-wrap items-center gap-1.5">
+                  <span class="rounded-full px-2 py-0.5 text-xs"
+                        :class="internalStatusClass(pr)"
+                        x-text="pr.internal_status_label || 'needs review'"></span>
+                  <span x-show="showPriorApproved(pr)" x-cloak
+                        class="rounded-full px-2 py-0.5 text-xs bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200"
+                        title="You approved an earlier head of this PR">approved</span>
+                </span>
+              </td>
+              <td class="px-4 py-3 whitespace-nowrap">
+                <span class="inline-flex items-center"
+                      :title="activityTitle(pr)"
+                      role="img"
+                      :aria-label="activityTitle(pr)">
+                  <span class="lr-status-ball h-2.5 w-2.5"
+                        :class="activityBallClass(pr.activity_status)"></span>
+                </span>
+              </td>
+              <td class="px-4 py-3 whitespace-nowrap text-slate-700 dark:text-slate-300"
+                  :title="pr.head_updated_at || ''"
+                  x-text="ageLabel(pr)"></td>
+            </tr>
+          </template>
+          <tr x-show="filteredPrs.length === 0">
+            <td colspan="8" class="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+              No PRs match the current filters.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 <script>
