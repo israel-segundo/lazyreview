@@ -2042,6 +2042,23 @@ function reviewForm() {
     agentKey(name) {
       return (window.LR && window.LR.agentKey) ? window.LR.agentKey(name) : String(name || '').toLowerCase();
     },
+    agentSelectable(a) {
+      if (!a) return false;
+      if (typeof a.selectable === 'boolean') return a.selectable;
+      return !!a.available;
+    },
+    agentOptionLabel(a) {
+      if (!a) return '';
+      const name = a.display_name || a.name || '';
+      if (this.agentSelectable(a)) return name;
+      if (a.enabled === false) return name + ' (disabled)';
+      if (a.authenticated === false) return name + ' (not signed in)';
+      if (!a.available) return name + ' (missing)';
+      return name + ' (unavailable)';
+    },
+    firstSelectableAgent() {
+      return (this.agents || []).find(a => this.agentSelectable(a)) || null;
+    },
     agentTitle(name) {
       const s = String(name || '');
       if (!s) return '';
@@ -2728,7 +2745,7 @@ function reviewForm() {
       return (list || []).map(cfg => this._rowFromConfig(cfg));
     },
     _rowFromConfig(cfg) {
-      const first = this.agents.find(a => a.available) || this.agents[0];
+      const first = this.firstSelectableAgent() || this.agents[0];
       const row = {
         key: this._batchKeySeq++,
         agent: (cfg && cfg.agent) || (first ? first.name : ''),
@@ -2758,7 +2775,7 @@ function reviewForm() {
       this.batchCloseCombo();
     },
     _newBatchRow() {
-      const first = this.agents.find(a => a.available) || this.agents[0];
+      const first = this.firstSelectableAgent() || this.agents[0];
       const row = {
         key: this._batchKeySeq++,
         agent: first ? first.name : '',
@@ -2820,7 +2837,7 @@ function reviewForm() {
       const open = this.batchCombo;
       if (open !== row.key + ':agent') {
         const a = this.agents.find(x => x.name === row.agent);
-        row.agentQuery = a ? (a.display_name + (a.available ? '' : ' (missing)')) : (row.agent || '');
+        row.agentQuery = a ? this.agentOptionLabel(a) : (row.agent || '');
       }
       if (open !== row.key + ':model') {
         const m = row.models.find(x => x.id === row.model);
@@ -2904,7 +2921,11 @@ function reviewForm() {
         return String(hay || '').toLowerCase().includes(needle);
       };
       if (which === 'agent') {
-        return this.agents.filter(a => match(a.display_name) || match(a.name));
+        const selected = row && row.agent;
+        return this.agents.filter(a => {
+          if (!(this.agentSelectable(a) || a.name === selected)) return false;
+          return match(a.display_name) || match(a.name);
+        });
       }
       if (which === 'model') {
         return (row.models || []).filter(m => match(m.label) || match(m.id));
@@ -2919,12 +2940,12 @@ function reviewForm() {
     },
     batchOptionLabel(opt) {
       const which = this.batchComboWhich();
-      if (which === 'agent') return opt.display_name + (opt.available ? '' : ' (missing)');
+      if (which === 'agent') return this.agentOptionLabel(opt);
       if (which === 'model') return opt.label;
       return opt;
     },
     batchOptionDisabled(opt) {
-      return this.batchComboWhich() === 'agent' && opt && !opt.available;
+      return this.batchComboWhich() === 'agent' && opt && !this.agentSelectable(opt);
     },
     batchOptionClass(idx, disabled) {
       const base = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-sm ';
@@ -2955,7 +2976,7 @@ function reviewForm() {
       if (!row || !which) return;
       if (which === 'agent') {
         // Require a real agent object with a name id — never the display label.
-        if (!opt || typeof opt !== 'object' || !opt.name || !opt.available) return;
+        if (!opt || typeof opt !== 'object' || !opt.name || !this.agentSelectable(opt)) return;
         row.agent = opt.name;
         this._batchApplyAgent(row, true);
       } else if (which === 'model') {

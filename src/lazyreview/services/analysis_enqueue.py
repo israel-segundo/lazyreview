@@ -12,6 +12,7 @@ from lazyreview.db import (
     get_current_pr_analysis,
     get_pr,
 )
+from lazyreview.services.agent_eligibility import require_selectable_agent
 from lazyreview.services.analysis_eligibility import (
     analysis_ineligible_reason,
     refresh_pr_analysis_flags,
@@ -68,6 +69,9 @@ def ensure_analysis_for_pr(
     if not head_sha:
         return None
 
+    cfg = get_pr_analysis_config(conn)
+    require_selectable_agent(settings, conn, cfg["agent"])
+
     existing = get_current_pr_analysis(conn, pr_id)
     if existing and not force and existing["status"] in ("queued", "running", "succeeded"):
         return existing
@@ -84,7 +88,6 @@ def ensure_analysis_for_pr(
         # for the same head (UNIQUE). Easiest: update in place to queued.
         from lazyreview.db import update_pr_analysis
 
-        cfg = get_pr_analysis_config(conn)
         updated = update_pr_analysis(
             conn,
             int(existing["id"]),
@@ -109,7 +112,6 @@ def ensure_analysis_for_pr(
             runner.enqueue(int(updated["id"]))
         return updated
 
-    cfg = get_pr_analysis_config(conn)
     was_terminal = bool(
         existing and existing["status"] in ("failed", "cancelled")
     )

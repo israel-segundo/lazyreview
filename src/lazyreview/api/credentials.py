@@ -15,11 +15,11 @@ from lazyreview.services.credentials import (
 router = APIRouter(tags=["credentials"])
 
 PROVIDERS = (
-    {"id": "github", "label": "GitHub"},
-    {"id": "claude", "label": "Claude"},
-    {"id": "cursor", "label": "Cursor"},
-    {"id": "agy", "label": "Agy"},
-    {"id": "codex", "label": "Codex"},
+    {"id": "github", "label": "GitHub", "group": "general"},
+    {"id": "claude", "label": "Claude", "group": "agents"},
+    {"id": "cursor", "label": "Cursor", "group": "agents"},
+    {"id": "agy", "label": "Agy", "group": "agents"},
+    {"id": "codex", "label": "Codex", "group": "agents"},
 )
 
 

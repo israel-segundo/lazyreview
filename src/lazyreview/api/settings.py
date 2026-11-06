@@ -37,6 +37,7 @@ class SettingsBody(BaseModel):
     session_agent: str | None = None
     session_model: str | None = None
     session_effort: str | None = None
+    agent_enabled: dict[str, bool] | None = None
 
 
 @router.get("/settings")
@@ -73,6 +74,7 @@ def write_settings(body: SettingsBody, request: Request):
             session_agent=body.session_agent,
             session_model=body.session_model,
             session_effort=body.session_effort,
+            agent_enabled=body.agent_enabled,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

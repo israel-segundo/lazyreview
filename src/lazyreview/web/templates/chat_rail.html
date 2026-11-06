@@ -122,7 +122,7 @@
             </button>
             <ul x-show="chatOpenCombo === 'agent'" x-cloak class="lr-chat-combo__menu lr-chat-combo__menu--up">
               <template x-for="(a, idx) in chatFilteredAgents()" :key="a.name">
-                <li :class="chatComboOptionClass('agent', idx, a.available === false)"
+                <li :class="chatComboOptionClass('agent', idx, !agentSelectable(a))"
                     @mousedown.prevent="chatPickAgent(a)"
                     @mouseenter="chatComboHighlight = idx">
                   <span class="lr-chat-agent-icon" aria-hidden="true">
@@ -139,7 +139,7 @@
                   </span>
                   <span class="lr-chat-combo__option-main">
                     <span class="lr-chat-combo__option-title"
-                          x-text="(a.display_name || a.name) + (a.available === false ? ' (missing)' : '')"></span>
+                          x-text="agentOptionLabel(a)"></span>
                   </span>
                   <svg x-show="chatAgent === a.name" x-cloak class="lr-chat-combo__check" viewBox="0 0 24 24"
                        fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">

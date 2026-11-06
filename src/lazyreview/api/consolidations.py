@@ -21,6 +21,7 @@ from lazyreview.db import (
     mark_consolidation_feedback_provided,
     run_is_selectable,
 )
+from lazyreview.services.agent_eligibility import require_selectable_agent
 from lazyreview.services.analysis_gate import require_succeeded_analysis
 from lazyreview.services.consolidation_jobs import consolidations_dir
 from lazyreview.services.gh import (
@@ -37,6 +38,22 @@ from lazyreview.services.review_post import (
     partition_findings_for_github_post,
 )
 from lazyreview.services.settings import get_consolidator_config
+
+
+def _require_consolidator_selectable(request: Request) -> dict:
+    conn = request.app.state.db
+    cfg = get_consolidator_config(conn)
+    try:
+        get_adapter(cfg["agent"])
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    try:
+        require_selectable_agent(
+            request.app.state.settings, conn, cfg["agent"]
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return cfg
 
 logger = logging.getLogger(__name__)
 
@@ -93,16 +110,7 @@ def create_pr_consolidation(pr_id: int, body: CreateConsolidationBody, request: 
     require_succeeded_analysis(conn, pr_id)
 
     run_ids = _validate_run_ids(conn, pr_id, body.run_ids)
-    cfg = get_consolidator_config(conn)
-    try:
-        adapter = get_adapter(cfg["agent"])
-    except KeyError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    if not adapter.available():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Consolidator agent {cfg['agent']} binary not available on PATH",
-        )
+    cfg = _require_consolidator_selectable(request)
 
     settings.ensure_dirs()
     # Placeholder workdir; id assigned on insert
@@ -227,16 +235,7 @@ def regenerate_consolidation(consolidation_id: int, request: Request):
                 detail=f"Run #{rid} is already in an active consolidation",
             )
 
-    cfg = get_consolidator_config(conn)
-    try:
-        adapter = get_adapter(cfg["agent"])
-    except KeyError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    if not adapter.available():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Consolidator agent {cfg['agent']} binary not available on PATH",
-        )
+    cfg = _require_consolidator_selectable(request)
 
     pr = get_pr(conn, int(row["pr_id"]))
     updated = update_consolidation(
@@ -299,16 +298,7 @@ def regenerate_publish(consolidation_id: int, request: Request):
             detail="No internal report to publish from",
         )
 
-    cfg = get_consolidator_config(conn)
-    try:
-        adapter = get_adapter(cfg["agent"])
-    except KeyError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    if not adapter.available():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Consolidator agent {cfg['agent']} binary not available on PATH",
-        )
+    _require_consolidator_selectable(request)
 
     update_consolidation(
         conn,

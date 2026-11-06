@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from lazyreview.agents.names import (
+    ALL_AGENT_NAMES,
     AgentName,
     ClaudeModelAlias,
     DEFAULT_AGY_MODEL,
@@ -315,9 +316,10 @@ DEFAULT_SETTINGS = {
     "session_agent": AgentName.CLAUDE.value,
     "session_model": ClaudeModelAlias.OPUS.value,
     "session_effort": EffortLevel.HIGH.value,
+    # agent_enabled seeded in init_db (JSON map of agent → bool; default all true)
 }
 
-SCHEMA_VERSION = 29
+SCHEMA_VERSION = 30
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -556,6 +558,10 @@ def init_db(conn: sqlite3.Connection) -> None:
     if verify_prompt_seed:
         defaults["verify_prompt"] = verify_prompt_seed
     defaults["batch_review_defaults"] = json.dumps(DEFAULT_BATCH_REVIEW_DEFAULTS)
+    defaults["agent_enabled"] = json.dumps(
+        {name: True for name in sorted(ALL_AGENT_NAMES)},
+        sort_keys=True,
+    )
     for key, value in defaults.items():
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
@@ -926,6 +932,17 @@ def init_db(conn: sqlite3.Connection) -> None:
                 "UPDATE settings SET value = ? WHERE key = 'publish_prompt'",
                 (publish_prompt_seed,),
             )
+
+    if prev is not None and prev < 30:
+        # Per-agent enable toggles for dropdowns / enqueue (default all on).
+        enabled_json = json.dumps(
+            {name: True for name in sorted(ALL_AGENT_NAMES)},
+            sort_keys=True,
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+            ("agent_enabled", enabled_json),
+        )
 
     if prev is not None and prev < 10 and prompt_seed:
         conn.execute(

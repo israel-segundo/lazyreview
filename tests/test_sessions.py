@@ -92,7 +92,7 @@ def test_schema_has_chat_tables(tmp_path: Path):
     conn = connect(db)
     init_db(conn)
     ver = conn.execute("SELECT version FROM schema_version").fetchone()["version"]
-    assert ver == SCHEMA_VERSION == 29
+    assert ver == SCHEMA_VERSION == 30
     tables = {
         r["name"]
         for r in conn.execute(

@@ -510,7 +510,21 @@
         return String(raw);
       },
 
-      async loadAgentsCatalog() {
+            agentSelectable(a) {
+        if (!a) return false;
+        if (typeof a.selectable === 'boolean') return a.selectable;
+        return a.available !== false;
+      },
+      agentOptionLabel(a) {
+        if (!a) return '';
+        const name = a.display_name || a.name || '';
+        if (this.agentSelectable(a)) return name;
+        if (a.enabled === false) return name + ' (disabled)';
+        if (a.authenticated === false) return name + ' (not signed in)';
+        if (a.available === false) return name + ' (missing)';
+        return name + ' (unavailable)';
+      },
+async loadAgentsCatalog() {
         try {
           const res = await fetch('/api/agents');
           if (!res.ok) return;
@@ -530,7 +544,14 @@
           );
         }
         return Object.values(window.LR.AgentName || { CLAUDE: 'claude', CURSOR: 'cursor', AGY: 'agy', CODEX: 'codex' }).map(
-          (name) => ({ name: name, display_name: name, available: true })
+          (name) => ({
+            name: name,
+            display_name: name,
+            available: true,
+            authenticated: true,
+            enabled: true,
+            selectable: true,
+          })
         );
       },
 
@@ -594,7 +615,7 @@
       chatAgentLabel() {
         const a = this.chatAgentsList().find((x) => x.name === this.chatAgent);
         if (!a) return this.chatAgent || '';
-        return (a.display_name || a.name) + (a.available === false ? ' (missing)' : '');
+        return this.agentOptionLabel(a);
       },
 
       chatModelLabel() {
@@ -624,9 +645,11 @@
 
       chatFilteredAgents() {
         const q = this.chatOpenCombo === 'agent' ? this.chatAgentQuery : '';
-        return this.chatAgentsList().filter(
-          (a) => this._chatMatch(a.display_name, q) || this._chatMatch(a.name, q)
-        );
+        const selected = this.chatAgent;
+        return this.chatAgentsList().filter((a) => {
+          if (!(this.agentSelectable(a) || a.name === selected)) return false;
+          return this._chatMatch(a.display_name, q) || this._chatMatch(a.name, q);
+        });
       },
 
       chatFilteredModels() {
@@ -702,7 +725,7 @@
       },
 
       chatPickAgent(a) {
-        if (!a || a.available === false) return;
+        if (!a || !this.agentSelectable(a)) return;
         this.chatAgent = a.name;
         this.chatOpenCombo = null;
         this.chatComboHighlight = -1;

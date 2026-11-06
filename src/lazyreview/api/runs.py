@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from lazyreview.agents import get_adapter
 from lazyreview.db import create_run, get_pr, get_run, list_findings, upsert_pr
+from lazyreview.services.agent_eligibility import require_selectable_agent
 from lazyreview.services.gh import GhError, view_pr
 
 router = APIRouter(tags=["runs"])
@@ -38,13 +39,13 @@ class BatchCreateBody(BaseModel):
 
 def _create_one_run(conn, settings, jobs, *, pr, agent: str, model: str, effort: str | None, skill: str):
     try:
-        adapter = get_adapter(agent)
+        get_adapter(agent)
     except KeyError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    if not adapter.available():
-        raise HTTPException(
-            status_code=400, detail=f"Agent {agent} binary not available on PATH"
-        )
+    try:
+        require_selectable_agent(settings, conn, agent)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     require_succeeded_analysis(conn, int(pr["id"]))
     run = create_run(
         conn,
@@ -126,16 +127,13 @@ def create_review_runs_batch(body: BatchCreateBody, request: Request):
 
     consolidator_cfg = get_consolidator_config(conn)
     try:
-        adapter = get_adapter(consolidator_cfg["agent"])
+        get_adapter(consolidator_cfg["agent"])
     except KeyError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    if not adapter.available():
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Consolidator agent {consolidator_cfg['agent']} binary not available on PATH"
-            ),
-        )
+    try:
+        require_selectable_agent(settings, conn, consolidator_cfg["agent"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     created = []
     for item in body.runs:
@@ -229,14 +227,15 @@ def rerun_review_run(run_id: int, request: Request):
         )
 
     try:
-        adapter = get_adapter(str(run["agent"]))
+        get_adapter(str(run["agent"]))
     except KeyError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    if not adapter.available():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Agent {run['agent']} binary not available on PATH",
+    try:
+        require_selectable_agent(
+            request.app.state.settings, conn, str(run["agent"])
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     pr = get_pr(conn, int(run["pr_id"]))
     workdir = Path(run["workdir_path"] or "")

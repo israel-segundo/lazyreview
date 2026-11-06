@@ -38,6 +38,7 @@ from lazyreview.findings_taxonomy import (
     coerce_findings_for_persist,
     findings_to_json,
 )
+from lazyreview.services.agent_eligibility import require_selectable_agent
 from lazyreview.services.review_post import (
     ensure_publish_sources_disclosure,
     parse_findings_list,
@@ -1183,6 +1184,20 @@ class ConsolidationRunner:
 
         verify_cfg = get_verify_config(conn)
         v_agent = verify_cfg["agent"]
+        try:
+            require_selectable_agent(self.settings, conn, v_agent)
+        except ValueError as e:
+            duration_ms = int((time.monotonic() - started) * 1000)
+            update_consolidation(
+                conn,
+                consolidation_id,
+                status="failed",
+                finished_at=utcnow(),
+                duration_ms=duration_ms,
+                ready_to_post=0,
+                error_message=str(e)[-2000:],
+            )
+            return str(e)
         v_model = verify_cfg["model"]
         v_effort = verify_cfg["effort"] or None
         verify_prompt_path = work_dir / "verify-prompt.md"

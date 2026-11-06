@@ -36,6 +36,7 @@ from lazyreview.findings_taxonomy import (
     findings_to_json,
     severity_word,
 )
+from lazyreview.services.agent_eligibility import require_selectable_agent
 from lazyreview.services.credentials import subprocess_env
 from lazyreview.services.pr_workspace import hold_worktree
 from lazyreview.services.session_safety import (
@@ -301,6 +302,8 @@ class SessionRunner:
             if existing:
                 return existing
         d_agent, d_model, d_effort = _session_defaults(conn)
+        chosen_agent = (agent or d_agent).strip().lower()
+        require_selectable_agent(self.settings, conn, chosen_agent)
         work = sessions_dir(self.settings) / "pending"
         work.mkdir(parents=True, exist_ok=True)
         row = create_chat_session(
@@ -308,7 +311,7 @@ class SessionRunner:
             pr_id=pr_id,
             head_sha=head,
             mode="explore",
-            agent=(agent or d_agent).strip().lower(),
+            agent=chosen_agent,
             model=(model or d_model).strip(),
             effort=(effort if effort is not None else d_effort) or None,
         )
@@ -345,6 +348,8 @@ class SessionRunner:
             if existing:
                 return existing
         d_agent, d_model, d_effort = _session_defaults(conn)
+        chosen_agent = (agent or d_agent).strip().lower()
+        require_selectable_agent(self.settings, conn, chosen_agent)
         findings_json = consol.get("findings_json") or "[]"
         body_md = (consol.get("body") or "").strip() or None
         row = create_chat_session(
@@ -353,7 +358,7 @@ class SessionRunner:
             head_sha=(consol.get("head_sha") or pr.get("head_sha") or "").strip(),
             mode="challenge",
             consolidation_id=consolidation_id,
-            agent=(agent or d_agent).strip().lower(),
+            agent=chosen_agent,
             model=(model or d_model).strip(),
             effort=(effort if effort is not None else d_effort) or None,
             working_findings_json=findings_json
@@ -398,7 +403,9 @@ class SessionRunner:
     ) -> dict[str, Any]:
         fields: dict[str, Any] = {}
         if agent is not None:
-            fields["agent"] = agent.strip().lower()
+            chosen = agent.strip().lower()
+            require_selectable_agent(self.settings, self._conn, chosen)
+            fields["agent"] = chosen
             fields["cli_session_id"] = None
         if model is not None:
             fields["model"] = model.strip()

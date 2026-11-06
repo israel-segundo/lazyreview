@@ -59,6 +59,8 @@ def start_pr_analysis(pr_id: int, request: Request):
         )
     except AnalysisSkipped as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if not row:
         raise HTTPException(status_code=400, detail="Could not enqueue analysis")
     return row
@@ -84,6 +86,8 @@ def retry_pr_analysis(pr_id: int, request: Request):
         )
     except AnalysisSkipped as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if not row:
         raise HTTPException(status_code=400, detail="Could not enqueue analysis")
     return row

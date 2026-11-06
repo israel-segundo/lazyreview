@@ -414,7 +414,7 @@
                 <ul x-show="openCombo === 'agent'" x-cloak
                     class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
                   <template x-for="(a, idx) in filteredAgents()" :key="a.name">
-                    <li :class="comboOptionClass('agent', idx, !a.available)"
+                    <li :class="comboOptionClass('agent', idx, !this.agentSelectable(a))"
                         @mousedown.prevent="pickAgent(a)"
                         @mouseenter="comboHighlight = idx">
                       <span class="inline-flex shrink-0 items-center" aria-hidden="true">
@@ -434,7 +434,7 @@
                              src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
                              class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
                       </span>
-                      <span x-text="a.display_name + (a.available ? '' : ' (missing)')"></span>
+                      <span x-text="this.agentOptionLabel(a)"></span>
                     </li>
                   </template>
                 </ul>
@@ -582,7 +582,7 @@
                 <ul x-show="verifyOpenCombo === 'agent'" x-cloak
                     class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
                   <template x-for="(a, idx) in verifyFilteredAgents()" :key="a.name">
-                    <li :class="verifyComboOptionClass('agent', idx, !a.available)"
+                    <li :class="verifyComboOptionClass('agent', idx, !this.agentSelectable(a))"
                         @mousedown.prevent="verifyPickAgent(a)"
                         @mouseenter="verifyComboHighlight = idx">
                       <span class="inline-flex shrink-0 items-center" aria-hidden="true">
@@ -602,7 +602,7 @@
                              src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
                              class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
                       </span>
-                      <span x-text="a.display_name + (a.available ? '' : ' (missing)')"></span>
+                      <span x-text="this.agentOptionLabel(a)"></span>
                     </li>
                   </template>
                 </ul>
@@ -749,7 +749,7 @@
                 <ul x-show="analysisOpenCombo === 'agent'" x-cloak
                     class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
                   <template x-for="(a, idx) in analysisFilteredAgents()" :key="a.name">
-                    <li :class="analysisComboOptionClass('agent', idx, !a.available)"
+                    <li :class="analysisComboOptionClass('agent', idx, !this.agentSelectable(a))"
                         @mousedown.prevent="analysisPickAgent(a)"
                         @mouseenter="analysisComboHighlight = idx">
                       <span class="inline-flex shrink-0 items-center" aria-hidden="true">
@@ -769,7 +769,7 @@
                              src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
                              class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
                       </span>
-                      <span x-text="a.display_name + (a.available ? '' : ' (missing)')"></span>
+                      <span x-text="this.agentOptionLabel(a)"></span>
                     </li>
                   </template>
                 </ul>
@@ -910,7 +910,7 @@
               <ul x-show="sessionOpenCombo === 'agent'" x-cloak
                   class="absolute left-0 right-0 top-full z-40 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-600 dark:bg-slate-950">
                 <template x-for="(a, idx) in sessionFilteredAgents()" :key="a.name">
-                  <li :class="sessionComboOptionClass('agent', idx, !a.available)"
+                  <li :class="sessionComboOptionClass('agent', idx, !this.agentSelectable(a))"
                       @mousedown.prevent="sessionPickAgent(a)"
                       @mouseenter="sessionComboHighlight = idx">
                     <span class="inline-flex shrink-0 items-center" aria-hidden="true">
@@ -930,7 +930,7 @@
                            src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
                            class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
                     </span>
-                    <span x-text="a.display_name + (a.available ? '' : ' (missing)')"></span>
+                    <span x-text="this.agentOptionLabel(a)"></span>
                   </li>
                 </template>
               </ul>
@@ -1053,117 +1053,231 @@
       <header class="lr-settings-header">
         <h1 class="lr-settings-title">Credentials</h1>
         <p class="lr-settings-sub">
-          Keys for GitHub and the agent CLIs, or log in through the browser.
-          Saved keys override <code class="rounded bg-slate-200/80 px-1 dark:bg-slate-800">.env</code>,
-          are stored in <code class="rounded bg-slate-200/80 px-1 dark:bg-slate-800">credentials.json</code>
-          in the data directory, and are never shown again.
+          GitHub for sync and posting; agent CLIs for analysis, reviews, consolidations, and chat.
+          Disable an agent to hide it from dropdowns without deleting its keys.
+          Saved keys override <code class="rounded bg-slate-200/80 px-1 dark:bg-slate-800">.env</code>
+          and are never shown again.
         </p>
       </header>
 
-      <div class="lr-settings-grid">
-        <template x-for="p in providers" :key="p.id">
-          <div class="lr-settings-card">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <div class="flex items-center gap-2">
-                <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100" x-text="p.label"></h2>
-                <span class="rounded-full px-2 py-0.5 text-xs font-medium"
-                      :class="statusClass(p.id)"
-                      x-text="statusText(p.id)"
-                      :title="(status[p.id] && status[p.id].detail) || ''"></span>
-              </div>
-              <button type="button" @click="check(p.id)"
-                      :disabled="status[p.id] && status[p.id].checking"
-                      class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
-                Check
-              </button>
-            </div>
-
-            <template x-for="c in credsFor(p.id)" :key="c.key">
-              <div class="mt-4">
-                <div class="flex flex-wrap items-baseline justify-between gap-2">
-                  <label class="text-sm font-medium text-slate-700 dark:text-slate-300" :for="'cred-' + c.key" x-text="c.label"></label>
-                  <span class="font-mono text-xs text-slate-500 dark:text-slate-400" x-text="sourceText(c)"></span>
+      <section class="mb-8">
+        <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">General</h2>
+        <div class="lr-settings-grid">
+          <template x-for="p in generalProviders()" :key="'g-' + p.id">
+            <div class="lr-settings-card">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <h3 class="text-base font-semibold text-slate-900 dark:text-slate-100" x-text="p.label"></h3>
+                  <span class="rounded-full px-2 py-0.5 text-xs font-medium"
+                        :class="statusClass(p.id)"
+                        x-text="statusText(p.id)"
+                        :title="(status[p.id] && status[p.id].detail) || ''"></span>
                 </div>
-                <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400" x-text="c.help"></p>
-                <div class="mt-2 flex flex-wrap items-center gap-2">
-                  <input type="password" autocomplete="off" spellcheck="false"
-                         :id="'cred-' + c.key"
-                         :placeholder="c.key"
-                         x-model="drafts[c.key]"
-                         @keydown.enter.prevent="save(c)"
-                         class="min-w-[14rem] flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
-                  <button type="button" @click="save(c)" :disabled="!(drafts[c.key] || '').trim()"
-                          class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
-                    Save
-                  </button>
-                  <button type="button" x-show="c.source === 'settings'" @click="remove(c)"
-                          class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
-                    Remove
-                  </button>
-                </div>
-                <p class="mt-1 text-xs text-slate-500 dark:text-slate-400" x-show="msgs[c.key]" x-text="msgs[c.key]"></p>
+                <button type="button" @click="check(p.id)"
+                        :disabled="status[p.id] && status[p.id].checking"
+                        class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+                  Check
+                </button>
               </div>
-            </template>
-
-            <div class="mt-5 border-t border-slate-200 pt-4 dark:border-slate-700">
-              <template x-if="!p.login">
-                <p class="text-sm text-slate-500 dark:text-slate-400">
-                  Browser login isn't available for this CLI here. Paste a token above.
-                </p>
-              </template>
-              <template x-if="p.login">
-                <div>
-                  <div class="flex flex-wrap items-center gap-2">
-                    <button type="button" @click="login(p.id)"
-                            :disabled="loginRunning(p.id)"
-                            class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
-                      Log in with browser
-                    </button>
-                    <button type="button" x-show="loginRunning(p.id)" @click="cancelLogin(p.id)"
-                            class="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100">
-                      Cancel
-                    </button>
-                    <span class="text-sm text-slate-500 dark:text-slate-400" x-text="loginText(p.id)"></span>
+              <template x-for="c in credsFor(p.id)" :key="c.key">
+                <div class="mt-4">
+                  <div class="flex flex-wrap items-baseline justify-between gap-2">
+                    <label class="text-sm font-medium text-slate-700 dark:text-slate-300" :for="'cred-' + c.key" x-text="c.label"></label>
+                    <span class="font-mono text-xs text-slate-500 dark:text-slate-400" x-text="sourceText(c)"></span>
                   </div>
-                  <p x-show="credsFor(p.id).some(c => c.source)" class="mt-2 text-xs text-amber-700 dark:text-amber-400">
-                    A key is set above; the CLI uses it instead of a browser login until you remove it.
-                  </p>
-
-                  <template x-if="logins[p.id] && logins[p.id].status === 'running'">
-                    <div class="mt-3 space-y-2 text-sm">
-                      <p x-show="logins[p.id].user_code" class="text-slate-700 dark:text-slate-300">
-                        Enter this code:
-                        <span class="ml-1 rounded bg-slate-100 px-2 py-0.5 font-mono text-base font-semibold tracking-wider dark:bg-slate-800" x-text="logins[p.id].user_code"></span>
-                      </p>
-                      <p x-show="logins[p.id].url" class="break-all">
-                        <a :href="logins[p.id].url" target="_blank" rel="noopener noreferrer"
-                           class="font-medium text-blue-600 underline hover:text-blue-700 dark:text-blue-400">Open the login page</a>
-                        <span class="text-slate-500 dark:text-slate-400"> and finish signing in there.</span>
-                      </p>
-                      <p x-show="!logins[p.id].url" class="text-slate-500 dark:text-slate-400">Waiting for the login link…</p>
-                      <div x-show="logins[p.id].needs_code" class="flex flex-wrap items-center gap-2">
-                        <input type="text" autocomplete="off" spellcheck="false"
-                               placeholder="Paste the authorization code"
-                               x-model="codes[p.id]"
-                               @keydown.enter.prevent="submitCode(p.id)"
-                               class="min-w-[14rem] flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
-                        <button type="button" @click="submitCode(p.id)" :disabled="!(codes[p.id] || '').trim()"
-                                class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
-                          Submit code
-                        </button>
-                      </div>
-                    </div>
-                  </template>
-
-                  <template x-if="logins[p.id] && logins[p.id].status === 'failed'">
-                    <pre class="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-100 p-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300" x-text="logins[p.id].output"></pre>
-                  </template>
+                  <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400" x-text="c.help"></p>
+                  <div class="mt-2 flex flex-wrap items-center gap-2">
+                    <input type="password" autocomplete="off" spellcheck="false"
+                           :id="'cred-' + c.key"
+                           :placeholder="c.key"
+                           x-model="drafts[c.key]"
+                           @keydown.enter.prevent="save(c)"
+                           class="min-w-[14rem] flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
+                    <button type="button" @click="save(c)" :disabled="!(drafts[c.key] || '').trim()"
+                            class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+                      Save
+                    </button>
+                    <button type="button" x-show="c.source === 'settings'" @click="remove(c)"
+                            class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+                      Remove
+                    </button>
+                  </div>
+                  <p class="mt-1 text-xs text-slate-500 dark:text-slate-400" x-show="msgs[c.key]" x-text="msgs[c.key]"></p>
                 </div>
               </template>
+              <div class="mt-5 border-t border-slate-200 pt-4 dark:border-slate-700">
+                <template x-if="p.login">
+                  <div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <button type="button" @click="login(p.id)"
+                              :disabled="loginRunning(p.id)"
+                              class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+                        Log in with browser
+                      </button>
+                      <button type="button" x-show="loginRunning(p.id)" @click="cancelLogin(p.id)"
+                              class="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100">
+                        Cancel
+                      </button>
+                      <span class="text-sm text-slate-500 dark:text-slate-400" x-text="loginText(p.id)"></span>
+                    </div>
+                    <p x-show="credsFor(p.id).some(c => c.source)" class="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                      A key is set above; the CLI uses it instead of a browser login until you remove it.
+                    </p>
+                    <template x-if="logins[p.id] && logins[p.id].status === 'running'">
+                      <div class="mt-3 space-y-2 text-sm">
+                        <p x-show="logins[p.id].user_code" class="text-slate-700 dark:text-slate-300">
+                          Enter this code:
+                          <span class="ml-1 rounded bg-slate-100 px-2 py-0.5 font-mono text-base font-semibold tracking-wider dark:bg-slate-800" x-text="logins[p.id].user_code"></span>
+                        </p>
+                        <p x-show="logins[p.id].url" class="break-all">
+                          <a :href="logins[p.id].url" target="_blank" rel="noopener noreferrer"
+                             class="font-medium text-blue-600 underline hover:text-blue-700 dark:text-blue-400">Open the login page</a>
+                          <span class="text-slate-500 dark:text-slate-400"> and finish signing in there.</span>
+                        </p>
+                        <p x-show="!logins[p.id].url" class="text-slate-500 dark:text-slate-400">Waiting for the login link…</p>
+                        <div x-show="logins[p.id].needs_code" class="flex flex-wrap items-center gap-2">
+                          <input type="text" autocomplete="off" spellcheck="false"
+                                 placeholder="Paste the authorization code"
+                                 x-model="codes[p.id]"
+                                 @keydown.enter.prevent="submitCode(p.id)"
+                                 class="min-w-[14rem] flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
+                          <button type="button" @click="submitCode(p.id)" :disabled="!(codes[p.id] || '').trim()"
+                                  class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+                            Submit code
+                          </button>
+                        </div>
+                      </div>
+                    </template>
+                    <template x-if="logins[p.id] && logins[p.id].status === 'failed'">
+                      <pre class="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-100 p-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300" x-text="logins[p.id].output"></pre>
+                    </template>
+                  </div>
+                </template>
+              </div>
             </div>
-          </div>
-        </template>
-      </div>
+          </template>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Agents</h2>
+        <p class="mb-3 text-sm text-slate-500 dark:text-slate-400">
+          Toggle <span class="font-medium">Use in dropdowns</span> off to keep credentials but hide the agent from analysis, reviews, consolidation, verify, and chat pickers.
+        </p>
+        <div class="lr-settings-grid">
+          <template x-for="p in agentProviders()" :key="'a-' + p.id">
+            <div class="lr-settings-card">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <h3 class="text-base font-semibold text-slate-900 dark:text-slate-100" x-text="p.label"></h3>
+                  <span class="rounded-full px-2 py-0.5 text-xs font-medium"
+                        :class="statusClass(p.id)"
+                        x-text="statusText(p.id)"
+                        :title="(status[p.id] && status[p.id].detail) || ''"></span>
+                </div>
+                <button type="button" @click="check(p.id)"
+                        :disabled="status[p.id] && status[p.id].checking"
+                        class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+                  Check
+                </button>
+              </div>
+
+              <label class="mt-4 flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/60">
+                <span class="text-sm font-medium text-slate-800 dark:text-slate-200">Use in dropdowns</span>
+                <input type="checkbox"
+                       class="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500 dark:border-slate-600 dark:bg-slate-800"
+                       :checked="!!agentEnabled[p.id]"
+                       @change="toggleAgentEnabled(p.id, $event.target.checked)"
+                       :disabled="!!enabledBusy[p.id]" />
+              </label>
+              <p class="mt-1 text-xs text-slate-500 dark:text-slate-400"
+                 x-show="enabledMsgs[p.id]" x-text="enabledMsgs[p.id]"></p>
+
+              <template x-for="c in credsFor(p.id)" :key="c.key">
+                <div class="mt-4">
+                  <div class="flex flex-wrap items-baseline justify-between gap-2">
+                    <label class="text-sm font-medium text-slate-700 dark:text-slate-300" :for="'cred-' + c.key" x-text="c.label"></label>
+                    <span class="font-mono text-xs text-slate-500 dark:text-slate-400" x-text="sourceText(c)"></span>
+                  </div>
+                  <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400" x-text="c.help"></p>
+                  <div class="mt-2 flex flex-wrap items-center gap-2">
+                    <input type="password" autocomplete="off" spellcheck="false"
+                           :id="'cred-' + c.key"
+                           :placeholder="c.key"
+                           x-model="drafts[c.key]"
+                           @keydown.enter.prevent="save(c)"
+                           class="min-w-[14rem] flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
+                    <button type="button" @click="save(c)" :disabled="!(drafts[c.key] || '').trim()"
+                            class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+                      Save
+                    </button>
+                    <button type="button" x-show="c.source === 'settings'" @click="remove(c)"
+                            class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+                      Remove
+                    </button>
+                  </div>
+                  <p class="mt-1 text-xs text-slate-500 dark:text-slate-400" x-show="msgs[c.key]" x-text="msgs[c.key]"></p>
+                </div>
+              </template>
+
+              <div class="mt-5 border-t border-slate-200 pt-4 dark:border-slate-700">
+                <template x-if="!p.login">
+                  <p class="text-sm text-slate-500 dark:text-slate-400">
+                    Browser login isn't available for this CLI here. Paste a token above.
+                  </p>
+                </template>
+                <template x-if="p.login">
+                  <div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <button type="button" @click="login(p.id)"
+                              :disabled="loginRunning(p.id)"
+                              class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+                        Log in with browser
+                      </button>
+                      <button type="button" x-show="loginRunning(p.id)" @click="cancelLogin(p.id)"
+                              class="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100">
+                        Cancel
+                      </button>
+                      <span class="text-sm text-slate-500 dark:text-slate-400" x-text="loginText(p.id)"></span>
+                    </div>
+                    <p x-show="credsFor(p.id).some(c => c.source)" class="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                      A key is set above; the CLI uses it instead of a browser login until you remove it.
+                    </p>
+                    <template x-if="logins[p.id] && logins[p.id].status === 'running'">
+                      <div class="mt-3 space-y-2 text-sm">
+                        <p x-show="logins[p.id].user_code" class="text-slate-700 dark:text-slate-300">
+                          Enter this code:
+                          <span class="ml-1 rounded bg-slate-100 px-2 py-0.5 font-mono text-base font-semibold tracking-wider dark:bg-slate-800" x-text="logins[p.id].user_code"></span>
+                        </p>
+                        <p x-show="logins[p.id].url" class="break-all">
+                          <a :href="logins[p.id].url" target="_blank" rel="noopener noreferrer"
+                             class="font-medium text-blue-600 underline hover:text-blue-700 dark:text-blue-400">Open the login page</a>
+                          <span class="text-slate-500 dark:text-slate-400"> and finish signing in there.</span>
+                        </p>
+                        <p x-show="!logins[p.id].url" class="text-slate-500 dark:text-slate-400">Waiting for the login link…</p>
+                        <div x-show="logins[p.id].needs_code" class="flex flex-wrap items-center gap-2">
+                          <input type="text" autocomplete="off" spellcheck="false"
+                                 placeholder="Paste the authorization code"
+                                 x-model="codes[p.id]"
+                                 @keydown.enter.prevent="submitCode(p.id)"
+                                 class="min-w-[14rem] flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
+                          <button type="button" @click="submitCode(p.id)" :disabled="!(codes[p.id] || '').trim()"
+                                  class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white">
+                            Submit code
+                          </button>
+                        </div>
+                      </div>
+                    </template>
+                    <template x-if="logins[p.id] && logins[p.id].status === 'failed'">
+                      <pre class="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-100 p-2 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300" x-text="logins[p.id].output"></pre>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </section>
     </div>
   </section>
 </div>
@@ -1179,19 +1293,64 @@ function credentialsPanel() {
     status: {},
     logins: {},
     codes: {},
+    agentEnabled: {},
+    enabledBusy: {},
+    enabledMsgs: {},
     init() {
       if (this.section === 'credentials') this.load();
       this.$watch('section', (v) => { if (v === 'credentials' && !this.loaded) this.load(); });
     },
     async load() {
       this.loaded = true;
-      const res = await fetch('/api/credentials');
-      this._applyData(await res.json());
+      const [credRes, settingsRes] = await Promise.all([
+        fetch('/api/credentials'),
+        fetch('/api/settings'),
+      ]);
+      this._applyData(await credRes.json());
+      if (settingsRes.ok) {
+        const s = await settingsRes.json();
+        this.agentEnabled = { ...(s.agent_enabled || {}) };
+      }
       this.providers.forEach(p => this.check(p.id));
     },
     _applyData(data) {
       this.providers = data.providers || [];
       this.creds = data.credentials || [];
+    },
+    generalProviders() {
+      return this.providers.filter(p => (p.group || (p.id === 'github' ? 'general' : 'agents')) === 'general');
+    },
+    agentProviders() {
+      return this.providers.filter(p => (p.group || (p.id === 'github' ? 'general' : 'agents')) === 'agents');
+    },
+    async toggleAgentEnabled(agentId, enabled) {
+      const prev = !!this.agentEnabled[agentId];
+      this.agentEnabled[agentId] = !!enabled;
+      this.enabledBusy[agentId] = true;
+      this.enabledMsgs[agentId] = '';
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent_enabled: { [agentId]: !!enabled } }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          this.agentEnabled[agentId] = prev;
+          this.enabledMsgs[agentId] = err.detail || `Save failed (${res.status})`;
+          return;
+        }
+        const s = await res.json();
+        this.agentEnabled = { ...(s.agent_enabled || this.agentEnabled) };
+        this.enabledMsgs[agentId] = enabled
+          ? 'Shown in dropdowns when authenticated.'
+          : 'Hidden from dropdowns; credentials kept.';
+      } catch (e) {
+        this.agentEnabled[agentId] = prev;
+        this.enabledMsgs[agentId] = String(e);
+      } finally {
+        this.enabledBusy[agentId] = false;
+      }
     },
     credsFor(pid) {
       return this.creds.filter(c => c.provider === pid);
@@ -1352,6 +1511,23 @@ function settingsPage() {
     agentKey(name) {
       return (window.LR && window.LR.agentKey) ? window.LR.agentKey(name) : String(name || '').toLowerCase();
     },
+    agentSelectable(a) {
+      if (!a) return false;
+      if (typeof a.selectable === 'boolean') return a.selectable;
+      return !!this.agentSelectable(a);
+    },
+    agentOptionLabel(a) {
+      if (!a) return '';
+      const name = a.display_name || a.name || '';
+      if (this.agentSelectable(a)) return name;
+      if (a.enabled === false) return name + ' (disabled)';
+      if (a.authenticated === false) return name + ' (not signed in)';
+      if (!this.agentSelectable(a)) return name + ' (missing)';
+      return name + ' (unavailable)';
+    },
+    firstSelectableAgent() {
+      return this.agents.find(a => this.agentSelectable(a)) || null;
+    },
     value: {{ settings.run_retention_value|default(1) }},
     unit: {{ (settings.run_retention_unit|default('weeks'))|tojson }},
     hint: {{ ((settings.default_summary|default('Default is 1 week.')) ~ ' Current policy: ' ~ (settings.policy_summary|default('keep runs for 1 weeks, then delete')) ~ '.')|tojson }},
@@ -1432,25 +1608,25 @@ function settingsPage() {
         String(a.display_name || a.name).localeCompare(String(b.display_name || b.name), undefined, { sensitivity: 'base' })
       );
       if (!this.agents.find(a => a.name === this.consolidatorAgent)) {
-        const first = this.agents.find(a => a.available) || this.agents[0];
+        const first = this.firstSelectableAgent() || this.agents[0];
         if (first) this.consolidatorAgent = first.name;
       }
       this.onAgentChange(false);
       this.syncComboQueries();
       if (!this.agents.find(a => a.name === this.analysisAgent)) {
-        const firstA = this.agents.find(a => a.available) || this.agents[0];
+        const firstA = this.firstSelectableAgent() || this.agents[0];
         if (firstA) this.analysisAgent = firstA.name;
       }
       this.analysisOnAgentChange(false);
       this.analysisSyncComboQueries();
       if (!this.agents.find(a => a.name === this.verifyAgent)) {
-        const firstV = this.agents.find(a => a.available) || this.agents[0];
+        const firstV = this.firstSelectableAgent() || this.agents[0];
         if (firstV) this.verifyAgent = firstV.name;
       }
       this.verifyOnAgentChange(false);
       this.verifySyncComboQueries();
       if (!this.agents.find(a => a.name === this.sessionAgent)) {
-        const firstS = this.agents.find(a => a.available) || this.agents[0];
+        const firstS = this.firstSelectableAgent() || this.agents[0];
         if (firstS) this.sessionAgent = firstS.name;
       }
       this.sessionOnAgentChange(false);
@@ -1474,7 +1650,7 @@ function settingsPage() {
       return wanted;
     },
     _cfgNewRow(cfg) {
-      const first = this.agents.find(a => a.available) || this.agents[0];
+      const first = this.firstSelectableAgent() || this.agents[0];
       const row = {
         key: this._cfgKeySeq++,
         agent: (cfg && cfg.agent) || (first ? first.name : ''),
@@ -1543,7 +1719,7 @@ function settingsPage() {
       const open = this.cfgCombo;
       if (open !== row.key + ':agent') {
         const a = this.agents.find(x => x.name === row.agent);
-        row.agentQuery = a ? (a.display_name + (a.available ? '' : ' (missing)')) : (row.agent || '');
+        row.agentQuery = a ? (this.agentOptionLabel(a)) : (row.agent || '');
       }
       if (open !== row.key + ':model') {
         const m = row.models.find(x => x.id === row.model);
@@ -1607,7 +1783,11 @@ function settingsPage() {
         return String(hay || '').toLowerCase().includes(needle);
       };
       if (which === 'agent') {
-        return this.agents.filter(a => match(a.display_name) || match(a.name));
+        const selected = row && row.agent;
+        return this.agents.filter(a => {
+          if (!(this.agentSelectable(a) || a.name === selected)) return false;
+          return match(a.display_name) || match(a.name);
+        });
       }
       if (which === 'model') {
         return (row.models || []).filter(m => match(m.label) || match(m.id));
@@ -1622,12 +1802,12 @@ function settingsPage() {
     },
     cfgOptionLabel(opt) {
       const which = this.cfgComboWhich();
-      if (which === 'agent') return opt.display_name + (opt.available ? '' : ' (missing)');
+      if (which === 'agent') return this.agentOptionLabel(opt);
       if (which === 'model') return opt.label;
       return opt;
     },
     cfgOptionDisabled(opt) {
-      return this.cfgComboWhich() === 'agent' && opt && !opt.available;
+      return this.cfgComboWhich() === 'agent' && opt && !this.agentSelectable(opt);
     },
     cfgOptionClass(idx, disabled) {
       const base = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-sm ';
@@ -1657,7 +1837,7 @@ function settingsPage() {
       const which = this.cfgComboWhich();
       if (!row || !which) return;
       if (which === 'agent') {
-        if (!opt || typeof opt !== 'object' || !opt.name || !opt.available) return;
+        if (!opt || typeof opt !== 'object' || !opt.name || !this.agentSelectable(opt)) return;
         row.agent = opt.name;
         this._cfgApplyAgent(row, true);
       } else if (which === 'model') {
@@ -1815,7 +1995,7 @@ function settingsPage() {
     verifyAgentLabel() {
       const a = this.agents.find(x => x.name === this.verifyAgent);
       if (!a) return this.verifyAgent || '';
-      return a.display_name + (a.available ? '' : ' (missing)');
+      return this.agentOptionLabel(a);
     },
     verifyModelLabel() {
       const m = this.verifyModels.find(x => x.id === this.verifyModel);
@@ -1823,9 +2003,11 @@ function settingsPage() {
     },
     verifyFilteredAgents() {
       const q = this.verifyOpenCombo === 'agent' ? this.verifyAgentQuery : '';
-      return this.agents.filter(a =>
-        this._match(a.display_name, q) || this._match(a.name, q)
-      );
+      const selected = this.verifyAgent;
+      return this.agents.filter(a => {
+        if (!(this.agentSelectable(a) || a.name === selected)) return false;
+        return this._match(a.display_name, q) || this._match(a.name, q);
+      });
     },
     verifyFilteredModels() {
       const q = this.verifyOpenCombo === 'model' ? this.verifyModelQuery : '';
@@ -1878,7 +2060,7 @@ function settingsPage() {
       else this.verifyPickEffort(item);
     },
     verifyPickAgent(a) {
-      if (!a || !a.available) return;
+      if (!a || !this.agentSelectable(a)) return;
       this.verifyAgent = a.name;
       this.verifyOpenCombo = null;
       this.verifyComboHighlight = -1;
@@ -1999,7 +2181,7 @@ function settingsPage() {
     sessionAgentLabel() {
       const a = this.agents.find(x => x.name === this.sessionAgent);
       if (!a) return this.sessionAgent || '';
-      return a.display_name + (a.available ? '' : ' (missing)');
+      return this.agentOptionLabel(a);
     },
     sessionModelLabel() {
       const m = this.sessionModels.find(x => x.id === this.sessionModel);
@@ -2007,9 +2189,11 @@ function settingsPage() {
     },
     sessionFilteredAgents() {
       const q = this.sessionOpenCombo === 'agent' ? this.sessionAgentQuery : '';
-      return this.agents.filter(a =>
-        this._match(a.display_name, q) || this._match(a.name, q)
-      );
+      const selected = this.sessionAgent;
+      return this.agents.filter(a => {
+        if (!(this.agentSelectable(a) || a.name === selected)) return false;
+        return this._match(a.display_name, q) || this._match(a.name, q);
+      });
     },
     sessionFilteredModels() {
       const q = this.sessionOpenCombo === 'model' ? this.sessionModelQuery : '';
@@ -2062,7 +2246,7 @@ function settingsPage() {
       else this.sessionPickEffort(item);
     },
     sessionPickAgent(a) {
-      if (!a || !a.available) return;
+      if (!a || !this.agentSelectable(a)) return;
       this.sessionAgent = a.name;
       this.sessionOpenCombo = null;
       this.sessionComboHighlight = -1;
@@ -2186,7 +2370,7 @@ function settingsPage() {
     analysisAgentLabel() {
       const a = this.agents.find(x => x.name === this.analysisAgent);
       if (!a) return this.analysisAgent || '';
-      return a.display_name + (a.available ? '' : ' (missing)');
+      return this.agentOptionLabel(a);
     },
     analysisModelLabel() {
       const m = this.analysisModels.find(x => x.id === this.analysisModel);
@@ -2194,9 +2378,11 @@ function settingsPage() {
     },
     analysisFilteredAgents() {
       const q = this.analysisOpenCombo === 'agent' ? this.analysisAgentQuery : '';
-      return this.agents.filter(a =>
-        this._match(a.display_name, q) || this._match(a.name, q)
-      );
+      const selected = this.analysisAgent;
+      return this.agents.filter(a => {
+        if (!(this.agentSelectable(a) || a.name === selected)) return false;
+        return this._match(a.display_name, q) || this._match(a.name, q);
+      });
     },
     analysisFilteredModels() {
       const q = this.analysisOpenCombo === 'model' ? this.analysisModelQuery : '';
@@ -2249,7 +2435,7 @@ function settingsPage() {
       else this.analysisPickEffort(item);
     },
     analysisPickAgent(a) {
-      if (!a || !a.available) return;
+      if (!a || !this.agentSelectable(a)) return;
       this.analysisAgent = a.name;
       this.analysisOpenCombo = null;
       this.analysisComboHighlight = -1;
@@ -2336,7 +2522,7 @@ function settingsPage() {
     agentLabel() {
       const a = this.agents.find(x => x.name === this.consolidatorAgent);
       if (!a) return this.consolidatorAgent || '';
-      return a.display_name + (a.available ? '' : ' (missing)');
+      return this.agentOptionLabel(a);
     },
     modelLabel() {
       const m = this.models.find(x => x.id === this.consolidatorModel);
@@ -2349,9 +2535,11 @@ function settingsPage() {
     },
     filteredAgents() {
       const q = this.openCombo === 'agent' ? this.agentQuery : '';
-      return this.agents.filter(a =>
-        this._match(a.display_name, q) || this._match(a.name, q)
-      );
+      const selected = this.consolidatorAgent;
+      return this.agents.filter(a => {
+        if (!(this.agentSelectable(a) || a.name === selected)) return false;
+        return this._match(a.display_name, q) || this._match(a.name, q);
+      });
     },
     filteredModels() {
       const q = this.openCombo === 'model' ? this.modelQuery : '';
@@ -2404,7 +2592,7 @@ function settingsPage() {
       else this.pickEffort(item);
     },
     pickAgent(a) {
-      if (!a || !a.available) return;
+      if (!a || !this.agentSelectable(a)) return;
       this.consolidatorAgent = a.name;
       this.openCombo = null;
       this.comboHighlight = -1;

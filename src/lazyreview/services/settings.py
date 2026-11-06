@@ -21,6 +21,11 @@ from lazyreview.db.schema import (
     _default_publish_prompt,
     _default_verify_prompt,
 )
+from lazyreview.services.agent_eligibility import (
+    get_agent_enabled_map,
+    normalize_agent_enabled,
+    set_agent_enabled_map,
+)
 from lazyreview.services.pr_sync import (
     DEFAULT_SYNC_INTERVAL_MINUTES,
     get_pr_sync_interval_minutes,
@@ -151,6 +156,7 @@ def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
         "session_agent": raw.get("session_agent") or _DEFAULT_SESSION_AGENT,
         "session_model": raw.get("session_model") or _DEFAULT_SESSION_MODEL,
         "session_effort": raw.get("session_effort") or _DEFAULT_SESSION_EFFORT,
+        "agent_enabled": get_agent_enabled_map(conn),
     }
 
 
@@ -178,6 +184,7 @@ def update_app_settings(
     session_agent: str | None = None,
     session_model: str | None = None,
     session_effort: str | None = None,
+    agent_enabled: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if run_retention_value is not None:
         if run_retention_value < 1:
@@ -261,6 +268,11 @@ def update_app_settings(
         set_setting(conn, "session_model", model)
     if session_effort is not None:
         set_setting(conn, "session_effort", session_effort.strip())
+    if agent_enabled is not None:
+        # Validate shape; set_agent_enabled_map commits.
+        normalize_agent_enabled(agent_enabled)
+        set_agent_enabled_map(conn, agent_enabled)
+        return get_settings_view(conn)
     conn.commit()
     return get_settings_view(conn)
 
