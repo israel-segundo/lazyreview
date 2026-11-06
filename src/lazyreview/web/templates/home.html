@@ -13,13 +13,27 @@
       <span class="cursor-help underline decoration-dotted underline-offset-2"
             :title="lastSyncExact || 'Never synced'"
             x-text="lastSyncRelative"></span>
+      <span x-text="nextSyncPhrase"></span>
     </p>
+  </div>
+
+  <div class="lr-home-counts" aria-label="Review queue counts">
+    <div class="lr-home-count"
+         title="Open non-draft PRs whose current head still needs a first review">
+      <span class="lr-home-count__value" x-text="needsReviewCount"></span>
+      <span class="lr-home-count__label">Needs review</span>
+    </div>
+    <div class="lr-home-count"
+         title="Open non-draft PRs that were approved before — new commit or dismissed approval">
+      <span class="lr-home-count__value" x-text="reReviewCount"></span>
+      <span class="lr-home-count__label">Re-review</span>
+    </div>
   </div>
 
   <div class="flex flex-wrap items-center gap-4 text-sm text-slate-700 dark:text-slate-300">
     <button type="button" @click="syncPending()" :disabled="syncing"
-            title="Refresh pending reviews"
-            aria-label="Refresh pending reviews"
+            title="Fetch from GitHub now"
+            aria-label="Fetch from GitHub now"
             class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
       <svg class="h-4 w-4" :class="syncing ? 'animate-spin' : ''" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
         <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
@@ -111,10 +125,8 @@
                   x-text="prStatusLabel(pr)"></span>
             <span class="rounded-full px-2 py-0.5 text-xs"
                   :class="internalStatusClass(pr)"
+                  :title="internalStatusTitle(pr)"
                   x-text="pr.internal_status_label || 'needs review'"></span>
-            <span x-show="showPriorApproved(pr)" x-cloak
-                  class="rounded-full px-2 py-0.5 text-xs bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200"
-                  title="You approved an earlier head of this PR">approved</span>
             <span class="lr-home-pr-card__activity"
                   :title="activityTitle(pr)"
                   role="img"
@@ -182,10 +194,8 @@
                 <span class="inline-flex flex-wrap items-center gap-1.5">
                   <span class="rounded-full px-2 py-0.5 text-xs"
                         :class="internalStatusClass(pr)"
+                        :title="internalStatusTitle(pr)"
                         x-text="pr.internal_status_label || 'needs review'"></span>
-                  <span x-show="showPriorApproved(pr)" x-cloak
-                        class="rounded-full px-2 py-0.5 text-xs bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200"
-                        title="You approved an earlier head of this PR">approved</span>
                 </span>
               </td>
               <td class="px-4 py-3 whitespace-nowrap">
@@ -251,8 +261,10 @@ function homePage() {
     syncing: false,
     syncMsg: '',
     lastSyncIso: {{ (last_sync or '')|tojson }},
+    syncIntervalMinutes: {{ (sync_interval_minutes or 15)|int }},
     lastSyncRelative: 'never',
     lastSyncExact: '',
+    nextSyncPhrase: '',
     get openPrs() {
       // Sync only fetches open PRs; drop closed/merged leftovers from the home list.
       return this.prs.filter((pr) => {
@@ -277,6 +289,22 @@ function homePage() {
     },
     get visibleCount() {
       return this.filteredPrs.length;
+    },
+    get actionablePrs() {
+      // Queue counters ignore drafts and closed/merged; sync only tracks open work.
+      return this.openPrs.filter((pr) => !pr.is_draft);
+    },
+    get needsReviewCount() {
+      return this.actionablePrs.filter((pr) => {
+        const s = pr.internal_status || 'needs_review';
+        return s === 'needs_review' && !pr.previously_approved;
+      }).length;
+    },
+    get reReviewCount() {
+      return this.actionablePrs.filter((pr) => {
+        const s = pr.internal_status || 'needs_review';
+        return s === 'needs_review' && !!pr.previously_approved;
+      }).length;
     },
     init() {
       this.tickRelative();
@@ -303,7 +331,7 @@ function homePage() {
       const files = this.diffFilesLabel(pr);
       return files ? (base + ' ' + files.replace(/^·\s*/, '')) : base;
     },
-    showPriorApproved(pr) {
+    isReReview(pr) {
       const s = pr.internal_status || 'needs_review';
       return s === 'needs_review' && !!pr.previously_approved;
     },
@@ -319,11 +347,20 @@ function homePage() {
       if (label === 'closed') return 'bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200';
       return 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
     },
+    internalStatusTitle(pr) {
+      if (this.isReReview(pr)) {
+        return 'Previously approved — new commit or dismissed approval';
+      }
+      return '';
+    },
     internalStatusClass(pr) {
       const s = pr.internal_status || 'needs_review';
       if (s === 'approved') return 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200';
       if (s === 'changes_requested') return 'bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200';
       if (s === 'feedback_provided') return 'bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200';
+      if (this.isReReview(pr)) {
+        return 'bg-orange-100 text-orange-950 dark:bg-orange-950/50 dark:text-orange-200';
+      }
       return 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200';
     },
     activityBallClass(status) {
@@ -334,11 +371,31 @@ function homePage() {
     activityTitle(pr) {
       return (pr && pr.activity_label) || 'No activity yet';
     },
+    nextSyncMinutesRemaining() {
+      const interval = Math.max(1, Number(this.syncIntervalMinutes) || 15);
+      if (!this.lastSyncIso) return interval;
+      const then = window.LR && window.LR.parseUtc
+        ? window.LR.parseUtc(this.lastSyncIso)
+        : new Date(this.lastSyncIso);
+      if (!then || Number.isNaN(then.getTime())) return interval;
+      const dueAt = then.getTime() + interval * 60 * 1000;
+      const ms = dueAt - Date.now();
+      if (ms <= 0) return 0;
+      return Math.max(1, Math.ceil(ms / 60000));
+    },
+    formatNextSyncPhrase() {
+      const mins = this.nextSyncMinutesRemaining();
+      if (mins <= 0) return ' (next fetch scheduled soon)';
+      if (mins === 1) return ' (next fetch scheduled in 1 minute)';
+      return ' (next fetch scheduled in ' + mins + ' minutes)';
+    },
     tickRelative() {
       this.lastSyncRelative = formatRelative(this.lastSyncIso);
       this.lastSyncExact = formatExact(this.lastSyncIso);
+      this.nextSyncPhrase = this.formatNextSyncPhrase();
       setInterval(() => {
         this.lastSyncRelative = formatRelative(this.lastSyncIso);
+        this.nextSyncPhrase = this.formatNextSyncPhrase();
       }, 30000);
     },
     openAddPr() {

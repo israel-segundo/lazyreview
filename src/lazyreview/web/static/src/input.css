@@ -174,6 +174,39 @@ html {
   width: 2.75rem;
   text-align: right;
 }
+/* Home queue counters (needs review / re-review). */
+.lr-home-counts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1.25rem 1.75rem;
+}
+.lr-home-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.lr-home-count__value {
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-slate-900, #0f172a);
+}
+.dark .lr-home-count__value {
+  color: var(--color-slate-50, #f8fafc);
+}
+.lr-home-count__label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-slate-500, #64748b);
+}
+.dark .lr-home-count__label {
+  color: var(--color-slate-400, #94a3b8);
+}
+
 /* Home PR list — cards on narrow viewports, table on desktop. */
 .lr-home-prs {
   min-width: 0;
@@ -2344,6 +2377,14 @@ body:has(.lr-consol) > footer {
 .dark .lr-pr-meta__pill--warn {
   background: color-mix(in oklab, var(--color-amber-900, #78350f) 40%, transparent);
   color: var(--color-amber-200, #fde68a);
+}
+.lr-pr-meta__pill--rereview {
+  background: var(--color-orange-100, #ffedd5);
+  color: var(--color-orange-950, #431407);
+}
+.dark .lr-pr-meta__pill--rereview {
+  background: color-mix(in oklab, var(--color-orange-950, #431407) 50%, transparent);
+  color: var(--color-orange-200, #fed7aa);
 }
 .lr-pr-meta__pill--bad {
   background: var(--color-red-100, #fee2e2);

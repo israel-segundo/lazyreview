@@ -188,9 +188,11 @@ def create_app() -> FastAPI:
     async def home(request: Request):
         from lazyreview.db import get_setting, list_prs
         from lazyreview.services.gh import GhError, gh_user_login
+        from lazyreview.services.pr_sync import get_pr_sync_interval_minutes
 
         prs_list = list_prs(request.app.state.db)
         last_sync = get_setting(request.app.state.db, "pr_sync_last_at")
+        sync_interval_minutes = get_pr_sync_interval_minutes(request.app.state.db)
         gh_login = None
         try:
             gh_login = gh_user_login()
@@ -202,6 +204,7 @@ def create_app() -> FastAPI:
             {
                 "prs": prs_list,
                 "last_sync": last_sync,
+                "sync_interval_minutes": sync_interval_minutes,
                 "gh_login": gh_login,
                 "version": __version__,
             },

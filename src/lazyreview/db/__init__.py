@@ -344,8 +344,8 @@ def pr_previously_approved(conn: sqlite3.Connection, pr: dict[str, Any]) -> bool
     """
     True if this PR ever had a submitted approve (any head).
 
-    Used on the homepage when the current head is needs_review so previously
-    approved PRs can still show an approved badge for prioritization.
+    Used when the current head is needs_review so the UI can label the PR as
+    needs re-review (new commit or dismissed approval) instead of a first look.
     """
     row = conn.execute(
         """
@@ -383,10 +383,15 @@ def head_age_days(head_updated_at: str | None, *, now: datetime | None = None) -
 def _attach_internal_status(conn: sqlite3.Connection, pr: dict[str, Any]) -> dict[str, Any]:
     info = pr_internal_status(conn, pr)
     out = dict(pr)
+    prior = pr_previously_approved(conn, pr)
     out["internal_status"] = info["status"]
-    out["internal_status_label"] = info["label"]
+    # Keep status=needs_review for workflow gates; surface re-review in the label.
+    if info["status"] == "needs_review" and prior:
+        out["internal_status_label"] = "needs re-review"
+    else:
+        out["internal_status_label"] = info["label"]
     out["feedback_gh_action"] = info["gh_action"]
-    out["previously_approved"] = pr_previously_approved(conn, pr)
+    out["previously_approved"] = prior
     out["age_days"] = head_age_days(out.get("head_updated_at"))
     return out
 

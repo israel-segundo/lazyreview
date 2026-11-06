@@ -11,6 +11,8 @@
 
   {% set pr_label = 'draft' if pr.is_draft else (pr.state or 'open') %}
   {% set istatus = pr.internal_status or 'needs_review' %}
+  {% set is_rereview = istatus == 'needs_review' and pr.previously_approved %}
+  {% set review_label = pr.internal_status_label or ('needs re-review' if is_rereview else 'needs review') %}
 
   {# Title — New Review sits beside it on desktop only #}
   <div class="lr-pr-title-row">
@@ -51,7 +53,9 @@
           {% if istatus == 'approved' %}lr-pr-meta__pill--ok
           {% elif istatus == 'changes_requested' %}lr-pr-meta__pill--bad
           {% elif istatus == 'feedback_provided' %}lr-pr-meta__pill--info
-          {% else %}lr-pr-meta__pill--warn{% endif %}">{{ pr.internal_status_label or 'needs review' }}</span>
+          {% elif is_rereview %}lr-pr-meta__pill--rereview
+          {% else %}lr-pr-meta__pill--warn{% endif %}"
+          {% if is_rereview %}title="Previously approved — new commit or dismissed approval"{% endif %}>{{ review_label }}</span>
         <span class="lr-pr-meta__dot" aria-hidden="true">·</span>
         <span class="lr-pr-meta__analysis" :title="analysisTitle()">
           <span class="lr-status-ball h-2 w-2" :class="analysisBallClass(analysisStatus)"></span>
@@ -90,7 +94,9 @@
           {% if istatus == 'approved' %}bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200
           {% elif istatus == 'changes_requested' %}bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200
           {% elif istatus == 'feedback_provided' %}bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200
-          {% else %}bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200{% endif %}">{{ pr.internal_status_label or 'needs review' }}</span>
+          {% elif is_rereview %}bg-orange-100 text-orange-950 dark:bg-orange-950/50 dark:text-orange-200
+          {% else %}bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200{% endif %}"
+          {% if is_rereview %}title="Previously approved — new commit or dismissed approval"{% endif %}>{{ review_label }}</span>
       </span>
       <span class="inline-flex items-center gap-0 overflow-hidden rounded-md border border-slate-200 dark:border-slate-600"
             :title="analysisTitle()">

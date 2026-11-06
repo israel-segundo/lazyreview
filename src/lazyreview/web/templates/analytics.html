@@ -242,7 +242,24 @@
       <template x-for="c in table" :key="'card-' + c.agent + '|' + c.model + '|' + c.effort">
         <article class="lr-analytics-combo-card">
           <div class="lr-analytics-combo-card__title">
-            <span x-text="c.agent"></span>
+            <span class="inline-flex min-w-0 items-center gap-1.5">
+              <img x-show="agentKey(c.agent) === LR.AgentName.CLAUDE" x-cloak
+                   src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                   class="h-4 w-4 shrink-0 object-contain" />
+              <img x-show="agentKey(c.agent) === LR.AgentName.AGY" x-cloak
+                   src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                   class="h-4 w-4 shrink-0 object-contain" />
+              <img x-show="agentKey(c.agent) === LR.AgentName.CODEX" x-cloak
+                   src="/static/img/agents/codex.svg" alt="" width="16" height="16"
+                   class="h-4 w-4 shrink-0 object-contain" />
+              <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
+                   src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                   class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+              <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
+                   src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                   class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+              <span class="truncate" x-text="agentTitle(c.agent)"></span>
+            </span>
             <span class="lr-analytics-combo-card__model" x-text="c.model"></span>
             <span class="text-xs font-normal text-slate-500" x-text="c.effort || '—'"></span>
           </div>
@@ -294,7 +311,26 @@
         <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
           <template x-for="c in table" :key="'row-' + c.agent + '|' + c.model + '|' + c.effort">
             <tr>
-              <td class="px-4 py-3" x-text="c.agent"></td>
+              <td class="px-4 py-3">
+                <span class="inline-flex min-w-0 items-center gap-1.5">
+                  <img x-show="agentKey(c.agent) === LR.AgentName.CLAUDE" x-cloak
+                       src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain" />
+                  <img x-show="agentKey(c.agent) === LR.AgentName.AGY" x-cloak
+                       src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain" />
+                  <img x-show="agentKey(c.agent) === LR.AgentName.CODEX" x-cloak
+                       src="/static/img/agents/codex.svg" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain" />
+                  <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
+                       src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+                  <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
+                       src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                       class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+                  <span x-text="agentTitle(c.agent)"></span>
+                </span>
+              </td>
               <td class="px-4 py-3 font-mono text-xs" x-text="c.model"></td>
               <td class="px-4 py-3" x-text="c.effort || '—'"></td>
               <td class="px-4 py-3" x-text="c.runs"></td>
@@ -431,8 +467,18 @@ function analyticsPage() {
       for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
       return LR_PALETTE[(h + (idx || 0)) % LR_PALETTE.length];
     },
+    agentKey(name) {
+      return (window.LR && window.LR.agentKey)
+        ? window.LR.agentKey(name)
+        : String(name || '').toLowerCase();
+    },
+    agentTitle(name) {
+      const key = this.agentKey(name);
+      if (!key) return '—';
+      return key.charAt(0).toUpperCase() + key.slice(1);
+    },
     agentColor(agent) {
-      const a = (window.LR && window.LR.agentKey) ? window.LR.agentKey(agent) : String(agent || '').toLowerCase();
+      const a = this.agentKey(agent);
       if (window.LR && window.LR.AgentColors && window.LR.AgentColors[a]) {
         return window.LR.AgentColors[a];
       }

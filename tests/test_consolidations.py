@@ -773,6 +773,7 @@ def test_previously_approved_survives_new_head(tmp_path: Path):
     listed = list_prs(conn)[0]
     assert listed["internal_status"] == "needs_review"
     assert listed["previously_approved"] is True
+    assert listed["internal_status_label"] == "needs re-review"
     assert listed["additions"] == 42
     assert listed["deletions"] == 7
     assert listed["changed_files"] == 3
