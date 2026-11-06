@@ -183,7 +183,7 @@ def upsert_pr(
         on_pr_head_changed(conn, int(pr["id"]))
     from lazyreview.services.lifecycle import on_pr_upserted
 
-    on_pr_upserted(conn, pr, is_new=is_new)
+    on_pr_upserted(conn, pr, is_new=is_new, head_moved=head_moved)
     maybe_notify_pr_attention(conn, pr, is_new=is_new, head_moved=head_moved)
     return pr
 

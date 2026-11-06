@@ -43,6 +43,23 @@ ALLOWED_PR_ANALYSIS_AGENTS = ALL_AGENT_NAMES
 ALLOWED_SESSION_AGENTS = ALL_AGENT_NAMES
 ALLOWED_BATCH_AGENTS = ALL_AGENT_NAMES
 MAX_BATCH_DEFAULTS = 20
+DEFAULT_PR_ANALYSIS_ON_HEAD_CHANGE = True
+
+
+def parse_bool_setting(raw: str | None, *, default: bool) -> bool:
+    if raw is None:
+        return default
+    text = str(raw).strip().lower()
+    if text in ("1", "true", "yes", "on"):
+        return True
+    if text in ("0", "false", "no", "off"):
+        return False
+    return default
+
+
+def get_pr_analysis_on_head_change(conn: sqlite3.Connection) -> bool:
+    raw = get_setting(conn, "pr_analysis_on_head_change")
+    return parse_bool_setting(raw, default=DEFAULT_PR_ANALYSIS_ON_HEAD_CHANGE)
 
 _DEFAULT_CONSOLIDATOR_AGENT = AgentName.CLAUDE.value
 _DEFAULT_CONSOLIDATOR_MODEL = ClaudeModelAlias.HAIKU.value
@@ -150,6 +167,10 @@ def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
         "pr_analysis_effort": raw.get("pr_analysis_effort") or _DEFAULT_PR_ANALYSIS_EFFORT,
         "pr_analysis_prompt": analysis_prompt,
         "pr_analysis_prompt_default": _default_pr_analysis_prompt() or "",
+        "pr_analysis_on_head_change": parse_bool_setting(
+            raw.get("pr_analysis_on_head_change"),
+            default=DEFAULT_PR_ANALYSIS_ON_HEAD_CHANGE,
+        ),
         "publish_prompt": publish_prompt,
         "publish_prompt_default": _default_publish_prompt() or "",
         "batch_review_defaults": batch_defaults,
@@ -179,6 +200,7 @@ def update_app_settings(
     pr_analysis_model: str | None = None,
     pr_analysis_effort: str | None = None,
     pr_analysis_prompt: str | None = None,
+    pr_analysis_on_head_change: bool | None = None,
     publish_prompt: str | None = None,
     batch_review_defaults: list[dict[str, Any]] | None = None,
     session_agent: str | None = None,
@@ -249,6 +271,12 @@ def update_app_settings(
         set_setting(conn, "pr_analysis_effort", pr_analysis_effort.strip())
     if pr_analysis_prompt is not None:
         set_setting(conn, "pr_analysis_prompt", pr_analysis_prompt)
+    if pr_analysis_on_head_change is not None:
+        set_setting(
+            conn,
+            "pr_analysis_on_head_change",
+            "true" if pr_analysis_on_head_change else "false",
+        )
     if publish_prompt is not None:
         set_setting(conn, "publish_prompt", publish_prompt)
     if batch_review_defaults is not None:

@@ -312,6 +312,8 @@ DEFAULT_SETTINGS = {
     "pr_analysis_model": ClaudeModelAlias.OPUS.value,
     "pr_analysis_effort": EffortLevel.HIGH.value,
     # pr_analysis_prompt seeded in init_db from prompts/pr_analysis.md
+    # When true, sync re-queues PR analysis after a new head_sha.
+    "pr_analysis_on_head_change": "true",
     # batch_review_defaults seeded in init_db (JSON list of {agent,model,effort})
     # Interactive chat (Explore / Challenge) — defaults Claude / Opus / high
     "session_agent": AgentName.CLAUDE.value,
@@ -320,7 +322,7 @@ DEFAULT_SETTINGS = {
     # agent_enabled seeded in init_db (JSON map of agent → bool; default all true)
 }
 
-SCHEMA_VERSION = 31
+SCHEMA_VERSION = 32
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -956,6 +958,13 @@ def init_db(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "ALTER TABLE notifications ADD COLUMN head_sha TEXT NOT NULL DEFAULT ''"
             )
+
+    if prev is not None and prev < 32:
+        # Auto re-run PR analysis when sync sees a new head_sha (default on).
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+            ("pr_analysis_on_head_change", "true"),
+        )
 
     if prev is not None and prev < 10 and prompt_seed:
         conn.execute(

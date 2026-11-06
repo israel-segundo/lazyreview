@@ -32,6 +32,7 @@ class SettingsBody(BaseModel):
     pr_analysis_model: str | None = None
     pr_analysis_effort: str | None = None
     pr_analysis_prompt: str | None = None
+    pr_analysis_on_head_change: bool | None = None
     publish_prompt: str | None = None
     batch_review_defaults: list[BatchReviewDefault] | None = None
     session_agent: str | None = None
@@ -69,6 +70,7 @@ def write_settings(body: SettingsBody, request: Request):
             pr_analysis_model=body.pr_analysis_model,
             pr_analysis_effort=body.pr_analysis_effort,
             pr_analysis_prompt=body.pr_analysis_prompt,
+            pr_analysis_on_head_change=body.pr_analysis_on_head_change,
             publish_prompt=body.publish_prompt,
             batch_review_defaults=batch,
             session_agent=body.session_agent,

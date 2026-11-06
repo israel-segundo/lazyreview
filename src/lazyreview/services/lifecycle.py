@@ -60,10 +60,13 @@ def _cancel_analyses(pr_id: int, reason: str) -> None:
         pass
 
 
-def on_pr_upserted(conn: Any, pr: dict[str, Any], *, is_new: bool = False) -> None:
-    """Enqueue analysis only when a PR is first added; prune workspace when terminal."""
+def on_pr_upserted(
+    conn: Any, pr: dict[str, Any], *, is_new: bool = False, head_moved: bool = False
+) -> None:
+    """Enqueue analysis on create (and on new head when settings allow); prune terminal PRs."""
     from lazyreview.services.analysis_eligibility import analysis_ineligible_reason
     from lazyreview.services.pr_workspace import queue_workspace_deletion
+    from lazyreview.services.settings import get_pr_analysis_on_head_change
 
     state = (pr.get("state") or "").lower()
     if state in ("closed", "merged"):
@@ -78,9 +81,10 @@ def on_pr_upserted(conn: Any, pr: dict[str, Any], *, is_new: bool = False) -> No
         _cancel_analyses(int(pr["id"]), f"Skipped: {skip}")
         return
 
-    # Analysis is kicked off once at create time. Later head moves do not re-run it
-    # (manual Run analysis / Retry still available on the PR page).
-    if not is_new:
+    should_enqueue = is_new or (
+        head_moved and get_pr_analysis_on_head_change(conn)
+    )
+    if not should_enqueue:
         return
     if not int(pr.get("review_requested") or 0):
         return

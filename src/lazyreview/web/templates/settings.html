@@ -712,6 +712,28 @@
             <p class="text-sm text-slate-600 dark:text-slate-400">
               Agent and prompt used for PR orientation briefs (not code review).
             </p>
+            <div class="mt-4 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/60">
+              <div class="min-w-0">
+                <span class="block text-sm font-medium text-slate-800 dark:text-slate-200"
+                      id="pa-head-change-label">Re-run analysis on new commits</span>
+                <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  When a synced PR gets a new head, queue a fresh orientation brief.
+                </p>
+                <p class="mt-1 text-xs text-slate-500 dark:text-slate-400"
+                   x-show="analysisHeadChangeMsg" x-text="analysisHeadChangeMsg"></p>
+              </div>
+              <button type="button"
+                      role="switch"
+                      aria-labelledby="pa-head-change-label"
+                      :aria-checked="(!!analysisOnHeadChange).toString()"
+                      :disabled="!!analysisHeadChangeBusy"
+                      @click="toggleAnalysisOnHeadChange(!analysisOnHeadChange)"
+                      class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full bg-slate-300 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-600"
+                      :class="analysisOnHeadChange ? 'bg-blue-600 dark:bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'">
+                <span class="pointer-events-none inline-block h-5 w-5 translate-x-0.5 rounded-full bg-white shadow transition duration-200"
+                      :class="analysisOnHeadChange ? 'translate-x-5' : 'translate-x-0.5'"></span>
+              </button>
+            </div>
             <div class="mt-4 grid gap-3 sm:grid-cols-3">
               <div class="relative overflow-visible"
                    :class="analysisOpenCombo === 'agent' ? 'z-30' : 'z-10'"
@@ -1581,6 +1603,9 @@ function settingsPage() {
     analysisEffort: {{ (settings.pr_analysis_effort|default(EffortLevel.HIGH.value))|tojson }},
     analysisPrompt: {{ (settings.pr_analysis_prompt|default(''))|tojson }},
     defaultAnalysisPrompt: {{ (settings.pr_analysis_prompt_default|default(''))|tojson }},
+    analysisOnHeadChange: {{ (settings.pr_analysis_on_head_change|default(true))|tojson }},
+    analysisHeadChangeBusy: false,
+    analysisHeadChangeMsg: '',
     analysisMsg: '',
     publishPrompt: {{ (settings.publish_prompt|default(''))|tojson }},
     defaultPublishPrompt: {{ (settings.publish_prompt_default|default(''))|tojson }},
@@ -2130,6 +2155,35 @@ function settingsPage() {
       }
     },
 
+    async toggleAnalysisOnHeadChange(enabled) {
+      const prev = !!this.analysisOnHeadChange;
+      this.analysisOnHeadChange = !!enabled;
+      this.analysisHeadChangeBusy = true;
+      this.analysisHeadChangeMsg = '';
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pr_analysis_on_head_change: !!enabled }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          this.analysisOnHeadChange = prev;
+          this.analysisHeadChangeMsg = data.detail || `Save failed (${res.status})`;
+          return;
+        }
+        this.analysisOnHeadChange = !!data.pr_analysis_on_head_change;
+        this.analysisHeadChangeMsg = this.analysisOnHeadChange
+          ? 'New commits will re-queue analysis.'
+          : 'New commits will not re-queue analysis.';
+        setTimeout(() => { this.analysisHeadChangeMsg = ''; }, 2500);
+      } catch (e) {
+        this.analysisOnHeadChange = prev;
+        this.analysisHeadChangeMsg = String(e);
+      } finally {
+        this.analysisHeadChangeBusy = false;
+      }
+    },
     async saveAnalysis() {
       const res = await fetch('/api/settings', {
         method: 'PUT',
@@ -2138,7 +2192,8 @@ function settingsPage() {
           pr_analysis_agent: this.analysisAgent,
           pr_analysis_model: this.analysisModel,
           pr_analysis_effort: this.analysisEffort || '',
-          pr_analysis_prompt: this.analysisPrompt
+          pr_analysis_prompt: this.analysisPrompt,
+          pr_analysis_on_head_change: !!this.analysisOnHeadChange,
         })
       });
       const data = await res.json();
@@ -2147,6 +2202,7 @@ function settingsPage() {
       this.analysisModel = data.pr_analysis_model;
       this.analysisEffort = data.pr_analysis_effort || '';
       this.analysisPrompt = data.pr_analysis_prompt || '';
+      this.analysisOnHeadChange = !!data.pr_analysis_on_head_change;
       this.analysisMsg = 'Saved.';
       setTimeout(() => { this.analysisMsg = ''; }, 2500);
     },
