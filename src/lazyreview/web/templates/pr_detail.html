@@ -9,8 +9,11 @@
 
   <a href="/" class="inline-block text-sm text-blue-600 hover:underline dark:text-blue-400">← PRs</a>
 
-  {# Full-width title + New Review (not squeezed by chat) #}
-  <div class="flex flex-wrap items-start justify-between gap-3">
+  {% set pr_label = 'draft' if pr.is_draft else (pr.state or 'open') %}
+  {% set istatus = pr.internal_status or 'needs_review' %}
+
+  {# Title — New Review sits beside it on desktop only #}
+  <div class="lr-pr-title-row">
     <h1 class="min-w-0 text-xl font-semibold tracking-tight sm:text-2xl">
       <a class="text-blue-600 hover:underline dark:text-blue-400" href="{{ pr.url }}" target="_blank" rel="noopener">{{ pr.repo }}#{{ pr.number }}</a>
       <span class="ml-1.5 break-words text-slate-900 dark:text-slate-100">{{ pr.title }}</span>
@@ -18,136 +21,226 @@
     <button type="button" @click="openBatchModal()"
             :disabled="!analysisReady"
             :title="analysisReady ? 'Start a new review' : 'PR analysis must succeed before reviewing'"
-            class="shrink-0 rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+            class="lr-pr-new-review lr-pr-new-review--desktop">
       New Review
     </button>
   </div>
 
-  {# Full-width status chips + toggles #}
-  <div class="flex flex-wrap items-center gap-2 text-xs">
-    {% set pr_label = 'draft' if pr.is_draft else (pr.state or 'open') %}
-    <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
-      <a class="bg-slate-100 px-2 py-1 font-medium text-blue-600 hover:underline dark:bg-slate-800 dark:text-blue-400"
-         href="{{ pr.url }}" target="_blank" rel="noopener">PR #{{ pr.number }}</a>
-      <span class="px-2 py-1 font-medium
-        {% if pr_label == 'draft' %}bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200
-        {% elif pr_label == 'open' %}bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200
-        {% elif pr_label == 'merged' %}bg-purple-100 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200
-        {% else %}bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200{% endif %}">{{ pr_label }}</span>
-    </span>
-    {% set istatus = pr.internal_status or 'needs_review' %}
-    <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
-      <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Review</span>
-      <span class="px-2 py-1 font-medium
-        {% if istatus == 'approved' %}bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200
-        {% elif istatus == 'changes_requested' %}bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200
-        {% elif istatus == 'feedback_provided' %}bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200
-        {% else %}bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200{% endif %}">{{ pr.internal_status_label or 'needs review' }}</span>
-    </span>
-    <span class="inline-flex items-center gap-0 overflow-hidden rounded-md border border-slate-200 dark:border-slate-600"
-          :title="analysisTitle()">
-      <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Analysis</span>
-      <span class="inline-flex items-center gap-1.5 px-2 py-1 font-medium"
-            :class="{
-              'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200': analysisStatus === 'succeeded',
-              'bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200': analysisStatus === 'failed',
-              'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200': analysisStatus === 'cancelled',
-              'bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-200': analysisStatus === 'running' || analysisStatus === 'queued',
-              'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200': !analysisStatus
-            }">
-        <span class="lr-status-ball h-2.5 w-2.5"
-              :class="analysisBallClass(analysisStatus)"></span>
-        <span x-text="analysisLabel()"></span>
-      </span>
-    </span>
-    <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
-      <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Commit head</span>
-      {% if pr.head_sha %}
-      <a class="bg-white px-2 py-1 font-mono font-medium text-blue-600 hover:underline dark:bg-slate-900 dark:text-blue-400"
-         href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/commit/{{ pr.head_sha }}"
-         target="_blank" rel="noopener"
-         title="{{ pr.head_sha }}">{{ pr.head_sha[:12] }}</a>
-      {% else %}
-      <span class="bg-white px-2 py-1 font-medium text-slate-500 dark:bg-slate-900 dark:text-slate-400">—</span>
-      {% endif %}
-    </span>
-    <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
-      <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Author</span>
-      <span class="bg-white px-2 py-1 font-medium text-slate-700 dark:bg-slate-900 dark:text-slate-200">{{ pr.author or '—' }}</span>
-    </span>
-    <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
-      <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Diff</span>
-      <span class="bg-white px-2 py-1 font-medium dark:bg-slate-900">
-        {% if pr.additions is not none or pr.deletions is not none %}
-        <span class="text-emerald-700 dark:text-emerald-400">+{{ pr.additions or 0 }}</span>
-        <span class="text-slate-400">/</span>
-        <span class="text-red-700 dark:text-red-400">−{{ pr.deletions or 0 }}</span>
-        {% if pr.changed_files is not none %}
-        <span class="text-slate-500">· {{ pr.changed_files }} files</span>
+  {% if runs_stale %}
+  <div class="lr-pr-stale-banner"
+       title="Current head has no review runs — previous runs are obsolete"
+       role="status">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5 shrink-0" aria-hidden="true">
+      <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 6a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 6Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
+    </svg>
+    Review stale
+  </div>
+  {% endif %}
+
+  {# Meta chips — collapsed summary on mobile, full chips on desktop / when expanded #}
+  <div class="lr-pr-meta">
+    <div class="lr-pr-meta__bar">
+      <div class="lr-pr-meta__summary" aria-hidden="false">
+        <span class="lr-pr-meta__pill
+          {% if pr_label == 'draft' %}lr-pr-meta__pill--muted
+          {% elif pr_label == 'open' %}lr-pr-meta__pill--ok
+          {% elif pr_label == 'merged' %}lr-pr-meta__pill--merged
+          {% else %}lr-pr-meta__pill--bad{% endif %}">{{ pr_label }}</span>
+        <span class="lr-pr-meta__dot" aria-hidden="true">·</span>
+        <span class="lr-pr-meta__pill
+          {% if istatus == 'approved' %}lr-pr-meta__pill--ok
+          {% elif istatus == 'changes_requested' %}lr-pr-meta__pill--bad
+          {% elif istatus == 'feedback_provided' %}lr-pr-meta__pill--info
+          {% else %}lr-pr-meta__pill--warn{% endif %}">{{ pr.internal_status_label or 'needs review' }}</span>
+        <span class="lr-pr-meta__dot" aria-hidden="true">·</span>
+        <span class="lr-pr-meta__analysis" :title="analysisTitle()">
+          <span class="lr-status-ball h-2 w-2" :class="analysisBallClass(analysisStatus)"></span>
+          <span x-text="analysisLabel()"></span>
+        </span>
+        {% if pr.head_sha %}
+        <span class="lr-pr-meta__dot" aria-hidden="true">·</span>
+        <a class="lr-pr-meta__commit"
+           href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/commit/{{ pr.head_sha }}"
+           target="_blank" rel="noopener"
+           title="{{ pr.head_sha }}">{{ pr.head_sha[:12] }}</a>
         {% endif %}
+      </div>
+      <button type="button"
+              class="lr-pr-meta__toggle"
+              @click="togglePrMeta()"
+              :aria-expanded="prMetaOpen"
+              x-text="prMetaOpen ? 'Hide details' : 'Details'"></button>
+    </div>
+
+    <div class="lr-pr-meta__details"
+         :class="prMetaOpen && 'is-open'"
+         id="pr-meta-details">
+      <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
+        <a class="bg-slate-100 px-2 py-1 font-medium text-blue-600 hover:underline dark:bg-slate-800 dark:text-blue-400"
+           href="{{ pr.url }}" target="_blank" rel="noopener">PR #{{ pr.number }}</a>
+        <span class="px-2 py-1 font-medium
+          {% if pr_label == 'draft' %}bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200
+          {% elif pr_label == 'open' %}bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200
+          {% elif pr_label == 'merged' %}bg-purple-100 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200
+          {% else %}bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200{% endif %}">{{ pr_label }}</span>
+      </span>
+      <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
+        <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Review</span>
+        <span class="px-2 py-1 font-medium
+          {% if istatus == 'approved' %}bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200
+          {% elif istatus == 'changes_requested' %}bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200
+          {% elif istatus == 'feedback_provided' %}bg-blue-100 text-blue-900 dark:bg-blue-900/40 dark:text-blue-200
+          {% else %}bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200{% endif %}">{{ pr.internal_status_label or 'needs review' }}</span>
+      </span>
+      <span class="inline-flex items-center gap-0 overflow-hidden rounded-md border border-slate-200 dark:border-slate-600"
+            :title="analysisTitle()">
+        <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Analysis</span>
+        <span class="inline-flex items-center gap-1.5 px-2 py-1 font-medium"
+              :class="{
+                'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200': analysisStatus === 'succeeded',
+                'bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200': analysisStatus === 'failed',
+                'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200': analysisStatus === 'cancelled',
+                'bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-200': analysisStatus === 'running' || analysisStatus === 'queued',
+                'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200': !analysisStatus
+              }">
+          <span class="lr-status-ball h-2.5 w-2.5"
+                :class="analysisBallClass(analysisStatus)"></span>
+          <span x-text="analysisLabel()"></span>
+        </span>
+      </span>
+      <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
+        <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Commit head</span>
+        {% if pr.head_sha %}
+        <a class="bg-white px-2 py-1 font-mono font-medium text-blue-600 hover:underline dark:bg-slate-900 dark:text-blue-400"
+           href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/commit/{{ pr.head_sha }}"
+           target="_blank" rel="noopener"
+           title="{{ pr.head_sha }}">{{ pr.head_sha[:12] }}</a>
         {% else %}
-        <span class="text-slate-500">—</span>
+        <span class="bg-white px-2 py-1 font-medium text-slate-500 dark:bg-slate-900 dark:text-slate-400">—</span>
         {% endif %}
       </span>
-    </span>
-    <span class="inline-flex max-w-full items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
-      <span class="shrink-0 bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Branch</span>
-      <span class="min-w-0 truncate bg-white px-2 py-1 font-medium text-slate-700 dark:bg-slate-900 dark:text-slate-200"
-            title="{{ pr.head_ref or '—' }} → {{ pr.base_ref or '—' }}">
-        {% if pr.head_ref %}
-        <a class="text-blue-600 hover:underline dark:text-blue-400"
-           href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/tree/{{ pr.head_ref }}"
-           target="_blank" rel="noopener">{{ pr.head_ref }}</a>
-        {% else %}—{% endif %}
-        <span class="text-slate-400"> → </span>
-        {% if pr.base_ref %}
-        <a class="text-blue-600 hover:underline dark:text-blue-400"
-           href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/tree/{{ pr.base_ref }}"
-           target="_blank" rel="noopener">{{ pr.base_ref }}</a>
-        {% else %}—{% endif %}
+      <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
+        <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Author</span>
+        <span class="bg-white px-2 py-1 font-medium text-slate-700 dark:bg-slate-900 dark:text-slate-200">{{ pr.author or '—' }}</span>
       </span>
-    </span>
-    {% if runs_stale %}
-    <span class="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 font-medium text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
-          title="Current head has no review runs — previous runs are obsolete">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5" aria-hidden="true">
-        <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 6a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 6Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
-      </svg>
-      Review stale
-    </span>
-    {% endif %}
-    <button type="button"
-            @click="chatOpen ? (chatOpen = false, persistChatOpen()) : openChat()"
-            class="lr-chat-toggle ml-auto"
-            :class="{ 'is-open': chatOpen }"
-            :aria-expanded="chatOpen"
-            x-text="chatOpen ? 'Hide chat' : 'Chat'"></button>
+      <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
+        <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Diff</span>
+        <span class="bg-white px-2 py-1 font-medium dark:bg-slate-900">
+          {% if pr.additions is not none or pr.deletions is not none %}
+          <span class="text-emerald-700 dark:text-emerald-400">+{{ pr.additions or 0 }}</span>
+          <span class="text-slate-400">/</span>
+          <span class="text-red-700 dark:text-red-400">−{{ pr.deletions or 0 }}</span>
+          {% if pr.changed_files is not none %}
+          <span class="text-slate-500">· {{ pr.changed_files }} files</span>
+          {% endif %}
+          {% else %}
+          <span class="text-slate-500">—</span>
+          {% endif %}
+        </span>
+      </span>
+      <span class="inline-flex max-w-full items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
+        <span class="shrink-0 bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Branch</span>
+        <span class="min-w-0 truncate bg-white px-2 py-1 font-medium text-slate-700 dark:bg-slate-900 dark:text-slate-200"
+              title="{{ pr.head_ref or '—' }} → {{ pr.base_ref or '—' }}">
+          {% if pr.head_ref %}
+          <a class="text-blue-600 hover:underline dark:text-blue-400"
+             href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/tree/{{ pr.head_ref }}"
+             target="_blank" rel="noopener">{{ pr.head_ref }}</a>
+          {% else %}—{% endif %}
+          <span class="text-slate-400"> → </span>
+          {% if pr.base_ref %}
+          <a class="text-blue-600 hover:underline dark:text-blue-400"
+             href="https://github.com/{{ pr.owner }}/{{ pr.repo }}/tree/{{ pr.base_ref }}"
+             target="_blank" rel="noopener">{{ pr.base_ref }}</a>
+          {% else %}—{% endif %}
+        </span>
+      </span>
+    </div>
   </div>
 
-  {# Tabs share a row with chat; header above stays full width #}
+  {# Tabs + actions share a row; header above stays full width #}
   <div class="lr-page-with-chat" :class="{ 'lr-page-with-chat--open': chatOpen }">
   <div class="lr-page-with-chat__main">
 
   <div class="lr-pr-layout">
     {# Main column #}
     <div class="lr-pr-main space-y-4">
-      {# Tabs #}
       <div>
-        <div class="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-700" role="tablist">
-          <template x-for="t in tabItems()" :key="t.id">
-            <button type="button" role="tab"
-                    @click="setTab(t.id)"
-                    :aria-selected="tab === t.id"
-                    class="inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors"
-                    :class="tab === t.id
-                      ? 'border-blue-600 text-blue-700 dark:border-blue-400 dark:text-blue-300'
-                      : 'border-transparent text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'">
-              <span x-text="t.label"></span>
-              <svg x-show="t.warn" x-cloak class="h-3.5 w-3.5 text-amber-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" title="Report is for a deprecated commit">
-                <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+        <div class="lr-pr-chrome">
+          {# Mobile: custom listbox (native <select> popups misalign under Chrome device emulation). #}
+          <div class="lr-pr-tabs-select"
+               @keydown.escape.window="prTabMenuOpen && (prTabMenuOpen = false)"
+               @click.outside="prTabMenuOpen = false">
+            <span class="lr-pr-tabs-select__label" id="pr-tab-label">Section</span>
+            <button type="button"
+                    class="lr-pr-tabs-select__control"
+                    aria-labelledby="pr-tab-label"
+                    aria-haspopup="listbox"
+                    :aria-expanded="prTabMenuOpen"
+                    @click="prTabMenuOpen = !prTabMenuOpen">
+              <span class="inline-flex min-w-0 items-center gap-1.5">
+                <span class="truncate" x-text="activeTabLabel()"></span>
+                <svg x-show="activeTabWarn()" x-cloak class="h-3.5 w-3.5 shrink-0 text-amber-500"
+                     viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+                </svg>
+              </span>
+              <svg class="lr-pr-tabs-select__chevron" :class="prTabMenuOpen && 'is-open'"
+                   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M6 9l6 6 6-6"/>
               </svg>
             </button>
-          </template>
+            <ul x-show="prTabMenuOpen" x-cloak
+                class="lr-pr-tabs-select__menu"
+                role="listbox"
+                aria-labelledby="pr-tab-label">
+              <template x-for="t in tabItems()" :key="'tab-opt-' + t.id">
+                <li role="option"
+                    class="lr-pr-tabs-select__option"
+                    :class="tab === t.id && 'is-active'"
+                    :aria-selected="tab === t.id"
+                    @click="setTab(t.id); prTabMenuOpen = false">
+                  <span class="inline-flex items-center gap-1.5">
+                    <span x-text="t.label"></span>
+                    <svg x-show="t.warn" x-cloak class="h-3.5 w-3.5 text-amber-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                      <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+                    </svg>
+                  </span>
+                </li>
+              </template>
+            </ul>
+          </div>
+
+          {# Desktop underline tabs #}
+          <div class="lr-pr-tabs" role="tablist">
+            <template x-for="t in tabItems()" :key="t.id">
+              <button type="button" role="tab"
+                      @click="setTab(t.id)"
+                      :aria-selected="tab === t.id"
+                      class="lr-pr-tab"
+                      :class="tab === t.id && 'lr-pr-tab--active'">
+                <span x-text="t.label"></span>
+                <svg x-show="t.warn" x-cloak class="h-3.5 w-3.5 text-amber-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" title="Report is for a deprecated commit">
+                  <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+                </svg>
+              </button>
+            </template>
+          </div>
+
+          <div class="lr-pr-chrome__actions">
+            <button type="button"
+                    @click="chatOpen ? (chatOpen = false, persistChatOpen()) : openChat()"
+                    class="lr-chat-toggle"
+                    :class="{ 'is-open': chatOpen }"
+                    :aria-expanded="chatOpen"
+                    x-text="chatOpen ? 'Hide chat' : 'Chat'"></button>
+            <button type="button" @click="openBatchModal()"
+                    :disabled="!analysisReady"
+                    :title="analysisReady ? 'Start a new review' : 'PR analysis must succeed before reviewing'"
+                    class="lr-pr-new-review lr-pr-new-review--mobile">
+              New Review
+            </button>
+          </div>
         </div>
         {# Overview #}
         <div x-show="tab === 'overview'" x-cloak class="mt-4 space-y-4">
@@ -266,7 +359,109 @@
       <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Consolidations</h2>
       <span class="text-xs text-slate-500" x-show="pollActive" x-cloak>Updating…</span>
     </div>
-    <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+
+    {# Mobile / narrow: stacked cards (no horizontal scroll). #}
+    <div class="lr-pr-act-cards" aria-label="Consolidations">
+      <template x-for="c in consolidations" :key="'consol-card-' + c.id">
+        <article class="lr-pr-act-card"
+                 :class="Number(highlightConsolidationId) === Number(c.id) && 'lr-pr-act-card--highlight'">
+          <div class="lr-pr-act-card__top">
+            <div class="lr-pr-act-card__id">
+              <span class="inline-flex items-center gap-1" :title="consolidationStatusLabel(c.status)">
+                <span class="lr-status-ball h-2.5 w-2.5"
+                      :class="statusBallClass(c.status, {consolidating: true})"
+                      role="img" :aria-label="consolidationStatusLabel(c.status)"></span>
+              </span>
+              <button type="button" class="text-blue-600 hover:underline dark:text-blue-400"
+                      x-show="c.status === 'succeeded'" x-cloak
+                      @click="openFindingsForConsolidation(c)"
+                      x-text="'#' + c.id"></button>
+              <span x-show="c.status !== 'succeeded'" x-text="'#' + c.id"></span>
+            </div>
+            <span x-show="dispositionLabel(c)"
+                  class="inline-flex shrink-0 rounded-full px-2 py-0.5 text-xs font-medium"
+                  :class="dispositionClass(c)" :title="dispositionTitle(c)"
+                  x-text="dispositionLabel(c)"></span>
+          </div>
+          <div class="lr-pr-act-card__agent">
+            <span class="inline-flex items-center gap-1.5 align-middle">
+              <img x-show="agentKey(c.agent) === LR.AgentName.CLAUDE" x-cloak
+                   src="/static/img/agents/claude.webp" alt="" width="16" height="16"
+                   class="h-4 w-4 shrink-0 object-contain" />
+              <img x-show="agentKey(c.agent) === LR.AgentName.AGY" x-cloak
+                   src="/static/img/agents/agy.png" alt="" width="16" height="16"
+                   class="h-4 w-4 shrink-0 object-contain" />
+              <img x-show="agentKey(c.agent) === LR.AgentName.CODEX" x-cloak
+                   src="/static/img/agents/codex.svg" alt="" width="16" height="16"
+                   class="h-4 w-4 shrink-0 object-contain" />
+              <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
+                   src="/static/img/agents/cursor-light.png" alt="" width="16" height="16"
+                   class="h-4 w-4 shrink-0 object-contain dark:hidden" />
+              <img x-show="agentKey(c.agent) === LR.AgentName.CURSOR" x-cloak
+                   src="/static/img/agents/cursor-dark.png" alt="" width="16" height="16"
+                   class="h-4 w-4 shrink-0 object-contain hidden dark:inline" />
+              <span x-text="agentTitle(c.agent)"></span>
+            </span>
+            <span class="text-slate-400" aria-hidden="true"> · </span>
+            <span x-text="c.model"></span>
+            <template x-if="c.effort">
+              <span>
+                <span class="text-slate-400" aria-hidden="true"> · </span>
+                <span x-text="c.effort"></span>
+              </span>
+            </template>
+          </div>
+          <div class="lr-pr-act-card__meta">
+            <span>
+              Runs
+              <template x-if="(c.source_run_ids || []).length">
+                <span class="inline-flex flex-wrap gap-x-1.5 font-mono">
+                  <template x-for="rid in (c.source_run_ids || [])" :key="'c' + c.id + '-r' + rid">
+                    <button type="button" class="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                            @click="openSidebarRun(rid)" x-text="'#' + rid"></button>
+                  </template>
+                </span>
+              </template>
+              <strong x-show="!(c.source_run_ids || []).length">—</strong>
+            </span>
+            <span>Tokens <strong x-text="c.total_tokens != null ? c.total_tokens : '—'"></strong></span>
+            <span>Cost <strong x-text="formatCost(c.cost_usd)"></strong></span>
+            <span>Duration <strong x-text="formatDuration(c.duration_ms)"></strong></span>
+          </div>
+          <div class="lr-pr-act-card__actions">
+            <button type="button" @click="openConsolLogs(c)"
+                    class="rounded-lg px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">Logs</button>
+            <button type="button"
+                    x-show="c.status === 'succeeded' || c.status === 'failed' || c.status === 'cancelled'"
+                    x-cloak @click="askRegenerate(c.id)"
+                    :disabled="!!regenerating[c.id] || !!c.feedback_provided"
+                    :title="c.feedback_provided ? 'Already posted to GitHub' : 'Re-run with current consolidator settings'"
+                    class="rounded-lg px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800">Regenerate</button>
+            <button type="button"
+                    x-show="c.status === 'dormant' || c.status === 'queued' || c.status === 'running'"
+                    @click="cancelConsolidation(c.id)"
+                    class="rounded-lg px-2.5 py-1.5 text-xs text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-950/40">Cancel</button>
+            <span class="text-xs text-slate-500"
+                  x-show="c.status === 'succeeded' && !c.feedback_provided && (c.publish_status === 'queued' || c.publish_status === 'running')"
+                  x-cloak>Preparing GitHub draft…</span>
+            <button type="button"
+                    x-show="c.status === 'succeeded'" x-cloak
+                    @click="openFindingsForConsolidation(c)"
+                    class="rounded-lg px-2.5 py-1.5 text-xs font-medium"
+                    :class="c.feedback_provided
+                      ? 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
+                      : (c.ready_to_post
+                        ? 'bg-blue-600 text-white hover:bg-blue-700'
+                        : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800')"
+                    x-text="c.feedback_provided ? 'View' : (c.ready_to_post ? 'Review & submit' : 'View')"></button>
+          </div>
+        </article>
+      </template>
+      <p x-show="!consolidations.length" class="lr-pr-act-empty">No consolidations yet.</p>
+    </div>
+
+    {# Desktop: dense table. #}
+    <div class="lr-pr-act-table-wrap">
       <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
         <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
           <tr>
@@ -389,7 +584,109 @@
 
   <section class="space-y-3">
     <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Review runs</h2>
-    <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+
+    {# Mobile / narrow: stacked cards (no horizontal scroll). #}
+    <div class="lr-pr-act-cards" aria-label="Review runs">
+      {% for run in runs %}
+      {% set when = run.finished_at or run.started_at or run.created_at or '' %}
+      {% set findings_total = (run.findings_sev1 or 0) + (run.findings_sev2 or 0) + (run.findings_sev3 or 0) %}
+      <article class="lr-pr-act-card"
+               id="run-card-{{ run.id }}"
+               :class="highlightRunId === {{ run.id }} && 'lr-pr-act-card--highlight'">
+        <div class="lr-pr-act-card__top">
+          <div class="lr-pr-act-card__id">
+            <div class="inline-flex flex-wrap items-center gap-1">
+              {{ run_status_balls(run) }}
+              <span x-show="isConsolidating({{ run.id }}) && !{{ 'true' if run.consolidated else 'false' }}"
+                    x-cloak
+                    class="inline-flex"
+                    title="Consolidating">
+                {{ status_ball('consolidating', 'Consolidating') }}
+              </span>
+            </div>
+            <a class="text-blue-600 hover:underline dark:text-blue-400" href="/runs/{{ run.id }}">#{{ run.id }}</a>
+          </div>
+          <span class="shrink-0 text-xs text-slate-500 dark:text-slate-400"
+                {% if when %}title="{{ when }}"{% endif %}
+                x-text='timeAgo({{ when|tojson }}) || "—"'></span>
+        </div>
+        <div class="lr-pr-act-card__agent">
+          {{ agent_label(run.agent) }}
+          <span class="text-slate-400" aria-hidden="true"> · </span>
+          {{ run.model }}
+          {% if run.effort %}
+          <span class="text-slate-400" aria-hidden="true"> · </span>
+          {{ run.effort }}
+          {% endif %}
+        </div>
+        <div class="lr-pr-act-card__meta">
+          <span class="inline-flex min-w-0 flex-wrap items-center gap-1">Commit {{ commit_hash(run) }}</span>
+          <span>Findings
+            <button type="button"
+                    @click="openRunFindings({{ run.id }})"
+                    class="rounded px-1 py-0.5 font-mono font-medium hover:bg-slate-100 hover:text-blue-700 dark:hover:bg-slate-800 dark:hover:text-blue-300
+                      {% if findings_total %}text-slate-700 dark:text-slate-200{% else %}text-slate-400{% endif %}"
+                    title="View findings for run #{{ run.id }}"
+                    aria-label="View findings for run #{{ run.id }}">
+              {% if findings_total %}H{{ run.findings_sev1 }} M{{ run.findings_sev2 }} L{{ run.findings_sev3 }}{% else %}—{% endif %}
+            </button>
+          </span>
+          <span>Tokens <strong>{{ run.total_tokens or '—' }}</strong></span>
+          <span>Cost <strong>{{ run.cost_usd|cost }}</strong></span>
+          <span>Duration <strong>{{ run.duration_ms|duration }}</strong></span>
+        </div>
+        <div class="lr-pr-act-card__actions">
+          <button type="button"
+                  @click="openRunFindings({{ run.id }})"
+                  title="View findings"
+                  aria-label="View findings for run #{{ run.id }}"
+                  class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-slate-200">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2Z" />
+            </svg>
+          </button>
+          {% if run.status in ['queued', 'running'] %}
+          <button type="button"
+                  @click="cancelRun({{ run.id }})"
+                  :disabled="cancelling[{{ run.id }}] || deleting[{{ run.id }}] || rerunning[{{ run.id }}]"
+                  title="Cancel run"
+                  aria-label="Cancel run #{{ run.id }}"
+                  class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-amber-50 hover:text-amber-700 disabled:opacity-40 dark:hover:bg-amber-950/40 dark:hover:text-amber-300">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4" aria-hidden="true">
+              <path fill-rule="evenodd" d="M4.5 7.5a3 3 0 0 1 3-3h9a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3h-9a3 3 0 0 1-3-3v-9Z" clip-rule="evenodd" />
+            </svg>
+          </button>
+          {% elif run.status in ['succeeded', 'failed', 'cancelled'] and run.id not in locked_run_ids %}
+          <button type="button"
+                  @click="rerunRun({{ run.id }})"
+                  :disabled="cancelling[{{ run.id }}] || deleting[{{ run.id }}] || rerunning[{{ run.id }}] || isLocked({{ run.id }})"
+                  title="Re-run with the same agent, model, and effort"
+                  aria-label="Re-run #{{ run.id }}"
+                  class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-40 dark:hover:bg-blue-950/40 dark:hover:text-blue-300">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992V4.512M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+            </svg>
+          </button>
+          {% endif %}
+          <button type="button"
+                  @click="deleteRun({{ run.id }})"
+                  :disabled="cancelling[{{ run.id }}] || deleting[{{ run.id }}] || rerunning[{{ run.id }}]"
+                  title="Delete run"
+                  aria-label="Delete run #{{ run.id }}"
+                  class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-40 dark:hover:bg-red-950/40 dark:hover:text-red-300">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-4 w-4" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+            </svg>
+          </button>
+        </div>
+      </article>
+      {% else %}
+      <p class="lr-pr-act-empty">No runs yet.</p>
+      {% endfor %}
+    </div>
+
+    {# Desktop: dense table. #}
+    <div class="lr-pr-act-table-wrap">
       <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-700">
         <thead class="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:bg-slate-800/80 dark:text-slate-400">
           <tr>
@@ -408,7 +705,7 @@
         <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
           {% for run in runs %}
           <tr id="run-{{ run.id }}" :class="highlightRunId === {{ run.id }} && 'bg-amber-50 dark:bg-amber-950/30'">
-<td class="px-3 py-3"><a class="text-blue-600 hover:underline dark:text-blue-400" href="/runs/{{ run.id }}">#{{ run.id }}</a></td>
+            <td class="px-3 py-3"><a class="text-blue-600 hover:underline dark:text-blue-400" href="/runs/{{ run.id }}">#{{ run.id }}</a></td>
             <td class="px-3 py-3">
               <div class="inline-flex flex-wrap items-center gap-1">
                 {{ run_status_balls(run) }}
@@ -1146,7 +1443,17 @@
 
 <script>
 function reviewForm() {
-  return Object.assign({}, (window.LR && window.LR.chatRailMixin) ? window.LR.chatRailMixin({
+  // Object.assign copies getter *values* once (freezing analysisReady etc.).
+  // Merge descriptors so Alpine keeps live getters.
+  const merge = (...parts) => {
+    const out = {};
+    for (const part of parts) {
+      if (!part) continue;
+      Object.defineProperties(out, Object.getOwnPropertyDescriptors(part));
+    }
+    return out;
+  };
+  return merge((window.LR && window.LR.chatRailMixin) ? window.LR.chatRailMixin({
     mode: 'explore',
     prId: {{ pr.id }},
     storageKey: 'lazyreview-chat-open-pr-{{ pr.id }}',
@@ -1195,6 +1502,10 @@ function reviewForm() {
     _batchKeySeq: 1,
     toast: '',
     tab: 'overview',
+    prTabMenuOpen: false,
+    prMetaOpen: false,
+    _prMetaMq: null,
+    _prMetaMqHandler: null,
     prId: {{ pr.id }},
     analysisStatus: {{ (pr.analysis_status or none)|tojson }},
     analysisId: {{ (pr.analysis_id or none)|tojson }},
@@ -1495,6 +1806,7 @@ function reviewForm() {
     },
     async init() {
       if (typeof this.initChatRail === 'function') this.initChatRail();
+      this.initPrChrome();
       this.loadDiffPaths();
       try {
         const params = new URLSearchParams(window.location.search);
@@ -1592,6 +1904,44 @@ function reviewForm() {
         }).catch(() => {});
       }
     },
+    initPrChrome() {
+      const applyMetaDefault = () => {
+        const wide = !!(this._prMetaMq && this._prMetaMq.matches);
+        if (wide) {
+          this.prMetaOpen = true;
+          this.prTabMenuOpen = false;
+          return;
+        }
+        try {
+          const stored = localStorage.getItem('lr-pr-meta-open');
+          if (stored === '1') this.prMetaOpen = true;
+          else if (stored === '0') this.prMetaOpen = false;
+          else this.prMetaOpen = false;
+        } catch (_) {
+          this.prMetaOpen = false;
+        }
+      };
+      try {
+        this._prMetaMq = window.matchMedia('(min-width: 768px)');
+        this._prMetaMqHandler = () => applyMetaDefault();
+        if (this._prMetaMq.addEventListener) {
+          this._prMetaMq.addEventListener('change', this._prMetaMqHandler);
+        } else if (this._prMetaMq.addListener) {
+          this._prMetaMq.addListener(this._prMetaMqHandler);
+        }
+      } catch (_) {
+        this._prMetaMq = null;
+      }
+      applyMetaDefault();
+    },
+    togglePrMeta() {
+      this.prMetaOpen = !this.prMetaOpen;
+      try {
+        if (!(this._prMetaMq && this._prMetaMq.matches)) {
+          localStorage.setItem('lr-pr-meta-open', this.prMetaOpen ? '1' : '0');
+        }
+      } catch (_) { /* ignore */ }
+    },
     tabItems() {
       const nRuns = (this.runsForHistory || []).length;
       const nConsol = (this.consolidations || []).length;
@@ -1610,6 +1960,16 @@ function reviewForm() {
         { id: 'history', label: 'History' },
       ];
       return items;
+    },
+    activeTabItem() {
+      const items = this.tabItems();
+      return items.find(t => t.id === this.tab) || items[0] || { id: 'overview', label: 'Overview' };
+    },
+    activeTabLabel() {
+      return this.activeTabItem().label || 'Overview';
+    },
+    activeTabWarn() {
+      return !!this.activeTabItem().warn;
     },
     latestConsolidation() {
       const rows = this.consolidations || [];
@@ -1928,7 +2288,9 @@ function reviewForm() {
       this.setTab('activity');
       this.highlightRunId = Number(id);
       this.$nextTick(() => {
-        const el = document.getElementById('run-' + id);
+        const card = document.getElementById('run-card-' + id);
+        const row = document.getElementById('run-' + id);
+        const el = (card && getComputedStyle(card).display !== 'none') ? card : row;
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         setTimeout(() => { if (this.highlightRunId === Number(id)) this.highlightRunId = null; }, 2500);
       });
