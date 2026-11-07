@@ -336,6 +336,36 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+class _ThreadConnFinalizer:
+    """Close a sqlite connection when the owning thread's locals are cleared.
+
+    ThreadLocalConnection keeps one connection per OS thread. FastAPI's
+    threadpool and short-lived worker threads come and go; without this,
+    dead threads leave their DB FDs open forever (each WAL connection takes
+    two FDs) until the process hits EMFILE.
+    """
+
+    __slots__ = ("conn", "owner", "_closed")
+
+    def __init__(self, conn: sqlite3.Connection, owner: "ThreadLocalConnection") -> None:
+        self.conn = conn
+        self.owner = owner
+        self._closed = False
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self.conn.close()
+        except sqlite3.Error:
+            pass
+        self.owner._forget(self.conn)
+
+    def __del__(self) -> None:
+        self.close()
+
+
 class ThreadLocalConnection:
     """
     Drop-in Connection proxy: one real sqlite3 connection per OS thread.
@@ -344,12 +374,15 @@ class ThreadLocalConnection:
     (PR sync, retention) use their own threads. A single shared Connection
     raises sqlite3.InterfaceError under concurrent use even with
     check_same_thread=False.
+
+    Connections are closed when their thread dies (see _ThreadConnFinalizer)
+    and again on explicit close() at app shutdown.
     """
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = Path(db_path)
         self._local = threading.local()
-        self._all: list[sqlite3.Connection] = []
+        self._all: dict[int, sqlite3.Connection] = {}
         self._lock = threading.Lock()
 
     def _conn(self) -> sqlite3.Connection:
@@ -357,22 +390,36 @@ class ThreadLocalConnection:
         if conn is None:
             conn = connect(self._db_path)
             self._local.conn = conn
+            # Lives only in thread-local storage. When the thread exits,
+            # Python clears the local dict and __del__ releases the FDs.
+            self._local.finalizer = _ThreadConnFinalizer(conn, self)
             with self._lock:
-                self._all.append(conn)
+                self._all[id(conn)] = conn
         return conn
+
+    def _forget(self, conn: sqlite3.Connection) -> None:
+        with self._lock:
+            self._all.pop(id(conn), None)
+
+    def connection_count(self) -> int:
+        """Open connections still tracked (for tests / diagnostics)."""
+        with self._lock:
+            return len(self._all)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._conn(), name)
 
     def close(self) -> None:
         with self._lock:
-            conns = list(self._all)
+            conns = list(self._all.values())
             self._all.clear()
         for conn in conns:
             try:
                 conn.close()
             except sqlite3.Error:
                 pass
+        # Drop this thread's locals so a lingering finalizer does not keep
+        # a closed connection referenced on the shutdown thread.
         self._local = threading.local()
 
 

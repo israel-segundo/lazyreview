@@ -20,6 +20,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from lazyreview.services.procutil import close_popen_pipes, close_stream
+
 logger = logging.getLogger(__name__)
 
 LOGIN_TIMEOUT_SECONDS = 600
@@ -224,16 +226,20 @@ class LoginManager:
     def _pump(self, session: LoginSession) -> None:
         stream = session.proc.stdout
         assert stream is not None
-        while True:
-            chunk = stream.read1(4096)  # type: ignore[attr-defined]
-            if not chunk:
-                break
-            text = _ANSI_RE.sub("", chunk.decode("utf-8", errors="replace"))
-            session.output = (session.output + text)[-_OUTPUT_LIMIT:]
+        try:
+            while True:
+                chunk = stream.read1(4096)  # type: ignore[attr-defined]
+                if not chunk:
+                    break
+                text = _ANSI_RE.sub("", chunk.decode("utf-8", errors="replace"))
+                session.output = (session.output + text)[-_OUTPUT_LIMIT:]
+        finally:
+            close_stream(stream)
         rc = session.proc.wait()
         if session.tty_fd is not None:
             os.close(session.tty_fd)
             session.tty_fd = None
+        close_popen_pipes(session.proc)
         session.exit_code = rc
         if session.status == "running":
             session.status = "succeeded" if rc == 0 else "failed"

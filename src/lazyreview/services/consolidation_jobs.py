@@ -34,6 +34,7 @@ from lazyreview.db import (
 from lazyreview.db.schema import connect
 from lazyreview.services.credentials import subprocess_env
 from lazyreview.services.gh import GhError, list_pr_comments
+from lazyreview.services.procutil import close_popen_pipes, pump_stream_to_file
 from lazyreview.findings_taxonomy import (
     coerce_findings_for_persist,
     findings_to_json,
@@ -1614,55 +1615,51 @@ class ConsolidationRunner:
         with self._lock:
             self._procs[consolidation_id] = proc
 
-        def _pump(stream, path: Path) -> None:
-            if stream is None:
-                return
-            try:
-                with path.open("w", encoding="utf-8", buffering=1) as out:
-                    for line in stream:
-                        out.write(line)
-                        out.flush()
-            except Exception:
-                logger.exception("log pump failed for %s", path)
-
         t_out = threading.Thread(
-            target=_pump,
+            target=pump_stream_to_file,
             args=(proc.stdout, stdout_path),
+            kwargs={"log_label": "log pump"},
             name=f"lr-cout-{consolidation_id}",
             daemon=True,
         )
         t_err = threading.Thread(
-            target=_pump,
+            target=pump_stream_to_file,
             args=(proc.stderr, stderr_path),
+            kwargs={"log_label": "log pump"},
             name=f"lr-cerr-{consolidation_id}",
             daemon=True,
         )
         t_out.start()
         t_err.start()
 
-        if stdin_text is not None and proc.stdin is not None:
-            try:
-                proc.stdin.write(stdin_text)
-                proc.stdin.close()
-            except OSError:
-                logger.exception("failed writing stdin for consolidation %s", consolidation_id)
+        try:
+            if stdin_text is not None and proc.stdin is not None:
+                try:
+                    proc.stdin.write(stdin_text)
+                    proc.stdin.close()
+                except OSError:
+                    logger.exception(
+                        "failed writing stdin for consolidation %s", consolidation_id
+                    )
 
-        while proc.poll() is None:
-            if self._is_cancel_requested(consolidation_id, conn):
-                self._terminate(proc)
-                proc.wait(timeout=30)
-                break
-            if deadline is not None and time.monotonic() > deadline:
-                self._terminate(proc)
-                proc.wait(timeout=30)
-                t_out.join(timeout=5)
-                t_err.join(timeout=5)
-                raise TimeoutError(f"Consolidation exceeded {timeout}s timeout")
-            time.sleep(0.4)
+            while proc.poll() is None:
+                if self._is_cancel_requested(consolidation_id, conn):
+                    self._terminate(proc)
+                    proc.wait(timeout=30)
+                    break
+                if deadline is not None and time.monotonic() > deadline:
+                    self._terminate(proc)
+                    proc.wait(timeout=30)
+                    t_out.join(timeout=5)
+                    t_err.join(timeout=5)
+                    raise TimeoutError(f"Consolidation exceeded {timeout}s timeout")
+                time.sleep(0.4)
 
-        t_out.join(timeout=30)
-        t_err.join(timeout=30)
-        return int(proc.returncode if proc.returncode is not None else -1)
+            t_out.join(timeout=30)
+            t_err.join(timeout=30)
+            return int(proc.returncode if proc.returncode is not None else -1)
+        finally:
+            close_popen_pipes(proc)
 
     @staticmethod
     def _terminate(proc: subprocess.Popen[str]) -> None:

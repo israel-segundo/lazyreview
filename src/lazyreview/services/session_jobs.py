@@ -38,6 +38,7 @@ from lazyreview.findings_taxonomy import (
 )
 from lazyreview.services.agent_eligibility import require_selectable_agent
 from lazyreview.services.credentials import subprocess_env
+from lazyreview.services.procutil import close_popen_pipes, pump_stream_to_file
 from lazyreview.services.pr_workspace import hold_worktree
 from lazyreview.services.session_safety import (
     SESSION_ALLOWED_TOOLS,
@@ -863,53 +864,47 @@ class SessionRunner:
         with self._lock:
             self._procs[session_id] = proc
 
-        def _pump(stream: Any, path: Path) -> None:
-            if stream is None:
-                return
-            try:
-                with path.open("w", encoding="utf-8", buffering=1) as out:
-                    for line in stream:
-                        out.write(line)
-                        out.flush()
-            except Exception:
-                logger.exception("session log pump failed for %s", path)
-
         t_out = threading.Thread(
-            target=_pump,
+            target=pump_stream_to_file,
             args=(proc.stdout, stdout_path),
+            kwargs={"log_label": "session log pump"},
             name=f"lr-sess-out-{session_id}",
             daemon=True,
         )
         t_err = threading.Thread(
-            target=_pump,
+            target=pump_stream_to_file,
             args=(proc.stderr, stderr_path),
+            kwargs={"log_label": "session log pump"},
             name=f"lr-sess-err-{session_id}",
             daemon=True,
         )
         t_out.start()
         t_err.start()
-        if stdin_text is not None and proc.stdin is not None:
-            try:
-                proc.stdin.write(stdin_text)
-                proc.stdin.close()
-            except OSError:
-                logger.exception("failed writing stdin for session %s", session_id)
-
-        while proc.poll() is None:
-            if deadline is not None and time.monotonic() > deadline:
-                proc.terminate()
+        try:
+            if stdin_text is not None and proc.stdin is not None:
                 try:
-                    proc.wait(timeout=30)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                raise TimeoutError(f"Session round exceeded {timeout}s timeout")
-            time.sleep(0.4)
+                    proc.stdin.write(stdin_text)
+                    proc.stdin.close()
+                except OSError:
+                    logger.exception("failed writing stdin for session %s", session_id)
 
-        t_out.join(timeout=30)
-        t_err.join(timeout=30)
-        with self._lock:
-            self._procs.pop(session_id, None)
-        return int(proc.returncode if proc.returncode is not None else -1)
+            while proc.poll() is None:
+                if deadline is not None and time.monotonic() > deadline:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=30)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    raise TimeoutError(f"Session round exceeded {timeout}s timeout")
+                time.sleep(0.4)
+
+            t_out.join(timeout=30)
+            t_err.join(timeout=30)
+            with self._lock:
+                self._procs.pop(session_id, None)
+            return int(proc.returncode if proc.returncode is not None else -1)
+        finally:
+            close_popen_pipes(proc)
 
     def apply_findings(self, session_id: int) -> dict[str, Any]:
         """Write working findings into the consolidation and enqueue publish draft regen.
