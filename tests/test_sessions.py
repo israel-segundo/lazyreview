@@ -19,6 +19,7 @@ from lazyreview.services.session_jobs import (
     SessionRunner,
     findings_to_body_md,
     is_apply_findings_command,
+    looks_like_findings_edit_intent,
     parse_structured_trailer,
 )
 from lazyreview.services.session_safety import (
@@ -213,12 +214,21 @@ def test_findings_to_body_md():
     assert "request_changes" in md
 
 
-def test_create_challenge_seeds_body_and_clears_publish(tmp_path: Path):
+def test_create_challenge_seeds_body_without_clearing_publish(tmp_path: Path):
+    """Opening Challenge must not wipe a ready draft until working copy diverges."""
     conn = _conn(tmp_path)
     settings = _settings(tmp_path)
     settings.ensure_dirs()
     _, consol, work = _pr_and_consol(conn, tmp_path)
-    (work / "publish-body.md").write_text("stale\n", encoding="utf-8")
+    (work / "publish-body.md").write_text("ready draft\n", encoding="utf-8")
+    from lazyreview.db import update_consolidation
+
+    update_consolidation(
+        conn,
+        int(consol["id"]),
+        publish_body="ready draft\n",
+        ready_to_post=1,
+    )
 
     runner = SessionRunner(settings, conn)
     session = runner.create_challenge_session(int(consol["id"]))
@@ -229,9 +239,9 @@ def test_create_challenge_seeds_body_and_clears_publish(tmp_path: Path):
     assert len(session.get("working_findings") or []) == 1
 
     refreshed = get_consolidation(conn, int(consol["id"]))
-    assert int(refreshed["ready_to_post"] or 0) == 0
-    assert not (refreshed.get("publish_body") or "").strip()
-    assert not (work / "publish-body.md").exists()
+    assert int(refreshed["ready_to_post"] or 0) == 1
+    assert (refreshed.get("publish_body") or "").strip() == "ready draft"
+    assert (work / "publish-body.md").read_text(encoding="utf-8") == "ready draft\n"
 
 
 def test_finish_session_preserves_body_and_writes_guidance(tmp_path: Path):
@@ -426,6 +436,35 @@ def test_is_apply_findings_command():
     assert is_apply_findings_command("update the consolidation")
     assert not is_apply_findings_command("please apply findings and also drop C2")
     assert not is_apply_findings_command("how do I apply findings?")
+
+
+def test_looks_like_findings_edit_intent():
+    assert looks_like_findings_edit_intent("please add a finding about the backup gap")
+    assert looks_like_findings_edit_intent("drop C2 from the list")
+    assert looks_like_findings_edit_intent("change severity of C1 to high")
+    assert looks_like_findings_edit_intent("apply findings")
+    assert not looks_like_findings_edit_intent("what does the plan say about backups?")
+    assert not looks_like_findings_edit_intent("summarize the diff")
+
+
+def test_explore_findings_intent_offers_challenge(tmp_path: Path):
+    conn = _conn(tmp_path)
+    settings = _settings(tmp_path)
+    settings.ensure_dirs()
+    pr, consol, _work = _pr_and_consol(conn, tmp_path)
+    update_consolidation(conn, int(consol["id"]), status="succeeded", feedback_provided=0)
+
+    runner = SessionRunner(settings, conn)
+    explore = runner.create_explore_session(int(pr["id"]))
+    sid = int(explore["id"])
+
+    with patch.object(runner, "_run_round") as run_round:
+        result = runner.send_message(sid, "Please add a finding about the missing backup")
+        run_round.assert_not_called()
+
+    assert result.get("offer_challenge", {}).get("consolidation_id") == int(consol["id"])
+    assert "Challenge" in (result.get("turn") or {}).get("text", "")
+    assert "add a finding" in (result["offer_challenge"].get("pending_text") or "")
 
 
 def test_apply_findings_command_skips_llm(tmp_path: Path):

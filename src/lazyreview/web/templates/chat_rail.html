@@ -19,7 +19,17 @@
        :aria-valuenow="chatWidthPx"></div>
 
   <header class="lr-chat-rail__head">
-    <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Chat</span>
+    <div class="flex min-w-0 items-center gap-2">
+      <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Chat</span>
+      <span class="lr-chat-mode-chip"
+            :class="chatMode === 'challenge' ? 'lr-chat-mode-chip--challenge' : 'lr-chat-mode-chip--explore'"
+            :title="chatMode === 'challenge'
+              ? ('Edit findings for consolidation #' + (chatConsolidationId || '') + ' — Apply writes the draft, does not post')
+              : 'Ask about this PR — cannot edit findings'"
+            x-text="chatMode === 'challenge'
+              ? ('Challenge' + (chatConsolidationId ? (' #' + chatConsolidationId) : ''))
+              : 'Explore'"></span>
+    </div>
     <div class="flex items-center gap-1">
       <template x-if="chatMode === 'challenge' && chatSession && chatSession.status === 'open'">
         <button type="button" class="rounded px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
@@ -37,10 +47,34 @@
     </div>
   </header>
 
+  <div class="border-b border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/40 dark:text-sky-100"
+       x-show="chatMode === 'explore' && challengeReadyConsolidationId()" x-cloak>
+    <button type="button" class="font-medium underline-offset-2 hover:underline"
+            @click="acceptChallengeOffer(challengeReadyConsolidationId())">
+      Findings ready — open Challenge for consolidation #<span x-text="challengeReadyConsolidationId()"></span>
+    </button>
+  </div>
+
+  <div class="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100"
+       x-show="chatChallengeOffer" x-cloak>
+    <p class="font-medium">
+      Switch to Challenge to edit findings for consolidation
+      #<span x-text="chatChallengeOffer && chatChallengeOffer.consolidation_id"></span>?
+    </p>
+    <div class="mt-2 flex flex-wrap gap-2">
+      <button type="button"
+              class="rounded bg-amber-800 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700 dark:bg-amber-200 dark:text-amber-950"
+              :disabled="chatBusy"
+              @click="acceptChallengeOffer()">Switch</button>
+      <button type="button"
+              class="rounded px-2.5 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100 dark:text-amber-100 dark:hover:bg-amber-900/40"
+              :disabled="chatBusy"
+              @click="dismissChallengeOffer()">Not now</button>
+    </div>
+  </div>
+
   <div class="lr-chat-rail__meta border-b border-slate-200 px-3 py-2 text-xs text-slate-500 dark:border-slate-700"
        x-show="chatSession" x-cloak>
-    <span x-text="chatMode === 'challenge' ? 'Challenge' : 'Explore'"></span>
-    <span aria-hidden="true"> · </span>
     <span x-text="(chatSession && chatSession.status) || '—'"></span>
     <template x-if="chatSession && chatSession.working_recommended_action">
       <span>
@@ -55,7 +89,8 @@
     <template x-if="!chatSession">
       <div class="px-4 py-8 text-center text-sm text-slate-500">
         <p class="font-medium text-slate-700 dark:text-slate-300" x-text="chatMode === 'challenge' ? 'Challenge this consolidation' : 'Ask about this PR'"></p>
-        <p class="mt-2">Scoped to this PR’s worktree. Never posts to GitHub.</p>
+        <p class="mt-2" x-show="chatMode === 'explore'">Explore cannot edit findings — open Challenge from Findings when a consolidation is ready.</p>
+        <p class="mt-2" x-show="chatMode === 'challenge'" x-cloak>Edits stay in a working draft until Apply findings. Never posts to GitHub.</p>
         <button type="button" class="mt-4 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
                 :disabled="chatBusy" @click="ensureChatSession()">Start</button>
       </div>
@@ -87,7 +122,8 @@
 
   <footer class="lr-chat-rail__composer">
     <form class="lr-chat-box" @submit.prevent="sendChatMessage()">
-      <textarea class="lr-chat-input" rows="3" placeholder="Ask about this PR…"
+      <textarea class="lr-chat-input" rows="3"
+                :placeholder="chatMode === 'challenge' ? 'Challenge findings / change verdict…' : 'Ask about this PR…'"
                 x-model="chatDraft"
                 :disabled="chatBusy || (chatSession && chatSession.status !== 'open')"
                 @input="autoSizeChatInput($event.target)"

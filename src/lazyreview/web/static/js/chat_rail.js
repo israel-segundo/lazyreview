@@ -150,6 +150,7 @@
       chatDraft: '',
       chatBusy: false,
       chatError: '',
+      chatChallengeOffer: null,
       chatAgent: opts.defaultAgent || (window.LR.AgentName && window.LR.AgentName.CLAUDE) || 'claude',
       chatModel: opts.defaultModel || (window.LR.ClaudeModelAlias && window.LR.ClaudeModelAlias.OPUS) || 'opus',
       chatEffort: opts.defaultEffort || (window.LR.EffortLevel && window.LR.EffortLevel.HIGH) || 'high',
@@ -881,6 +882,12 @@ async loadAgentsCatalog() {
           if (!res.ok) throw new Error(formatApiDetail(data.detail, 'Send failed'));
           if (data.session) this.chatSession = data.session;
           await this.reloadChatTurns();
+          if (data.offer_challenge && data.offer_challenge.consolidation_id) {
+            this.chatChallengeOffer = {
+              consolidation_id: Number(data.offer_challenge.consolidation_id),
+              pending_text: data.offer_challenge.pending_text || text,
+            };
+          }
           if (typeof this.onChatFindingsUpdated === 'function' && data.session) {
             this.onChatFindingsUpdated(data.session);
           }
@@ -891,6 +898,53 @@ async loadAgentsCatalog() {
           this.chatError = String(e.message || e);
           this.chatDraft = text;
           this.chatTurns = (this.chatTurns || []).filter((t) => t.id !== optimisticId);
+        } finally {
+          this.chatBusy = false;
+        }
+      },
+
+      challengeReadyConsolidationId() {
+        if (typeof this.findChallengeReadyConsolidationId === 'function') {
+          return this.findChallengeReadyConsolidationId();
+        }
+        if (this.chatMode === 'challenge' && this.chatConsolidationId) {
+          return Number(this.chatConsolidationId);
+        }
+        return null;
+      },
+
+      dismissChallengeOffer() {
+        this.chatChallengeOffer = null;
+      },
+
+      async acceptChallengeOffer(consolidationId) {
+        const offer = this.chatChallengeOffer;
+        const cid = Number(
+          consolidationId
+          || (offer && offer.consolidation_id)
+          || this.challengeReadyConsolidationId()
+        );
+        if (!cid) return;
+        const pending = (offer && offer.pending_text) || '';
+        this.chatChallengeOffer = null;
+        this.chatBusy = true;
+        this.chatError = '';
+        try {
+          if (typeof this.switchToChallengeMode === 'function') {
+            await this.switchToChallengeMode(cid);
+          } else {
+            this.chatMode = 'challenge';
+            this.chatConsolidationId = cid;
+            this.chatSession = null;
+            this.chatTurns = [];
+            await this.ensureChatSession();
+          }
+          if (pending) {
+            this.chatDraft = pending;
+            await this.sendChatMessage();
+          }
+        } catch (e) {
+          this.chatError = String(e.message || e);
         } finally {
           this.chatBusy = false;
         }

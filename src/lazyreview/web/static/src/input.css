@@ -2744,6 +2744,41 @@ html.lr-chat-open .lr-pr-page {
 .dark .lr-chat-rail__head {
   border-bottom-color: #1e293b;
 }
+.lr-chat-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 9999px;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1.25rem;
+}
+.lr-chat-mode-chip--explore {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+.dark .lr-chat-mode-chip--explore {
+  background: #1e293b;
+  color: #94a3b8;
+  border-color: #334155;
+}
+.lr-chat-mode-chip--challenge {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+.dark .lr-chat-mode-chip--challenge {
+  background: rgba(6, 78, 59, 0.35);
+  color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.35);
+}
 .lr-chat-rail__meta {
   flex: 0 0 auto;
   background: inherit;

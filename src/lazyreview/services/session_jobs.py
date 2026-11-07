@@ -81,6 +81,45 @@ def is_apply_findings_command(text: str) -> bool:
     return t in _APPLY_FINDINGS_COMMANDS
 
 
+_FINDINGS_EDIT_INTENT_RE = re.compile(
+    r"("
+    r"\b(add|drop|remove|delete|merge|keep|include|exclude)\b.{0,40}\bfindings?\b"
+    r"|\bfindings?\b.{0,40}\b(add|drop|remove|delete|merge|keep|include|exclude)\b"
+    r"|\b(change|set|make|bump|lower)\b.{0,40}\b(severity|sev(?:erity)?)\b"
+    r"|\b(update|edit|rewrite|soften|harden)\b.{0,40}\b(consolidation|finding|verdict|draft)\b"
+    r"|\b(apply|save|write|incorporate)\b.{0,40}\bfindings?\b"
+    r"|\badd\b.{0,20}\b(finding|C\d+)\b"
+    r"|\bdrop\b.{0,20}\bC\d+\b"
+    r")",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def looks_like_findings_edit_intent(text: str) -> bool:
+    """Heuristic: user wants to mutate consolidation findings from Explore chat."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if is_apply_findings_command(t):
+        return True
+    return bool(_FINDINGS_EDIT_INTENT_RE.search(t))
+
+
+def challenge_ready_consolidation_for_pr(
+    conn: Any, pr_id: int
+) -> dict[str, Any] | None:
+    """Latest succeeded, unposted consolidation for Challenge mode (UI gate)."""
+    from lazyreview.db import list_consolidations_for_pr
+
+    for row in list_consolidations_for_pr(conn, int(pr_id)):
+        if (row.get("status") or "") != "succeeded":
+            continue
+        if int(row.get("feedback_provided") or 0):
+            continue
+        return row
+    return None
+
+
 def _working_differs_from_consolidation(
     session: dict[str, Any], consol: dict[str, Any]
 ) -> bool:
@@ -374,22 +413,9 @@ class SessionRunner:
         )
         workdir = sessions_dir(self.settings) / str(row["id"])
         workdir.mkdir(parents=True, exist_ok=True)
-        consol_work = Path(
-            consol.get("workdir_path")
-            or (self.settings.data_dir / "consolidations" / str(consolidation_id))
-        )
-        stale_publish = consol_work / "publish-body.md"
-        if stale_publish.exists():
-            try:
-                stale_publish.unlink()
-            except OSError:
-                pass
-        update_consolidation(
-            conn,
-            consolidation_id,
-            ready_to_post=0,
-            publish_body=None,
-        )
+        # Do not clear publish_body / publish-body.md on open alone — that made
+        # opening Challenge (with zero turns) wipe a ready GitHub draft. Draft is
+        # invalidated when the working copy first diverges (see _invalidate_publish).
         return (
             update_chat_session(conn, int(row["id"]), workdir_path=str(workdir)) or row
         )
@@ -444,6 +470,26 @@ class SessionRunner:
                 with self._lock:
                     self._busy.discard(session_id)
 
+        if (
+            session.get("mode") == "explore"
+            and looks_like_findings_edit_intent(text)
+        ):
+            ready = challenge_ready_consolidation_for_pr(
+                self._conn, int(session["pr_id"])
+            )
+            if ready:
+                with self._lock:
+                    if session_id in self._busy:
+                        raise ValueError("Session already has a round in progress")
+                    self._busy.add(session_id)
+                try:
+                    return self._offer_challenge_switch(
+                        session_id, text, ready
+                    )
+                finally:
+                    with self._lock:
+                        self._busy.discard(session_id)
+
         with self._lock:
             if session_id in self._busy:
                 raise ValueError("Session already has a round in progress")
@@ -453,6 +499,36 @@ class SessionRunner:
         finally:
             with self._lock:
                 self._busy.discard(session_id)
+
+    def _offer_challenge_switch(
+        self,
+        session_id: int,
+        user_text: str,
+        consol: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Ask the human to switch Explore → Challenge (no LLM round)."""
+        cid = int(consol["id"])
+        add_chat_turn(self._conn, session_id=session_id, role="user", text=user_text)
+        reply = (
+            f"Findings edits need **Challenge** mode for consolidation #{cid}. "
+            "Switch to Challenge on the Findings tab (or confirm below) so I can "
+            "update the working findings — that does **not** post to GitHub."
+        )
+        turn = add_chat_turn(
+            self._conn,
+            session_id=session_id,
+            role="assistant",
+            text=reply,
+        )
+        return {
+            "session": get_chat_session(self._conn, session_id),
+            "turn": turn,
+            "exit_code": 0,
+            "offer_challenge": {
+                "consolidation_id": cid,
+                "pending_text": user_text,
+            },
+        }
 
     def _apply_findings_from_chat(
         self, session_id: int, user_text: str
@@ -618,6 +694,9 @@ class SessionRunner:
         session = get_chat_session(conn, session_id)
         out: dict[str, Any] = {"session": session, "turn": turn, "exit_code": rc}
 
+        if session and session.get("mode") == "challenge" and fields:
+            self._invalidate_publish_if_working_diverged(session)
+
         want_apply = bool(
             structured and structured.get("apply_findings") is True
         )
@@ -630,6 +709,46 @@ class SessionRunner:
             out["consolidation_id"] = applied.get("consolidation_id")
             out["consolidation"] = applied.get("consolidation")
         return out
+
+    def _invalidate_publish_if_working_diverged(self, session: dict[str, Any]) -> None:
+        """Clear publish draft once Challenge edits diverge from the consolidation."""
+        consol_id = session.get("consolidation_id")
+        if not consol_id:
+            return
+        conn = self._conn
+        consol = get_consolidation(conn, int(consol_id))
+        if not consol:
+            return
+        if not _working_differs_from_consolidation(session, consol):
+            return
+        if not (
+            consol.get("publish_body")
+            or int(consol.get("ready_to_post") or 0)
+            or (consol.get("publish_status") or "").strip()
+        ):
+            # Nothing to clear — also remove stale file if present.
+            pass
+        consol_work = Path(
+            consol.get("workdir_path")
+            or (self.settings.data_dir / "consolidations" / str(consol_id))
+        )
+        stale_publish = consol_work / "publish-body.md"
+        if stale_publish.exists():
+            try:
+                stale_publish.unlink()
+            except OSError:
+                logger.exception(
+                    "failed removing stale publish-body.md for consolidation %s",
+                    consol_id,
+                )
+        update_consolidation(
+            conn,
+            int(consol_id),
+            ready_to_post=0,
+            publish_body=None,
+            publish_status=None,
+            publish_finished_at=None,
+        )
 
     def _build_prompt(
         self,

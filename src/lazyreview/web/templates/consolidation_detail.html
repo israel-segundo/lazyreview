@@ -176,7 +176,14 @@
       {# —— Findings —— #}
       <div class="lr-consol-panel lr-consol-panel--fill" x-show="pageTab === 'findings'" x-cloak role="tabpanel">
         <template x-if="!findingsCount()">
-          <p class="text-sm text-slate-500">No structured findings stored for this consolidation.</p>
+          <div class="space-y-2">
+            <p class="text-sm text-slate-500">No structured findings stored for this consolidation.</p>
+            <p x-show="artifactsHollow()" x-cloak
+               class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
+              Status is succeeded but findings and the GitHub draft are both empty.
+              Re-run consolidation or regenerate publish after findings are restored.
+            </p>
+          </div>
         </template>
         <div class="flex min-h-0 flex-1 flex-col overflow-hidden" x-show="findingsCount()">
           <div class="lr-modal-tabs shrink-0" role="tablist" aria-label="Finding severity">
@@ -391,14 +398,25 @@ function consolidationDetail() {
       const findings = Array.isArray(session.working_findings)
         ? session.working_findings
         : [];
+      let prevFindings = this.c.findings;
+      if (!Array.isArray(prevFindings)) {
+        try { prevFindings = JSON.parse(this.c.findings_json || '[]'); } catch (_) { prevFindings = []; }
+      }
+      const findingsChanged = JSON.stringify(findings) !== JSON.stringify(prevFindings || []);
+      const bodyChanged = !!(session.working_body_md
+        && String(session.working_body_md).trim() !== String(this.c.body || '').trim());
       const action = session.working_recommended_action;
+      const actionChanged = !!(action && action !== this.c.recommended_action);
+      const diverged = findingsChanged || bodyChanged || actionChanged;
       const rationale = session.working_recommended_action_rationale;
       const patch = {
         findings,
         findings_json: JSON.stringify(findings),
-        ready_to_post: 0,
-        publish_body: null,
       };
+      if (diverged) {
+        patch.ready_to_post = 0;
+        patch.publish_body = null;
+      }
       if (action && ['approve', 'request_changes', 'comment'].includes(action)) {
         patch.recommended_action = action;
         this.verdict = this.verdictFromRecommendation(action);
@@ -406,8 +424,10 @@ function consolidationDetail() {
       if (rationale != null) patch.recommended_action_rationale = rationale;
       if (session.working_body_md) patch.body = session.working_body_md;
       this.c = { ...this.c, ...patch };
-      this.publishBody = '';
-      this._edited = false;
+      if (diverged) {
+        this.publishBody = '';
+        this._edited = false;
+      }
       for (const label of ['High', 'Medium', 'Low']) {
         if (this.findingsForTab(label).length) { this.findingsTab = label; break; }
       }
@@ -430,7 +450,17 @@ function consolidationDetail() {
       this.refresh();
     },
     canSubmit() {
-      return this.c && this.c.status === 'succeeded' && !this.c.feedback_provided;
+      if (!this.c || this.c.status !== 'succeeded' || this.c.feedback_provided) return false;
+      const findings = Array.isArray(this.c.findings) ? this.c.findings : [];
+      const hasFindings = findings.length > 0;
+      const hasDraft = !!(this.c.ready_to_post && String(this.c.publish_body || this.publishBody || '').trim());
+      return hasFindings || hasDraft;
+    },
+    artifactsHollow() {
+      if (!this.c || this.c.status !== 'succeeded' || this.c.feedback_provided) return false;
+      const findings = Array.isArray(this.c.findings) ? this.c.findings : [];
+      const hasDraft = !!(String(this.c.publish_body || this.publishBody || '').trim());
+      return findings.length === 0 && !hasDraft;
     },
     canRegeneratePublish() {
       return this.c

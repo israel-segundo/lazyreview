@@ -1026,6 +1026,12 @@
                     <p class="text-sm text-red-600 dark:text-red-400"
                        x-text="activeFindingsConsolidation().error_message || 'Consolidation failed.'"></p>
                   </template>
+                  <template x-if="findingsArtifactsHollow()">
+                    <p class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
+                      This consolidation has no structured findings and no GitHub draft yet.
+                      Re-run consolidation or regenerate the publish draft after findings are restored.
+                    </p>
+                  </template>
                 </div>
               </section>
             </div>
@@ -2411,6 +2417,36 @@ function reviewForm() {
       const st = cons && cons.publish_status;
       return st === 'queued' || st === 'running';
     },
+    findChallengeReadyConsolidationId() {
+      const rows = this.consolidations || [];
+      for (let i = 0; i < rows.length; i++) {
+        const c = rows[i];
+        if (c && c.status === 'succeeded' && !c.feedback_provided) return Number(c.id);
+      }
+      return null;
+    },
+    async switchToChallengeMode(consolidationId) {
+      const cid = Number(consolidationId);
+      if (!cid) return;
+      this.tab = 'findings';
+      this.highlightConsolidationId = cid;
+      this.chatMode = 'challenge';
+      this.chatConsolidationId = cid;
+      this.chatSession = null;
+      this.chatTurns = [];
+      this.chatChallengeOffer = null;
+      this.chatOpen = true;
+      this.persistChatOpen();
+      if (typeof this.ensureChatSession === 'function') {
+        await this.ensureChatSession();
+      }
+      this.$nextTick(() => {
+        if (typeof this.clampChatWidth === 'function') this.clampChatWidth();
+        requestAnimationFrame(() => {
+          if (typeof this.syncChatRailHeight === 'function') this.syncChatRailHeight();
+        });
+      });
+    },
     syncChatForFindingsContext() {
       const onFindings = this.tab === 'findings';
       const c = onFindings ? this.activeFindingsConsolidation() : null;
@@ -2482,13 +2518,26 @@ function reviewForm() {
       const findings = Array.isArray(session.working_findings)
         ? session.working_findings
         : [];
+      const prev = this.consolidations[idx] || {};
+      let prevFindings = prev.findings;
+      if (!Array.isArray(prevFindings)) {
+        try { prevFindings = JSON.parse(prev.findings_json || '[]'); } catch (_) { prevFindings = []; }
+      }
+      const findingsChanged = JSON.stringify(findings) !== JSON.stringify(prevFindings || []);
+      const bodyChanged = !!(session.working_body_md
+        && String(session.working_body_md).trim() !== String(prev.body || '').trim());
+      const action = session.working_recommended_action;
+      const actionChanged = !!(action && action !== prev.recommended_action);
+      const diverged = findingsChanged || bodyChanged || actionChanged;
       const patch = {
         findings,
         findings_json: JSON.stringify(findings),
-        ready_to_post: 0,
-        publish_body: null,
       };
-      const action = session.working_recommended_action;
+      // Only invalidate the GitHub draft in the UI when Challenge actually edited.
+      if (diverged) {
+        patch.ready_to_post = 0;
+        patch.publish_body = null;
+      }
       if (action && ['approve', 'request_changes', 'comment'].includes(action)) {
         patch.recommended_action = action;
         this.findingsVerdict = this.verdictFromRecommendation(action);
@@ -2500,8 +2549,10 @@ function reviewForm() {
       const next = this.consolidations.slice();
       next[idx] = { ...next[idx], ...patch };
       this.consolidations = next;
-      this.findingsPublishBody = '';
-      this._findingsPublishEdited = false;
+      if (diverged) {
+        this.findingsPublishBody = '';
+        this._findingsPublishEdited = false;
+      }
       for (const label of ['High', 'Medium', 'Low']) {
         if (this.consolFindingsForTab(label).length) {
           this.consolFindingsTab = label;
@@ -2549,7 +2600,19 @@ function reviewForm() {
     },
     canSubmitFindings() {
       const c = this.activeFindingsConsolidation();
-      return !!(c && c.status === 'succeeded' && !c.feedback_provided);
+      if (!c || c.status !== 'succeeded' || c.feedback_provided) return false;
+      // Hollow consolidations (empty findings + no draft) are not submittable.
+      const findings = Array.isArray(c.findings) ? c.findings : [];
+      const hasFindings = findings.length > 0;
+      const hasDraft = !!(c.ready_to_post && String(c.publish_body || this.findingsPublishBody || '').trim());
+      return hasFindings || hasDraft;
+    },
+    findingsArtifactsHollow() {
+      const c = this.activeFindingsConsolidation();
+      if (!c || c.status !== 'succeeded' || c.feedback_provided) return false;
+      const findings = Array.isArray(c.findings) ? c.findings : [];
+      const hasDraft = !!(String(c.publish_body || this.findingsPublishBody || '').trim());
+      return findings.length === 0 && !hasDraft;
     },
     canRegenerateFindingsPublish() {
       const c = this.activeFindingsConsolidation();

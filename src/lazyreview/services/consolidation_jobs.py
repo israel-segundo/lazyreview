@@ -370,15 +370,41 @@ def build_verify_command(
 
 def count_findings_json(raw: str | None) -> int:
     """Return number of findings in a findings.json string; 0 on empty/invalid."""
-    if not (raw or "").strip():
-        return 0
+    parsed = try_parse_findings_json(raw)
+    return len(parsed) if parsed is not None else 0
+
+
+def try_parse_findings_json(raw: str | None) -> list[Any] | None:
+    """Return the findings list if ``raw`` is a valid JSON array; else None.
+
+    Distinguishes empty ``[]`` (valid) from unparseable text (invalid). Callers
+    must not treat None as ``[]`` and overwrite a prior good file.
+    """
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
     try:
-        data = json.loads(raw)
+        data = json.loads(text)
     except json.JSONDecodeError:
-        return 0
-    if isinstance(data, list):
-        return len(data)
-    return 0
+        return None
+    if not isinstance(data, list):
+        return None
+    return data
+
+
+def restore_findings_json_file(path: Path, prior_json: str | None) -> None:
+    """Write prior findings JSON back to disk (best-effort)."""
+    text = (prior_json or "").strip()
+    if not text:
+        text = "[]\n"
+    elif not text.endswith("\n"):
+        text = text + "\n"
+    try:
+        path.write_text(text, encoding="utf-8")
+    except OSError:
+        logger.exception("failed restoring findings.json at %s", path)
 
 
 _VALID_RECOMMENDED_ACTIONS = frozenset({"approve", "request_changes", "comment"})
@@ -995,8 +1021,26 @@ class ConsolidationRunner:
             body = body_path.read_text(encoding="utf-8") if body_path.exists() else body
             prior_findings_json = findings_json
             if findings_out.exists():
+                after_raw = findings_out.read_text(encoding="utf-8")
+                if try_parse_findings_json(after_raw) is None:
+                    # Should be unreachable if verify gate ran; never wipe prior.
+                    restore_findings_json_file(findings_out, prior_findings_json)
+                    duration_ms = int((time.monotonic() - started) * 1000)
+                    update_consolidation(
+                        conn,
+                        consolidation_id,
+                        status="failed",
+                        finished_at=utcnow(),
+                        duration_ms=duration_ms,
+                        ready_to_post=0,
+                        findings_json=prior_findings_json,
+                        error_message=(
+                            "Verify left findings.json invalid; prior findings restored"
+                        ),
+                    )
+                    return
                 findings_json = _persist_normalized_findings(
-                    findings_out.read_text(encoding="utf-8"),
+                    after_raw,
                     findings_out=findings_out,
                     prior_json=prior_findings_json,
                     default_origin="model",
@@ -1289,7 +1333,13 @@ class ConsolidationRunner:
         body_ok = body_path.exists() and bool(
             body_path.read_text(encoding="utf-8", errors="replace").strip()
         )
-        findings_ok = findings_out.exists()
+        findings_raw_after = (
+            findings_out.read_text(encoding="utf-8", errors="replace")
+            if findings_out.exists()
+            else ""
+        )
+        findings_parsed = try_parse_findings_json(findings_raw_after)
+        findings_ok = findings_parsed is not None
         meta_ok = meta_path.exists() and bool(
             meta_path.read_text(encoding="utf-8", errors="replace").strip()
         )
@@ -1306,21 +1356,30 @@ class ConsolidationRunner:
             if not v_err:
                 if v_rc != 0:
                     v_err = f"Verify findings exit {v_rc}"
+                elif not findings_ok:
+                    v_err = (
+                        "Verify findings succeeded but findings.json was missing "
+                        "or not valid JSON"
+                    )
                 else:
                     v_err = (
                         "Verify findings succeeded but body.md, findings.json, "
                         "or meta.json was missing or empty"
                     )
+            # Keep prior good findings if the agent left unparseable JSON.
+            if not findings_ok:
+                restore_findings_json_file(findings_out, findings_raw)
             duration_ms = int((time.monotonic() - started) * 1000)
-            update_consolidation(
-                conn,
-                consolidation_id,
-                status="failed",
-                finished_at=utcnow(),
-                duration_ms=duration_ms,
-                ready_to_post=0,
-                error_message=v_err[-2000:],
-            )
+            update_fields: dict[str, Any] = {
+                "status": "failed",
+                "finished_at": utcnow(),
+                "duration_ms": duration_ms,
+                "ready_to_post": 0,
+                "error_message": v_err[-2000:],
+            }
+            if not findings_ok and (findings_raw or "").strip():
+                update_fields["findings_json"] = findings_raw
+            update_consolidation(conn, consolidation_id, **update_fields)
             return v_err
 
         return None

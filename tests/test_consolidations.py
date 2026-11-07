@@ -825,6 +825,24 @@ def test_count_findings_json():
     assert count_findings_json('[{"id":"C1"},{"id":"C2"}]') == 2
 
 
+def test_try_parse_findings_json_distinguishes_empty_from_invalid(tmp_path: Path):
+    from lazyreview.services.consolidation_jobs import (
+        restore_findings_json_file,
+        try_parse_findings_json,
+    )
+
+    assert try_parse_findings_json("[]") == []
+    assert try_parse_findings_json('[{"id":"C1"}]')[0]["id"] == "C1"
+    assert try_parse_findings_json("{") is None
+    assert try_parse_findings_json('{"id":"C1"}') is None  # object, not array
+    assert try_parse_findings_json(None) is None
+
+    path = tmp_path / "findings.json"
+    path.write_text("NOT JSON", encoding="utf-8")
+    restore_findings_json_file(path, '[{"id":"C1","severity":1,"title":"t","body":"b"}]')
+    assert try_parse_findings_json(path.read_text(encoding="utf-8"))[0]["id"] == "C1"
+
+
 def test_build_verify_command_cursor_uses_worktree_workspace(tmp_path: Path):
     wt = tmp_path / "wt"
     work = tmp_path / "consol"
