@@ -442,7 +442,11 @@
           if (!this.desktopSupported || this.permission !== 'granted') return;
           if (!this.desktopEnabled && !o.primeOnly) return;
           try {
-            var res = await fetch('/api/notifications?unread_only=true&limit=25&offset=0');
+            // Do not filter unread_only: PR pages mark queue/findings kinds read on
+            // load (and consolidation completion reloads the page), which would
+            // otherwise swallow OS toasts before the 15s poller sees them.
+            // Delivery is gated by id watermark + desktop-worthy kinds instead.
+            var res = await fetch('/api/notifications?limit=25&offset=0');
             if (!res.ok) return;
             var data = await res.json();
             var items = data.items || [];

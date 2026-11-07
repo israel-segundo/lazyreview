@@ -265,6 +265,7 @@ function homePage() {
     lastSyncRelative: 'never',
     lastSyncExact: '',
     nextSyncPhrase: '',
+    _activityTimer: null,
     get openPrs() {
       // Sync only fetches open PRs; drop closed/merged leftovers from the home list.
       return this.prs.filter((pr) => {
@@ -308,6 +309,58 @@ function homePage() {
     },
     init() {
       this.tickRelative();
+      this.syncActivityPolling();
+    },
+    anyActivityRunning() {
+      return (this.prs || []).some((pr) => pr && pr.activity_status === 'running');
+    },
+    syncActivityPolling() {
+      if (this.anyActivityRunning()) this.startActivityPolling();
+      else this.stopActivityPolling();
+    },
+    startActivityPolling() {
+      if (this._activityTimer) return;
+      this._activityTimer = setInterval(() => this.refreshPrActivity(), 2000);
+    },
+    stopActivityPolling() {
+      if (!this._activityTimer) return;
+      clearInterval(this._activityTimer);
+      this._activityTimer = null;
+    },
+    async refreshPrActivity() {
+      try {
+        const res = await fetch('/api/prs');
+        if (!res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        const next = data.prs || [];
+        if (!Array.isArray(next) || !next.length) {
+          this.syncActivityPolling();
+          return;
+        }
+        const byId = {};
+        for (let i = 0; i < next.length; i++) {
+          const row = next[i];
+          if (row && row.id != null) byId[row.id] = row;
+        }
+        // Patch in place so Alpine keeps row identity; drop PRs no longer returned.
+        const merged = [];
+        const seen = {};
+        for (let i = 0; i < (this.prs || []).length; i++) {
+          const prev = this.prs[i];
+          const id = prev && prev.id;
+          const fresh = id != null ? byId[id] : null;
+          if (fresh) {
+            merged.push(Object.assign({}, prev, fresh));
+            seen[id] = true;
+          }
+        }
+        for (let j = 0; j < next.length; j++) {
+          const row = next[j];
+          if (row && row.id != null && !seen[row.id]) merged.push(row);
+        }
+        this.prs = merged;
+      } catch (_) { /* keep last known state */ }
+      this.syncActivityPolling();
     },
     ageLabel(pr) {
       if (pr.age_days == null || pr.age_days === '') return '—';
