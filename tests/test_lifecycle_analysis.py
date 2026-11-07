@@ -77,6 +77,57 @@ def test_upsert_enqueues_analysis_on_create_and_head_when_enabled(tmp_path: Path
         conn.close()
 
 
+def test_upsert_enqueues_analysis_on_head_even_without_review_requested(
+    tmp_path: Path,
+):
+    """Stale-queue sync clears review_requested before reconcile; head move must still analyze."""
+    conn = _conn(tmp_path)
+    analyses = MagicMock()
+    lifecycle.bind(
+        settings=MagicMock(),
+        jobs=MagicMock(),
+        consolidations=MagicMock(),
+        analyses=analyses,
+    )
+
+    try:
+        with patch(
+            "lazyreview.services.analysis_enqueue.ensure_analysis_for_pr"
+        ) as ensure:
+            upsert_pr(
+                conn,
+                owner="o",
+                repo="r",
+                number=1,
+                url="https://github.com/o/r/pull/1",
+                title="t",
+                base_ref="main",
+                head_ref="feat",
+                head_sha="aaa",
+                review_requested=True,
+            )
+            assert ensure.call_count == 1
+
+            # Mimic sync's stale path: new head + review_requested cleared.
+            upsert_pr(
+                conn,
+                owner="o",
+                repo="r",
+                number=1,
+                url="https://github.com/o/r/pull/1",
+                title="t",
+                base_ref="main",
+                head_ref="feat",
+                head_sha="bbb",
+                review_requested=False,
+            )
+            assert ensure.call_count == 2
+            analyses.cancel_for_pr.assert_called()
+    finally:
+        lifecycle.unbind()
+        conn.close()
+
+
 def test_upsert_skips_analysis_on_head_when_disabled(tmp_path: Path):
     conn = _conn(tmp_path)
     set_setting(conn, "pr_analysis_on_head_change", "false")

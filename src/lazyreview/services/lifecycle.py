@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _jobs: Any | None = None
 _consolidations: Any | None = None
@@ -86,7 +89,11 @@ def on_pr_upserted(
     )
     if not should_enqueue:
         return
-    if not int(pr.get("review_requested") or 0):
+    # New PRs only auto-analyze when we are a requested reviewer. Head moves must
+    # still re-queue even when sync temporarily clears review_requested (org
+    # dismiss-stale-approvals drops the PR from --review-requested @me before
+    # reconcile flips it back on).
+    if is_new and not int(pr.get("review_requested") or 0):
         return
     if _settings is None:
         return
@@ -97,4 +104,9 @@ def on_pr_upserted(
     except AnalysisSkipped:
         pass
     except Exception:
-        pass
+        logger.exception(
+            "failed to enqueue PR analysis for pr_id=%s (is_new=%s head_moved=%s)",
+            pr.get("id"),
+            is_new,
+            head_moved,
+        )
