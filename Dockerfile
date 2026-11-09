@@ -82,8 +82,10 @@ WORKDIR /home/app
 EXPOSE 3334
 
 ENTRYPOINT ["lazyreview-entrypoint"]
+# timeout must exceed longest in-request work (chat rounds are backgrounded;
+# keep headroom for sync apply/publish and slow reverse proxies).
 CMD ["gunicorn", "lazyreview.main:app", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--workers", "1", \
      "--bind", "0.0.0.0:3334", \
-     "--timeout", "120"]
+     "--timeout", "3600"]

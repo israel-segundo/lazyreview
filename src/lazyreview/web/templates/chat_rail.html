@@ -19,22 +19,65 @@
        :aria-valuenow="chatWidthPx"></div>
 
   <header class="lr-chat-rail__head">
-    <div class="flex min-w-0 items-center gap-2">
+    <div class="flex min-w-0 items-center gap-1.5">
       <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Chat</span>
       <span class="lr-chat-mode-chip"
             :class="chatMode === 'challenge' ? 'lr-chat-mode-chip--challenge' : 'lr-chat-mode-chip--explore'"
             :title="chatMode === 'challenge'
-              ? ('Edit findings for consolidation #' + (chatConsolidationId || '') + ' — Apply writes the draft, does not post')
-              : 'Ask about this PR — cannot edit findings'"
+              ? ('Challenge: edit findings, verdict, and draft tone for consolidation #' + (chatConsolidationId || '') + '. Apply writes locally — never posts to GitHub.')
+              : 'Explore: ask about this PR’s code and analysis. Cannot edit findings — open Challenge when a consolidation is ready.'"
+            :aria-label="chatMode === 'challenge'
+              ? ('Challenge mode for consolidation #' + (chatConsolidationId || ''))
+              : 'Explore mode'"
             x-text="chatMode === 'challenge'
               ? ('Challenge' + (chatConsolidationId ? (' #' + chatConsolidationId) : ''))
               : 'Explore'"></span>
+      <span class="lr-chat-mode-help"
+            x-data="{ helpOpen: false }"
+            @keydown.escape.window="helpOpen = false">
+        <button type="button"
+                class="lr-chat-mode-help__btn"
+                aria-label="What Explore and Challenge mean"
+                :aria-expanded="helpOpen.toString()"
+                aria-controls="lr-chat-mode-help-panel"
+                @click.stop="helpOpen = !helpOpen"
+                @mouseenter="helpOpen = true"
+                @mouseleave="helpOpen = false"
+                @focus="helpOpen = true"
+                @blur="helpOpen = false">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+          </svg>
+        </button>
+        <div id="lr-chat-mode-help-panel"
+             class="lr-chat-mode-help__panel"
+             role="tooltip"
+             x-show="helpOpen"
+             x-cloak
+             @mouseenter="helpOpen = true"
+             @mouseleave="helpOpen = false">
+          <p><strong>Explore</strong> — ask about this PR’s code and analysis. Cannot edit findings.</p>
+          <p><strong>Challenge</strong> — edit findings, verdict, and draft tone for a consolidation. Apply writes locally; never posts to GitHub.</p>
+        </div>
+      </span>
     </div>
     <div class="flex items-center gap-1">
       <template x-if="chatMode === 'challenge' && chatSession && chatSession.status === 'open'">
-        <button type="button" class="rounded px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
-                :disabled="chatBusy" @click="finishChat()"
-                title="Write working findings into the consolidation and regenerate the GitHub draft (does not post to GitHub)">Apply findings</button>
+        <button type="button"
+                class="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+                :disabled="chatBusy || chatPublishBusy()"
+                @click="finishChat()"
+                :aria-busy="chatPublishBusy()"
+                title="Write working findings into the consolidation and regenerate the GitHub draft (does not post to GitHub)">
+          <svg x-show="chatPublishBusy()" x-cloak
+               class="h-3 w-3 animate-spin" xmlns="http://www.w3.org/2000/svg"
+               fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span x-text="chatPublishBusy() ? 'Applying…' : 'Apply findings'"></span>
+        </button>
       </template>
       <button type="button" class="lr-chat-close"
               @click="chatOpen = false; persistChatOpen()" aria-label="Close chat">
@@ -46,6 +89,16 @@
       </button>
     </div>
   </header>
+
+  <div class="lr-publish-progress lr-publish-progress--chat"
+       x-show="chatPublishBusy()"
+       x-cloak
+       role="status"
+       aria-live="polite">
+    <span class="lr-status-ball h-2.5 w-2.5 lr-status-ball--consolidating lr-status-ball--pulse"
+          role="img" aria-label="In progress"></span>
+    <span>Applying findings — regenerating GitHub draft…</span>
+  </div>
 
   <div class="border-b border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-950 dark:border-sky-900/50 dark:bg-sky-950/40 dark:text-sky-100"
        x-show="chatMode === 'explore' && challengeReadyConsolidationId()" x-cloak>
@@ -95,7 +148,7 @@
                 :disabled="chatBusy" @click="ensureChatSession()">Start</button>
       </div>
     </template>
-    <template x-for="t in chatTurns" :key="t.id">
+    <template x-for="(t, ti) in chatTurns" :key="t.id">
       <div class="lr-chat-turn"
            :class="t.role === 'user' ? 'lr-chat-turn--user' : 'lr-chat-turn--assistant'"
            :title="formatChatTime(t.created_at)">
@@ -103,6 +156,10 @@
           <div class="lr-chat-turn__role" x-text="t.role === 'user' ? 'You' : 'Agent'"></div>
           <div class="lr-chat-turn__body"
                x-html="renderChatMarkdown(t.text)"></div>
+          <div class="lr-chat-turn__meta"
+               x-show="t.role === 'assistant' && chatTurnDurationLabel(t, ti)"
+               x-cloak
+               x-text="chatTurnDurationLabel(t, ti)"></div>
         </div>
       </div>
     </template>
@@ -110,7 +167,11 @@
       <div class="lr-chat-turn lr-chat-turn--assistant">
         <div class="lr-chat-turn__bubble lr-chat-turn__bubble--pending">
           <div class="lr-chat-turn__role">Agent</div>
-          <div class="lr-chat-turn__body"><p class="lr-chat-muted">Thinking…</p></div>
+          <div class="lr-chat-turn__body">
+            <p class="lr-chat-muted lr-chat-thinking" aria-live="polite">
+              Thinking<span class="lr-chat-thinking__dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>
+            </p>
+          </div>
         </div>
       </div>
     </template>
@@ -121,14 +182,23 @@
   </div>
 
   <footer class="lr-chat-rail__composer">
+    <div class="lr-chat-queue" x-show="chatQueuedText" x-cloak>
+      <div class="lr-chat-queue__label">
+        <span class="font-medium">Queued</span>
+        <span class="lr-chat-queue__text" x-text="chatQueuedText"></span>
+      </div>
+      <button type="button" class="lr-chat-queue__clear" @click="clearChatQueued()"
+              aria-label="Clear queued message">Clear</button>
+    </div>
     <form class="lr-chat-box" @submit.prevent="sendChatMessage()">
-      <textarea class="lr-chat-input" rows="3"
-                :placeholder="chatMode === 'challenge' ? 'Challenge findings / change verdict…' : 'Ask about this PR…'"
+      <textarea class="lr-chat-input" rows="3" x-ref="chatInput"
+                :placeholder="chatBusy
+                  ? 'Type next message to queue…'
+                  : (chatMode === 'challenge' ? 'Challenge findings / change verdict…' : 'Ask about this PR…')"
                 x-model="chatDraft"
-                :disabled="chatBusy || (chatSession && chatSession.status !== 'open')"
-                @input="autoSizeChatInput($event.target)"
-                @keydown.meta.enter.prevent="sendChatMessage()"
-                @keydown.ctrl.enter.prevent="sendChatMessage()"></textarea>
+                :disabled="chatSession && chatSession.status !== 'open'"
+                @input="onChatDraftInput($event.target)"
+                @keydown="onChatDraftKeydown($event)"></textarea>
 
       <div class="lr-chat-box__bar">
         <div class="lr-chat-box__left">
@@ -260,9 +330,20 @@
         </div>
 
         <div class="lr-chat-box__right">
+          <button type="button" class="lr-chat-stop"
+                  x-show="chatBusy" x-cloak
+                  :disabled="chatStopping"
+                  @click="stopChatRound()"
+                  :aria-label="chatStopping ? 'Stopping…' : 'Stop generating'"
+                  :title="chatStopping ? 'Stopping…' : 'Stop generating'">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <rect x="6" y="6" width="12" height="12" rx="1.5"/>
+            </svg>
+          </button>
           <button type="submit" class="lr-chat-send"
-                  :disabled="chatBusy || !chatDraft.trim() || (chatSession && chatSession.status !== 'open')"
-                  aria-label="Send">
+                  :disabled="!chatDraft.trim() || (chatSession && chatSession.status !== 'open')"
+                  :aria-label="chatBusy ? 'Queue message' : 'Send'"
+                  :title="chatBusy ? 'Queue as next message' : 'Send'">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"
                  aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
           </button>

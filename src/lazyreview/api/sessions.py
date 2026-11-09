@@ -86,41 +86,80 @@ def create_challenge_session(
     return row
 
 
+def _with_round_flag(request: Request, row: dict) -> dict:
+    out = dict(row)
+    try:
+        out["round_in_progress"] = bool(_runner(request).is_busy(int(row["id"])))
+    except Exception:
+        out["round_in_progress"] = False
+    return out
+
+
 @router.get("/sessions/{session_id}")
 def get_session(session_id: int, request: Request):
     row = get_chat_session(request.app.state.db, session_id)
     if not row:
         raise HTTPException(status_code=404, detail="Session not found")
-    return row
+    return _with_round_flag(request, row)
 
 
 @router.patch("/sessions/{session_id}")
 def patch_session(session_id: int, body: PatchSessionBody, request: Request):
     try:
-        return _runner(request).patch_session(
+        row = _runner(request).patch_session(
             session_id, agent=body.agent, model=body.model, effort=body.effort
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    return _with_round_flag(request, row)
 
 
 @router.get("/sessions/{session_id}/turns")
 def get_turns(session_id: int, request: Request, after_id: int = 0):
-    if not get_chat_session(request.app.state.db, session_id):
+    row = get_chat_session(request.app.state.db, session_id)
+    if not row:
         raise HTTPException(status_code=404, detail="Session not found")
-    return {"turns": list_chat_turns(request.app.state.db, session_id, after_id=after_id)}
+    return {
+        "turns": list_chat_turns(request.app.state.db, session_id, after_id=after_id),
+        "round_in_progress": bool(_runner(request).is_busy(session_id)),
+        "session": _with_round_flag(request, row),
+    }
 
 
 @router.post("/sessions/{session_id}/messages")
 def post_message(session_id: int, body: MessageBody, request: Request):
     try:
-        return _runner(request).send_message(session_id, body.text)
+        # wait=False: agent rounds often exceed proxy/browser limits (~120s) and
+        # surface as TypeError "Load failed" while the server keeps going.
+        result = _runner(request).send_message(session_id, body.text, wait=False)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except TimeoutError as e:
         raise HTTPException(status_code=504, detail=str(e)) from e
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
+    if isinstance(result, dict) and result.get("session"):
+        result = dict(result)
+        result["session"] = _with_round_flag(request, result["session"])
+        result["round_in_progress"] = bool(
+            result.get("round_in_progress")
+            or _runner(request).is_busy(session_id)
+        )
+    return result
+
+
+@router.post("/sessions/{session_id}/cancel")
+def cancel_round(session_id: int, request: Request):
+    """Stop the in-flight agent round for this chat session."""
+    try:
+        result = _runner(request).cancel_round(session_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if isinstance(result, dict) and result.get("session"):
+        result = dict(result)
+        result["session"] = _with_round_flag(request, result["session"])
+        result["round_in_progress"] = bool(_runner(request).is_busy(session_id))
+    return result
 
 
 @router.post("/sessions/{session_id}/apply")

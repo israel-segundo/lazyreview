@@ -915,6 +915,16 @@
                          x-text="activeFindingsConsolidation().recommended_action_rationale || ''"></p>
                     </div>
 
+                    <div class="lr-publish-progress"
+                         x-show="findingsRegeneratingPublish || isFindingsPublishing()"
+                         x-cloak
+                         role="status"
+                         aria-live="polite">
+                      <span class="lr-status-ball h-2.5 w-2.5 lr-status-ball--consolidating lr-status-ball--pulse"
+                            role="img" aria-label="In progress"></span>
+                      <span>Regenerating GitHub draft…</span>
+                    </div>
+
                     <div class="lr-prompt-editor">
                       <div class="lr-prompt-toolbar">
                         <span class="text-sm font-medium text-slate-800 dark:text-slate-200">GitHub draft</span>
@@ -923,7 +933,15 @@
                                   class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
                                   x-show="canRegenerateFindingsPublish()" x-cloak
                                   @click="regenerateFindingsPublish()"
-                                  :disabled="findingsRegeneratingPublish || findingsPosting || isFindingsPublishing()">
+                                  :disabled="findingsRegeneratingPublish || findingsPosting || isFindingsPublishing()"
+                                  :aria-busy="findingsRegeneratingPublish || isFindingsPublishing()">
+                            <svg x-show="findingsRegeneratingPublish || isFindingsPublishing()" x-cloak
+                                 class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg"
+                                 fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                              <path class="opacity-75" fill="currentColor"
+                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
                             <span x-text="findingsRegeneratingPublish || isFindingsPublishing() ? 'Regenerating…' : 'Regenerate draft'"></span>
                           </button>
                           <div class="lr-prompt-mode">
@@ -2507,6 +2525,9 @@ function reviewForm() {
       if (this.tab !== 'findings') return;
       const cid = Number(this.chatConsolidationId);
       if (!cid || Number(s.consolidation_id) !== cid) return;
+      // Opening / reattaching Challenge must not paint a stale empty working copy
+      // over a ready consolidation. Only overlay after real chat turns.
+      if (!(this.chatTurns || []).length) return;
       this.onChatFindingsUpdated(s);
     },
     onChatFindingsUpdated(session) {
@@ -2523,6 +2544,9 @@ function reviewForm() {
       if (!Array.isArray(prevFindings)) {
         try { prevFindings = JSON.parse(prev.findings_json || '[]'); } catch (_) { prevFindings = []; }
       }
+      const hasTurns = (this.chatTurns || []).length > 0;
+      // Never let a zero-turn / missing working copy wipe non-empty findings + draft.
+      if (!hasTurns && (!findings.length && (prevFindings || []).length)) return;
       const findingsChanged = JSON.stringify(findings) !== JSON.stringify(prevFindings || []);
       const bodyChanged = !!(session.working_body_md
         && String(session.working_body_md).trim() !== String(prev.body || '').trim());

@@ -318,6 +318,51 @@ class SessionRunner:
         self._lock = threading.Lock()
         self._procs: dict[int, subprocess.Popen[str]] = {}
         self._busy: set[int] = set()
+        self._cancel_requested: set[int] = set()
+
+    def is_busy(self, session_id: int) -> bool:
+        with self._lock:
+            return int(session_id) in self._busy
+
+    def _is_cancel_requested(self, session_id: int) -> bool:
+        with self._lock:
+            return int(session_id) in self._cancel_requested
+
+    def _consume_cancel(self, session_id: int) -> bool:
+        with self._lock:
+            sid = int(session_id)
+            if sid in self._cancel_requested:
+                self._cancel_requested.discard(sid)
+                return True
+            return False
+
+    def cancel_round(self, session_id: int) -> dict[str, Any]:
+        """Stop an in-flight agent round (no-op if nothing is running)."""
+        sid = int(session_id)
+        session = get_chat_session(self._conn, sid)
+        if not session:
+            raise ValueError("Session not found")
+        with self._lock:
+            self._cancel_requested.add(sid)
+            proc = self._procs.get(sid)
+        if proc is not None and proc.poll() is None:
+            self._terminate_proc(proc)
+        return {
+            "session": session,
+            "round_in_progress": self.is_busy(sid),
+            "cancel_requested": True,
+        }
+
+    @staticmethod
+    def _terminate_proc(proc: subprocess.Popen[str]) -> None:
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        except Exception:
+            logger.exception("failed terminating chat agent process")
 
     def create_explore_session(
         self,
@@ -386,12 +431,15 @@ class SessionRunner:
                 consolidation_id=consolidation_id,
             )
             if existing:
+                # Zero-turn sessions often predate a regenerate (empty [] snapshot
+                # while verify/publish was still running). Refresh from consol so
+                # reopening chat cannot overlay a stale empty working copy.
+                if not list_chat_turns(conn, int(existing["id"])):
+                    return self._refresh_challenge_working_copy(existing, consol)
                 return existing
         d_agent, d_model, d_effort = _session_defaults(conn)
         chosen_agent = (agent or d_agent).strip().lower()
         require_selectable_agent(self.settings, conn, chosen_agent)
-        findings_json = consol.get("findings_json") or "[]"
-        body_md = (consol.get("body") or "").strip() or None
         row = create_chat_session(
             conn,
             pr_id=pr_id,
@@ -401,15 +449,7 @@ class SessionRunner:
             agent=chosen_agent,
             model=(model or d_model).strip(),
             effort=(effort if effort is not None else d_effort) or None,
-            working_findings_json=findings_json
-            if isinstance(findings_json, str)
-            else json.dumps(findings_json),
-            working_recommended_action=consol.get("recommended_action") or "comment",
-            working_recommended_action_rationale=consol.get(
-                "recommended_action_rationale"
-            )
-            or "",
-            working_body_md=body_md,
+            **self._challenge_working_fields(consol),
         )
         workdir = sessions_dir(self.settings) / str(row["id"])
         workdir.mkdir(parents=True, exist_ok=True)
@@ -418,6 +458,35 @@ class SessionRunner:
         # invalidated when the working copy first diverges (see _invalidate_publish).
         return (
             update_chat_session(conn, int(row["id"]), workdir_path=str(workdir)) or row
+        )
+
+    @staticmethod
+    def _challenge_working_fields(consol: dict[str, Any]) -> dict[str, Any]:
+        findings_json = consol.get("findings_json") or "[]"
+        if not isinstance(findings_json, str):
+            findings_json = json.dumps(findings_json)
+        body_md = (consol.get("body") or "").strip() or None
+        return {
+            "working_findings_json": findings_json,
+            "working_recommended_action": consol.get("recommended_action") or "comment",
+            "working_recommended_action_rationale": consol.get(
+                "recommended_action_rationale"
+            )
+            or "",
+            "working_body_md": body_md,
+        }
+
+    def _refresh_challenge_working_copy(
+        self, session: dict[str, Any], consol: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Reset an unused Challenge session to the consolidation's current artifacts."""
+        return (
+            update_chat_session(
+                self._conn,
+                int(session["id"]),
+                **self._challenge_working_fields(consol),
+            )
+            or session
         )
 
     def patch_session(
@@ -445,7 +514,16 @@ class SessionRunner:
             raise ValueError("Session not found")
         return row
 
-    def send_message(self, session_id: int, text: str) -> dict[str, Any]:
+    def send_message(
+        self, session_id: int, text: str, *, wait: bool = True
+    ) -> dict[str, Any]:
+        """Handle a chat message.
+
+        Fast paths (apply-findings command, Explore→Challenge offer) always run
+        inline. LLM rounds block when ``wait=True`` (tests); the HTTP API passes
+        ``wait=False`` so the browser is not stuck on a multi-minute POST that
+        proxies/browsers abort with "Load failed".
+        """
         text = (text or "").strip()
         if not text:
             raise ValueError("Message is empty")
@@ -494,9 +572,70 @@ class SessionRunner:
             if session_id in self._busy:
                 raise ValueError("Session already has a round in progress")
             self._busy.add(session_id)
+
+        if wait:
+            try:
+                return self._run_round(session_id, text, soft_warn=warn)
+            finally:
+                with self._lock:
+                    self._busy.discard(session_id)
+
+        # Persist the user bubble before returning so the UI can poll turns
+        # while the agent runs in the background.
+        user_turn = add_chat_turn(
+            self._conn, session_id=session_id, role="user", text=text
+        )
+        thread = threading.Thread(
+            target=self._run_round_background,
+            args=(int(session_id), text, warn),
+            name=f"chat-round-{session_id}",
+            daemon=True,
+        )
+        thread.start()
+        session = get_chat_session(self._conn, session_id)
+        return {
+            "status": "running",
+            "session": session,
+            "turn": user_turn,
+            "round_in_progress": True,
+            "exit_code": None,
+        }
+
+    def _run_round_background(
+        self, session_id: int, text: str, soft_warn: str | None
+    ) -> None:
         try:
-            return self._run_round(session_id, text, soft_warn=warn)
+            self._run_round(
+                session_id,
+                text,
+                soft_warn=soft_warn,
+                user_turn_saved=True,
+            )
+        except Exception as e:
+            logger.exception("chat round failed for session %s", session_id)
+            try:
+                if self._consume_cancel(session_id):
+                    msg = "(Stopped.)"
+                else:
+                    msg = f"(Chat round failed: {e})"
+                add_chat_turn(
+                    self._conn,
+                    session_id=session_id,
+                    role="assistant",
+                    text=msg,
+                )
+                if not msg.startswith("(Stopped"):
+                    update_chat_session(
+                        self._conn,
+                        session_id,
+                        error_message=str(e)[:2000],
+                    )
+            except Exception:
+                logger.exception(
+                    "failed recording chat round error for session %s", session_id
+                )
         finally:
+            self._consume_cancel(session_id)
             with self._lock:
                 self._busy.discard(session_id)
 
@@ -557,7 +696,12 @@ class SessionRunner:
         }
 
     def _run_round(
-        self, session_id: int, user_text: str, *, soft_warn: str | None
+        self,
+        session_id: int,
+        user_text: str,
+        *,
+        soft_warn: str | None,
+        user_turn_saved: bool = False,
     ) -> dict[str, Any]:
         conn = self._conn
         session = get_chat_session(conn, session_id)
@@ -569,7 +713,8 @@ class SessionRunner:
         if not pr:
             raise ValueError("PR not found")
 
-        add_chat_turn(conn, session_id=session_id, role="user", text=user_text)
+        if not user_turn_saved:
+            add_chat_turn(conn, session_id=session_id, role="user", text=user_text)
 
         workdir = Path(
             session.get("workdir_path") or sessions_dir(self.settings) / str(session_id)
@@ -588,30 +733,49 @@ class SessionRunner:
         effort = session.get("effort") or EffortLevel.HIGH.value
 
         allow_paths = session_allow_path_prefixes(workdir)
+        rc = -1
         with hold_worktree(self.settings, pr, head, conn=conn) as worktree:
-            allow_paths = session_allow_path_prefixes(workdir, worktree)
-            argv, stdin_text = self._build_command(
-                agent=agent,
-                model=model,
-                effort=effort,
-                worktree=worktree,
-                workdir=workdir,
-                prompt=prompt,
-                cli_session_id=session.get("cli_session_id"),
-            )
-            update_chat_session(
+            if self._is_cancel_requested(session_id):
+                pass
+            else:
+                allow_paths = session_allow_path_prefixes(workdir, worktree)
+                argv, stdin_text = self._build_command(
+                    agent=agent,
+                    model=model,
+                    effort=effort,
+                    worktree=worktree,
+                    workdir=workdir,
+                    prompt=prompt,
+                    cli_session_id=session.get("cli_session_id"),
+                )
+                update_chat_session(
+                    conn,
+                    session_id,
+                    error_message=None,
+                )
+                rc = self._run_proc(
+                    session_id,
+                    argv,
+                    cwd=worktree,
+                    stdout_path=stdout_path,
+                    stderr_path=stderr_path,
+                    stdin_text=stdin_text,
+                )
+
+        if self._consume_cancel(session_id):
+            turn = add_chat_turn(
                 conn,
-                session_id,
-                error_message=None,
+                session_id=session_id,
+                role="assistant",
+                text="(Stopped.)",
             )
-            rc = self._run_proc(
-                session_id,
-                argv,
-                cwd=worktree,
-                stdout_path=stdout_path,
-                stderr_path=stderr_path,
-                stdin_text=stdin_text,
-            )
+            session = get_chat_session(conn, session_id)
+            return {
+                "session": session,
+                "turn": turn,
+                "exit_code": rc,
+                "cancelled": True,
+            }
 
         stdout = (
             stdout_path.read_text(encoding="utf-8", errors="replace")
@@ -1008,12 +1172,11 @@ class SessionRunner:
                     logger.exception("failed writing stdin for session %s", session_id)
 
             while proc.poll() is None:
+                if self._is_cancel_requested(session_id):
+                    self._terminate_proc(proc)
+                    break
                 if deadline is not None and time.monotonic() > deadline:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=30)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
+                    self._terminate_proc(proc)
                     raise TimeoutError(f"Session round exceeded {timeout}s timeout")
                 time.sleep(0.4)
 

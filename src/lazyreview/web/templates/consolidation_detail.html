@@ -263,6 +263,16 @@
           </div>
         </div>
 
+        <div class="lr-publish-progress"
+             x-show="regeneratingPublish || isPublishing()"
+             x-cloak
+             role="status"
+             aria-live="polite">
+          <span class="lr-status-ball h-2.5 w-2.5 lr-status-ball--consolidating lr-status-ball--pulse"
+                role="img" aria-label="In progress"></span>
+          <span>Regenerating GitHub draft…</span>
+        </div>
+
         <div class="lr-prompt-editor mt-3 min-h-0 flex-1">
           <div class="lr-prompt-toolbar">
             <span class="text-sm font-medium text-slate-800 dark:text-slate-200">GitHub draft</span>
@@ -391,6 +401,7 @@ function consolidationDetail() {
       const s = this.chatSession;
       if (!s || s.status !== 'open' || this.chatMode !== 'challenge') return;
       if (Number(s.consolidation_id) !== Number(this.c && this.c.id)) return;
+      if (!(this.chatTurns || []).length) return;
       this.onChatFindingsUpdated(s);
     },
     onChatFindingsUpdated(session) {
@@ -402,6 +413,8 @@ function consolidationDetail() {
       if (!Array.isArray(prevFindings)) {
         try { prevFindings = JSON.parse(this.c.findings_json || '[]'); } catch (_) { prevFindings = []; }
       }
+      const hasTurns = (this.chatTurns || []).length > 0;
+      if (!hasTurns && (!findings.length && (prevFindings || []).length)) return;
       const findingsChanged = JSON.stringify(findings) !== JSON.stringify(prevFindings || []);
       const bodyChanged = !!(session.working_body_md
         && String(session.working_body_md).trim() !== String(this.c.body || '').trim());

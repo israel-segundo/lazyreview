@@ -1085,6 +1085,118 @@ def test_verify_success_rewrites_before_publish(tmp_path: Path):
     assert (work / "verify-prompt.md").exists()
 
 
+def test_verify_invalid_findings_json_restores_prior_and_fails(tmp_path: Path):
+    """Verify exit 0 with broken findings.json must not wipe prior findings to []."""
+    conn = _conn(tmp_path)
+    pr, run = _pr_and_run(conn, tmp_path)
+    work = tmp_path / "consol" / "verify-bad-json"
+    work.mkdir(parents=True)
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    row = create_consolidation(
+        conn,
+        pr_id=pr["id"],
+        head_sha="abc",
+        source_run_ids=[run["id"]],
+        agent="claude",
+        model="haiku",
+        effort="low",
+        workdir_path=str(work),
+    )
+    cid = int(row["id"])
+
+    class _S:
+        data_dir = tmp_path / "data"
+        db_path = tmp_path / "t.db"
+        max_concurrent_jobs = 1
+        job_timeout_seconds = 30
+
+        def ensure_dirs(self):
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+
+    _S.data_dir.mkdir(parents=True, exist_ok=True)
+    runner = ConsolidationRunner(_S(), conn)  # type: ignore[arg-type]
+
+    body = work / "body.md"
+    findings = work / "findings.json"
+    meta = work / "meta.json"
+    publish_body = work / "publish-body.md"
+    prior = '[{"id":"C1","severity":1,"title":"bug","body":"real finding"}]'
+    calls = {"n": 0}
+
+    class _Hold:
+        def __enter__(self):
+            return wt
+
+        def __exit__(self, *exc):
+            return False
+
+    def _fake_process(*_a, **_k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            body.write_text("## Review: topic\n\n**C1.**\n", encoding="utf-8")
+            findings.write_text(prior, encoding="utf-8")
+            meta.write_text(
+                '{"recommended_action":"request_changes","rationale":"S1"}',
+                encoding="utf-8",
+            )
+            return 0
+        # Verify claims success but leaves unparseable JSON (the #457 failure mode).
+        findings.write_text(
+            '[{"id":"C1","body":"broken "SIMT-".startsWith quote"}]',
+            encoding="utf-8",
+        )
+        return 0
+
+    with (
+        patch.object(runner, "_run_process", side_effect=_fake_process),
+        patch(
+            "lazyreview.services.consolidation_jobs.list_pr_comments",
+            return_value=[],
+        ),
+        patch(
+            "lazyreview.services.consolidation_jobs.build_consolidate_command",
+            return_value=MagicMock(argv=["true"], stdin_text=None),
+        ),
+        patch(
+            "lazyreview.services.consolidation_jobs.build_verify_command",
+            return_value=MagicMock(argv=["verify"], stdin_text=None),
+        ),
+        patch(
+            "lazyreview.services.consolidation_jobs.hold_worktree",
+            return_value=_Hold(),
+        ),
+        patch(
+            "lazyreview.services.consolidation_jobs.get_adapter",
+            return_value=MagicMock(
+                parse_result=MagicMock(
+                    return_value=MagicMock(
+                        input_tokens=1,
+                        output_tokens=1,
+                        total_tokens=2,
+                        cost_usd=0.0,
+                    )
+                )
+            ),
+        ),
+    ):
+        runner._execute_with_conn(cid, conn)
+
+    c = get_consolidation(conn, cid)
+    assert c["status"] == "failed"
+    assert int(c["ready_to_post"] or 0) == 0
+    assert "valid JSON" in (c.get("error_message") or "")
+    # Prior findings restored to DB + disk — not coerced to [].
+    restored = c.get("findings") or []
+    assert len(restored) == 1
+    assert restored[0].get("id") == "C1"
+    disk = findings.read_text(encoding="utf-8")
+    assert "real finding" in disk
+    assert disk.strip() != "[]"
+    assert calls["n"] == 2  # consolidate + verify; no publish
+    assert not publish_body.exists() or not publish_body.read_text(encoding="utf-8").strip()
+
+
 def test_verify_failure_blocks_publish(tmp_path: Path):
     conn = _conn(tmp_path)
     pr, run = _pr_and_run(conn, tmp_path)

@@ -149,6 +149,10 @@
       chatTurns: [],
       chatDraft: '',
       chatBusy: false,
+      chatStopping: false,
+      chatQueuedText: '',
+      chatHistoryIndex: -1,
+      chatHistoryDraft: '',
       chatError: '',
       chatChallengeOffer: null,
       chatAgent: opts.defaultAgent || (window.LR.AgentName && window.LR.AgentName.CLAUDE) || 'claude',
@@ -221,7 +225,19 @@
             });
           });
         }
-        if (this.chatOpen) await this.ensureChatSession({ quiet: true });
+        if (this.chatOpen) {
+          await this.ensureChatSession({ quiet: true });
+          // Resume Thinking… if a background round survived a reload / "Load failed".
+          const state = await this.fetchChatTurnsState();
+          if (state && state.round_in_progress) {
+            this.chatBusy = true;
+            try {
+              await this.pollUntilChatRoundDone();
+            } finally {
+              this.chatBusy = false;
+            }
+          }
+        }
       },
 
       syncChatOpenClass() {
@@ -509,6 +525,38 @@
           return window.LR.formatAbsolute(raw) || String(raw);
         }
         return String(raw);
+      },
+
+      parseChatTimestamp(raw) {
+        if (!raw) return NaN;
+        const s = String(raw).trim();
+        if (!s) return NaN;
+        const iso = s.includes('T') ? s : s.replace(' ', 'T');
+        const stamped = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(iso) ? iso : iso + 'Z';
+        return Date.parse(stamped);
+      },
+
+      formatChatDuration(ms) {
+        if (!Number.isFinite(ms) || ms < 0) return '';
+        const sec = Math.max(0, Math.round(ms / 1000));
+        if (sec < 60) return sec + 's';
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        if (m < 60) return s ? (m + 'm ' + s + 's') : (m + 'm');
+        const h = Math.floor(m / 60);
+        const rm = m % 60;
+        return rm ? (h + 'h ' + rm + 'm') : (h + 'h');
+      },
+
+      chatTurnDurationLabel(turn, index) {
+        if (!turn || turn.role !== 'assistant') return '';
+        const prev = (this.chatTurns || [])[index - 1];
+        if (!prev || prev.role !== 'user') return '';
+        const start = this.parseChatTimestamp(prev.created_at);
+        const end = this.parseChatTimestamp(turn.created_at);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return '';
+        const label = this.formatChatDuration(end - start);
+        return label ? ('Responded in ' + label) : '';
       },
 
             agentSelectable(a) {
@@ -837,12 +885,7 @@ async loadAgentsCatalog() {
         }
       },
 
-      async reloadChatTurns() {
-        if (!this.chatSession) return;
-        const res = await fetch('/api/sessions/' + this.chatSession.id + '/turns');
-        if (!res.ok) return;
-        const data = await res.json();
-        this.chatTurns = data.turns || [];
+      _scrollChatTurns() {
         this.$nextTick(() => {
           const el = this.$refs.chatTurns;
           if (el) el.scrollTop = el.scrollHeight;
@@ -850,15 +893,173 @@ async loadAgentsCatalog() {
         });
       },
 
+      async reloadChatTurns() {
+        const state = await this.fetchChatTurnsState();
+        if (!state) return null;
+        this.chatTurns = state.turns || [];
+        if (state.session) this.chatSession = state.session;
+        this._scrollChatTurns();
+        return state;
+      },
+
+      async fetchChatTurnsState() {
+        if (!this.chatSession) return null;
+        try {
+          const res = await fetch('/api/sessions/' + this.chatSession.id + '/turns');
+          if (!res.ok) return null;
+          return await res.json();
+        } catch (_) {
+          return null;
+        }
+      },
+
+      async pollUntilChatRoundDone() {
+        // Agent rounds can take several minutes; POST returns immediately and we
+        // poll turns until the server clears round_in_progress.
+        const maxMs = 60 * 60 * 1000;
+        const started = Date.now();
+        let sawBusy = true;
+        while (Date.now() - started < maxMs) {
+          const state = await this.fetchChatTurnsState();
+          if (state) {
+            if (Array.isArray(state.turns)) this.chatTurns = state.turns;
+            if (state.session) this.chatSession = state.session;
+            this._scrollChatTurns();
+            if (state.round_in_progress) sawBusy = true;
+            else if (sawBusy) {
+              if (typeof this.onChatFindingsUpdated === 'function' && this.chatSession) {
+                this.onChatFindingsUpdated(this.chatSession);
+              }
+              return true;
+            }
+          }
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+        this.chatError = 'Timed out waiting for a chat reply';
+        return false;
+      },
+
+      chatUserQuestionHistory() {
+        return (this.chatTurns || [])
+          .filter((t) => t && t.role === 'user')
+          .map((t) => String(t.text || ''));
+      },
+
+      clearChatQueued() {
+        this.chatQueuedText = '';
+      },
+
+      async stopChatRound() {
+        if (!this.chatSession || !this.chatBusy || this.chatStopping) return;
+        this.chatStopping = true;
+        this.chatError = '';
+        try {
+          const res = await fetch(
+            '/api/sessions/' + this.chatSession.id + '/cancel',
+            { method: 'POST' }
+          );
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(formatApiDetail(data.detail, 'Stop failed'));
+          await this.reloadChatTurns();
+        } catch (e) {
+          this.chatError = String(e.message || e);
+        } finally {
+          this.chatStopping = false;
+        }
+      },
+
+      onChatDraftInput(el) {
+        if (this.chatHistoryIndex >= 0) {
+          // Editing while browsing history leaves history mode.
+          this.chatHistoryIndex = -1;
+          this.chatHistoryDraft = '';
+        }
+        if (typeof this.autoSizeChatInput === 'function') {
+          this.autoSizeChatInput(el);
+        }
+      },
+
+      onChatDraftKeydown(e) {
+        if ((e.key === 'Enter') && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          this.sendChatMessage();
+          return;
+        }
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          this._navigateChatHistory(e);
+        }
+      },
+
+      _navigateChatHistory(e) {
+        const el = e.target;
+        const questions = this.chatUserQuestionHistory();
+        if (!questions.length) return;
+        const start = el.selectionStart != null ? el.selectionStart : 0;
+        const end = el.selectionEnd != null ? el.selectionEnd : start;
+        if (e.key === 'ArrowUp') {
+          // Match common chatbot UX: only when caret is at the start.
+          if (start !== 0 || end !== 0) return;
+          e.preventDefault();
+          if (this.chatHistoryIndex < 0) {
+            this.chatHistoryDraft = this.chatDraft;
+            this.chatHistoryIndex = questions.length - 1;
+          } else if (this.chatHistoryIndex > 0) {
+            this.chatHistoryIndex -= 1;
+          }
+          this.chatDraft = questions[this.chatHistoryIndex] || '';
+        } else {
+          if (this.chatHistoryIndex < 0) return;
+          e.preventDefault();
+          if (this.chatHistoryIndex < questions.length - 1) {
+            this.chatHistoryIndex += 1;
+            this.chatDraft = questions[this.chatHistoryIndex] || '';
+          } else {
+            this.chatHistoryIndex = -1;
+            this.chatDraft = this.chatHistoryDraft || '';
+            this.chatHistoryDraft = '';
+          }
+        }
+        this.$nextTick(() => {
+          const input = this.$refs.chatInput || el;
+          if (input && typeof this.autoSizeChatInput === 'function') {
+            this.autoSizeChatInput(input);
+          }
+          if (input && typeof input.setSelectionRange === 'function') {
+            const pos = (this.chatDraft || '').length;
+            input.setSelectionRange(pos, pos);
+          }
+        });
+      },
+
       async sendChatMessage() {
         const text = (this.chatDraft || '').trim();
         if (!text) return;
+        if (this.chatSession && this.chatSession.status && this.chatSession.status !== 'open') {
+          return;
+        }
+        // Queue the next question while the agent is still answering.
+        if (this.chatBusy) {
+          this.chatQueuedText = text;
+          this.chatDraft = '';
+          this.chatHistoryIndex = -1;
+          this.chatHistoryDraft = '';
+          this.chatError = '';
+          this.$nextTick(() => {
+            const input = this.$refs.chatInput;
+            if (input && typeof this.autoSizeChatInput === 'function') {
+              this.autoSizeChatInput(input);
+            }
+          });
+          return;
+        }
         await this.ensureChatSession();
         if (!this.chatSession) return;
         this.chatBusy = true;
         this.chatError = '';
         this.chatDraft = '';
-        // Show the user bubble immediately — the POST waits for the whole agent turn.
+        this.chatHistoryIndex = -1;
+        this.chatHistoryDraft = '';
+        // Optimistic user bubble — real turn is written before the agent starts.
         const optimisticId = 'local-' + Date.now();
         this.chatTurns = (this.chatTurns || []).concat([
           {
@@ -868,10 +1069,7 @@ async loadAgentsCatalog() {
             created_at: new Date().toISOString(),
           },
         ]);
-        this.$nextTick(() => {
-          const el = this.$refs.chatTurns;
-          if (el) el.scrollTop = el.scrollHeight;
-        });
+        this._scrollChatTurns();
         try {
           const res = await fetch('/api/sessions/' + this.chatSession.id + '/messages', {
             method: 'POST',
@@ -888,19 +1086,58 @@ async loadAgentsCatalog() {
               pending_text: data.offer_challenge.pending_text || text,
             };
           }
-          if (typeof this.onChatFindingsUpdated === 'function' && data.session) {
-            this.onChatFindingsUpdated(data.session);
-          }
-          if (data.applied_findings && typeof this.onChatDone === 'function') {
-            this.onChatDone(data);
+          if (data.status === 'running' || data.round_in_progress) {
+            await this.pollUntilChatRoundDone();
+          } else {
+            if (typeof this.onChatFindingsUpdated === 'function' && data.session) {
+              this.onChatFindingsUpdated(data.session);
+            }
+            if (data.applied_findings && typeof this.onChatDone === 'function') {
+              this.onChatDone(data);
+            }
           }
         } catch (e) {
-          this.chatError = String(e.message || e);
-          this.chatDraft = text;
-          this.chatTurns = (this.chatTurns || []).filter((t) => t.id !== optimisticId);
+          // Long POSTs used to die with Safari "Load failed" while the server
+          // kept going — recover by polling turns instead of wiping the thread.
+          const state = await this.reloadChatTurns();
+          if (state && (state.round_in_progress || this._chatHasReplyAfterText(text))) {
+            this.chatError = '';
+            if (state.round_in_progress) await this.pollUntilChatRoundDone();
+            else if (typeof this.onChatFindingsUpdated === 'function' && this.chatSession) {
+              this.onChatFindingsUpdated(this.chatSession);
+            }
+          } else {
+            this.chatError = String(e.message || e);
+            this.chatDraft = text;
+            this.chatTurns = (this.chatTurns || []).filter((t) => t.id !== optimisticId);
+          }
         } finally {
           this.chatBusy = false;
+          const queued = (this.chatQueuedText || '').trim();
+          if (queued) {
+            this.chatQueuedText = '';
+            this.chatDraft = queued;
+            await this.sendChatMessage();
+          }
         }
+      },
+
+      _chatHasReplyAfterText(userText) {
+        const turns = this.chatTurns || [];
+        const want = String(userText || '').trim();
+        for (let i = 0; i < turns.length; i++) {
+          const t = turns[i];
+          if (
+            t
+            && t.role === 'user'
+            && String(t.text || '').trim() === want
+            && turns[i + 1]
+            && turns[i + 1].role === 'assistant'
+          ) {
+            return true;
+          }
+        }
+        return false;
       },
 
       challengeReadyConsolidationId() {
@@ -950,8 +1187,18 @@ async loadAgentsCatalog() {
         }
       },
 
+      chatPublishBusy() {
+        if (this.findingsRegeneratingPublish) return true;
+        if (this.regeneratingPublish) return true;
+        if (typeof this.isFindingsPublishing === 'function' && this.isFindingsPublishing()) {
+          return true;
+        }
+        if (typeof this.isPublishing === 'function' && this.isPublishing()) return true;
+        return false;
+      },
+
       async finishChat() {
-        if (!this.chatSession) return;
+        if (!this.chatSession || this.chatPublishBusy()) return;
         this.chatBusy = true;
         this.chatError = '';
         try {

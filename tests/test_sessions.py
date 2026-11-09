@@ -244,6 +244,148 @@ def test_create_challenge_seeds_body_without_clearing_publish(tmp_path: Path):
     assert (work / "publish-body.md").read_text(encoding="utf-8") == "ready draft\n"
 
 
+def test_send_message_wait_false_returns_while_round_runs(tmp_path: Path):
+    """HTTP path must not block on the agent — browser proxies abort ~120s POSTs."""
+    import threading
+    import time
+
+    conn = _conn(tmp_path)
+    settings = _settings(tmp_path)
+    settings.ensure_dirs()
+    pr, _consol, _work = _pr_and_consol(conn, tmp_path)
+    runner = SessionRunner(settings, conn)
+    explore = runner.create_explore_session(int(pr["id"]))
+    sid = int(explore["id"])
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def _slow_round(session_id, user_text, *, soft_warn=None, user_turn_saved=False):
+        from lazyreview.db import add_chat_turn, get_chat_session
+
+        if not user_turn_saved:
+            add_chat_turn(conn, session_id=session_id, role="user", text=user_text)
+        started.set()
+        assert release.wait(timeout=5)
+        turn = add_chat_turn(
+            conn, session_id=session_id, role="assistant", text="done later"
+        )
+        return {
+            "session": get_chat_session(conn, session_id),
+            "turn": turn,
+            "exit_code": 0,
+        }
+
+    with patch.object(runner, "_run_round", side_effect=_slow_round):
+        t0 = time.monotonic()
+        result = runner.send_message(sid, "what does this PR do?", wait=False)
+        elapsed = time.monotonic() - t0
+
+    assert elapsed < 1.0
+    assert result.get("status") == "running"
+    assert result.get("round_in_progress") is True
+    assert runner.is_busy(sid)
+    assert started.wait(timeout=2)
+    from lazyreview.db import list_chat_turns
+
+    turns = list_chat_turns(conn, sid)
+    assert len(turns) == 1
+    assert turns[0]["role"] == "user"
+    release.set()
+    deadline = time.monotonic() + 2
+    while runner.is_busy(sid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not runner.is_busy(sid)
+    turns = list_chat_turns(conn, sid)
+    assert len(turns) == 2
+    assert turns[1]["role"] == "assistant"
+    assert turns[1]["text"] == "done later"
+
+
+def test_cancel_round_stops_running_agent(tmp_path: Path):
+    import threading
+    import time
+
+    conn = _conn(tmp_path)
+    settings = _settings(tmp_path)
+    settings.ensure_dirs()
+    pr, _consol, _work = _pr_and_consol(conn, tmp_path)
+    runner = SessionRunner(settings, conn)
+    explore = runner.create_explore_session(int(pr["id"]))
+    sid = int(explore["id"])
+
+    started = threading.Event()
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    cm = MagicMock()
+    cm.__enter__.return_value = wt
+    cm.__exit__.return_value = None
+
+    def _hang_proc(session_id, cmd, *, cwd, stdout_path, stderr_path, stdin_text):
+        started.set()
+        # Mimic a live agent until cancel_round marks the session cancelled.
+        while not runner._is_cancel_requested(session_id):
+            time.sleep(0.05)
+        return -15
+
+    with (
+        patch.object(runner, "_run_proc", side_effect=_hang_proc),
+        patch.object(runner, "_build_command", return_value=(["true"], None)),
+        patch("lazyreview.services.session_jobs.hold_worktree", return_value=cm),
+    ):
+        runner.send_message(sid, "long question", wait=False)
+        assert started.wait(timeout=2)
+        assert runner.is_busy(sid)
+        out = runner.cancel_round(sid)
+        assert out.get("cancel_requested") is True
+        deadline = time.monotonic() + 2
+        while runner.is_busy(sid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+
+    assert not runner.is_busy(sid)
+    from lazyreview.db import list_chat_turns
+
+    turns = list_chat_turns(conn, sid)
+    assert turns[-1]["role"] == "assistant"
+    assert turns[-1]["text"] == "(Stopped.)"
+
+
+def test_reopen_challenge_refreshes_stale_empty_working_copy(tmp_path: Path):
+    """Zero-turn Challenge opened mid-regenerate must not keep a stale [] snapshot."""
+    conn = _conn(tmp_path)
+    settings = _settings(tmp_path)
+    settings.ensure_dirs()
+    _, consol, work = _pr_and_consol(conn, tmp_path)
+    (work / "publish-body.md").write_text("ready draft\n", encoding="utf-8")
+
+    runner = SessionRunner(settings, conn)
+    session = runner.create_challenge_session(int(consol["id"]))
+    sid = int(session["id"])
+    # Simulate a session opened while findings were empty (pre-verify / mid-regen).
+    update_chat_session(conn, sid, working_findings_json="[]\n", working_body_md="")
+    update_consolidation(
+        conn,
+        int(consol["id"]),
+        findings_json=(
+            '[{"id":"C1","severity":1,"title":"Broken","body":"Because."},'
+            '{"id":"C2","severity":2,"title":"Also","body":"More."}]'
+        ),
+        body="## Review: after regenerate\n",
+        publish_body="ready draft\n",
+        ready_to_post=1,
+        recommended_action="request_changes",
+        recommended_action_rationale="still blocked",
+    )
+
+    reopened = runner.create_challenge_session(int(consol["id"]))
+    assert int(reopened["id"]) == sid
+    assert len(reopened.get("working_findings") or []) == 2
+    assert "after regenerate" in (reopened.get("working_body_md") or "")
+    refreshed = get_consolidation(conn, int(consol["id"]))
+    assert int(refreshed["ready_to_post"] or 0) == 1
+    assert (refreshed.get("publish_body") or "").strip() == "ready draft"
+
+
 def test_finish_session_preserves_body_and_writes_guidance(tmp_path: Path):
     conn = _conn(tmp_path)
     settings = _settings(tmp_path)
