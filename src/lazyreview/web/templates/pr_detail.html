@@ -1457,8 +1457,8 @@
             x-text="batchComboEmptyLabel()"></li>
       </ul>
 
-      <p class="mt-3 text-sm text-red-600 dark:text-red-400" x-show="batchMessage" x-text="batchMessage"></p>
-      <div class="mt-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
+      <p class="mt-3 shrink-0 text-sm text-red-600 dark:text-red-400" x-show="batchMessage" x-text="batchMessage"></p>
+      <div class="lr-modal-footer shrink-0">
         <div class="flex flex-wrap gap-2">
           <button type="button" @click="addBatchRow()" :disabled="batchBusy || batchRows.length >= 20"
                   class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">

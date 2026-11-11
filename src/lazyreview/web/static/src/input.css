@@ -87,9 +87,48 @@ html {
 .lr-modal-panel--batch {
   max-width: min(100%, 40rem);
   width: min(100%, 40rem);
-  height: auto;
+  /* Definite height when capped so the run list can shrink/scroll and the
+     footer stays visible instead of painting under overflow:hidden. */
+  height: min(max-content, 90vh, 90dvh);
   max-height: min(90vh, 90dvh);
   min-height: 0;
+}
+/* Keep the run list scrollable and the action footer docked inside the panel.
+   Settings intentionally opts out of nested scroll on phones — do not inherit that. */
+.lr-modal-panel--batch .lr-batch-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.lr-modal-panel--batch .lr-modal-footer {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  background: var(--color-white, #fff);
+}
+.dark .lr-modal-panel--batch .lr-modal-footer {
+  background: var(--color-slate-900, #0f172a);
+}
+@media (max-width: 480px) {
+  .lr-modal-panel--batch .lr-modal-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .lr-modal-panel--batch .lr-modal-footer > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .lr-modal-panel--batch .lr-modal-footer > div:last-child > button {
+    flex: 1 1 auto;
+  }
 }
 /* Wide modals (consolidation view/submit, logs, run findings): same content-sized height. */
 .lr-modal-panel--large {
@@ -1938,7 +1977,10 @@ html {
     min-height: 0 !important;
     overflow: visible !important;
   }
-  .lr-batch-list {
+  /* Settings page only: let batch defaults grow with the page (no nested scroll).
+     The Start Code Review modal must keep .lr-batch-list scrollable — see
+     .lr-modal-panel--batch .lr-batch-list above. */
+  .lr-settings .lr-batch-list {
     max-height: none;
     overflow: visible;
   }
