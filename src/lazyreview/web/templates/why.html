@@ -67,8 +67,11 @@
         home paths. Defense in depth for trusted local use — not multi-tenant ACLs.
       </li>
       <li>
-        <strong class="font-medium text-slate-900 dark:text-slate-100">Head-aware</strong>
-        — when the PR moves, stale runs and reports are flagged so you don’t post yesterday’s review.
+        <strong class="font-medium text-slate-900 dark:text-slate-100">Head-aware eviction</strong>
+        — when the PR moves, in-flight analysis, reviews, consolidations, publish transforms,
+        and chat rounds for the old head are cancelled and prior runs are flagged stale.
+        With analysis-on-head-change (and optional auto-kick) enabled, work restarts for the new head
+        so you don’t post yesterday’s review.
       </li>
     </ul>
   </section>
@@ -246,8 +249,9 @@
       Generic AI PR bots drop comments straight onto GitHub. lazyreview keeps the
       multi-agent → verify → draft pipeline local: human-in-the-loop by default,
       with optional auto-kick and auto-submit when you turn them on in Settings.
-      Worktrees, logs, and history stay on your machine. When the head moves, stale work
-      is marked so you don’t ship a review for the wrong commit.
+      Worktrees, logs, and history stay on your machine. When the head moves, stale
+      in-flight work is cancelled and flagged; optional Settings can re-queue analysis
+      and auto-kick reviews for the new commit.
     </p>
   </section>
 

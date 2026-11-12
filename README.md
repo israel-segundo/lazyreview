@@ -10,8 +10,10 @@ Settings can auto-kick the batch after analysis and auto-submit the recommended
 verdict (all PRs, only labeled ones, or never).
 
 History, costs, and feedback live in SQLite. Worktrees and run logs stay on your
-machine. When the PR head moves, stale runs are flagged so you don’t ship a
-review for the wrong commit.
+machine. When the PR head moves, in-flight analysis, reviews, consolidations,
+publish transforms, and chat rounds for the old head are cancelled; prior runs
+are flagged stale. If analysis-on-head-change (and optionally auto-kick) is
+enabled, work restarts for the new head.
 
 ## Workflow
 
@@ -218,7 +220,9 @@ stay readable on the host.
 
 lazyreview runs a **PR Analysis** job (orientation brief) when a PR is first
 added to the system (and whenever you click **Run analysis** / **Retry**). By
-default, a new head on a synced PR also re-queues analysis (toggle under
+default, a new head on a synced PR **evicts** in-flight work for the old head
+(analysis, review runs, consolidations including publish-only, and chat rounds),
+flags prior runs stale, and re-queues analysis (toggle under
 **Settings → Agents & Prompts → PR Analysis**). At most
 **`max_concurrent_analyses`** (default `2`) analyses run at once; the rest stay
 queued. When **Auto-kick reviews** is on, a succeeded analysis for the current
