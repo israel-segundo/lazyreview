@@ -430,6 +430,15 @@ def restore_findings_json_file(path: Path, prior_json: str | None) -> None:
 
 _VALID_RECOMMENDED_ACTIONS = frozenset({"approve", "request_changes", "comment"})
 
+_MERGE_CONFLICT_FINDING_ID = "C-MERGE-CONFLICT"
+_MERGE_CONFLICT_TITLE = "Resolve merge conflicts with the base branch"
+_MERGE_CONFLICT_BODY = (
+    "GitHub reports this pull request is not mergeable because of conflicts with "
+    "the base branch. Rebase or merge the base branch and resolve all conflicts "
+    "before this PR can land."
+)
+_MERGE_CONFLICT_RATIONALE = "PR has merge conflicts with the base branch."
+
 
 def parse_consolidation_meta(raw: str | None) -> tuple[str, str]:
     """Return (recommended_action, rationale) from meta.json contents."""
@@ -448,6 +457,87 @@ def parse_consolidation_meta(raw: str | None) -> tuple[str, str]:
         action = cand
     rationale = str(data.get("rationale") or "").strip()
     return action, rationale
+
+
+def _finding_covers_merge_conflicts(finding: dict[str, Any]) -> bool:
+    """True when a finding already asks to fix merge conflicts / unmergeable state."""
+    fid = str(finding.get("id") or finding.get("external_id") or "").strip()
+    if fid == _MERGE_CONFLICT_FINDING_ID:
+        return True
+    blob = " ".join(
+        str(finding.get(k) or "")
+        for k in ("title", "body", "disposition", "class", "verify_class")
+    ).lower()
+    needles = (
+        "merge conflict",
+        "merge conflicts",
+        "merge-conflict",
+        "unmergeable",
+        "not mergeable",
+        "conflicting with the base",
+        "conflicts with the base",
+        "resolve conflicts",
+    )
+    return any(n in blob for n in needles)
+
+
+def merge_conflict_finding() -> dict[str, Any]:
+    """Canonical High finding injected when GitHub reports CONFLICTING."""
+    from lazyreview.findings_taxonomy import normalize_finding
+
+    return normalize_finding(
+        {
+            "id": _MERGE_CONFLICT_FINDING_ID,
+            "external_id": _MERGE_CONFLICT_FINDING_ID,
+            "severity": 1,
+            "category": "correctness",
+            "labels": ["bug"],
+            "title": _MERGE_CONFLICT_TITLE,
+            "body": _MERGE_CONFLICT_BODY,
+            "disposition": "_Fix before merge._",
+            "class": "blocker",
+        },
+        default_origin="model",
+    )
+
+
+def apply_merge_conflict_constraints(
+    *,
+    has_merge_conflicts: bool,
+    findings: list[dict[str, Any]] | None,
+    recommended_action: str,
+    rationale: str = "",
+) -> tuple[list[dict[str, Any]], str, str, bool]:
+    """
+    When the PR has merge conflicts: ensure a High conflict finding exists and
+    force ``recommended_action`` to ``request_changes``.
+
+    Returns (findings, action, rationale, changed).
+    """
+    items = [dict(f) for f in (findings or []) if isinstance(f, dict)]
+    action = (
+        recommended_action
+        if recommended_action in _VALID_RECOMMENDED_ACTIONS
+        else "comment"
+    )
+    why = (rationale or "").strip()
+    if not has_merge_conflicts:
+        return items, action, why, False
+
+    changed = False
+    if not any(_finding_covers_merge_conflicts(f) for f in items):
+        items.insert(0, merge_conflict_finding())
+        changed = True
+    if action != "request_changes":
+        action = "request_changes"
+        changed = True
+    if not why:
+        why = _MERGE_CONFLICT_RATIONALE
+        changed = True
+    elif "conflict" not in why.lower():
+        why = f"{why.rstrip('.')} {_MERGE_CONFLICT_RATIONALE}"
+        changed = True
+    return items, action, why, changed
 
 
 def render_consolidator_prompt(
@@ -884,6 +974,10 @@ class ConsolidationRunner:
                         "url": pr["url"],
                         "title": pr.get("title"),
                         "head_sha": pr.get("head_sha"),
+                        "state": pr.get("state"),
+                        "is_draft": bool(pr.get("is_draft")),
+                        "in_merge_queue": bool(pr.get("in_merge_queue")),
+                        "has_merge_conflicts": bool(pr.get("has_merge_conflicts")),
                     },
                     indent=2,
                 ),
@@ -1081,6 +1175,39 @@ class ConsolidationRunner:
                 )
             meta_raw = meta_path.read_text(encoding="utf-8") if meta_path.exists() else meta_raw
             recommended_action, rationale = parse_consolidation_meta(meta_raw)
+            findings_list = parse_findings_list(findings_json)
+            findings_list, recommended_action, rationale, conflict_adjusted = (
+                apply_merge_conflict_constraints(
+                    has_merge_conflicts=bool(pr.get("has_merge_conflicts")),
+                    findings=findings_list,
+                    recommended_action=recommended_action,
+                    rationale=rationale,
+                )
+            )
+            if conflict_adjusted:
+                findings_json = _persist_normalized_findings(
+                    findings_to_json(findings_list),
+                    findings_out=findings_out,
+                    prior_json=findings_json,
+                    default_origin="model",
+                )
+                try:
+                    meta_path.write_text(
+                        json.dumps(
+                            {
+                                "recommended_action": recommended_action,
+                                "rationale": rationale,
+                            },
+                            indent=2,
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                except OSError:
+                    logger.exception(
+                        "failed writing merge-conflict meta for consolidation %s",
+                        consolidation_id,
+                    )
             update_consolidation(
                 conn,
                 consolidation_id,

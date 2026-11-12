@@ -126,6 +126,9 @@
             <span x-show="!!pr.in_merge_queue" x-cloak
                   class="rounded-full px-2 py-0.5 text-xs bg-indigo-100 text-indigo-900 dark:bg-indigo-900/40 dark:text-indigo-200"
                   title="GitHub has this PR in a merge queue">merge queue</span>
+            <span x-show="!!pr.has_merge_conflicts" x-cloak
+                  class="rounded-full px-2 py-0.5 text-xs bg-rose-100 text-rose-900 dark:bg-rose-900/40 dark:text-rose-200"
+                  title="GitHub reports merge conflicts with the base branch">conflicts</span>
             <span class="rounded-full px-2 py-0.5 text-xs"
                   :class="internalStatusClass(pr)"
                   :title="internalStatusTitle(pr)"
@@ -196,6 +199,9 @@
                   <span x-show="!!pr.in_merge_queue" x-cloak
                         class="rounded-full px-2 py-0.5 text-xs bg-indigo-100 text-indigo-900 dark:bg-indigo-900/40 dark:text-indigo-200"
                         title="GitHub has this PR in a merge queue">merge queue</span>
+                  <span x-show="!!pr.has_merge_conflicts" x-cloak
+                        class="rounded-full px-2 py-0.5 text-xs bg-rose-100 text-rose-900 dark:bg-rose-900/40 dark:text-rose-200"
+                        title="GitHub reports merge conflicts with the base branch">conflicts</span>
                 </span>
               </td>
               <td class="px-4 py-3 whitespace-nowrap">

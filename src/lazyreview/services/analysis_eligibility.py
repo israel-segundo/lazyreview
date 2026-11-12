@@ -55,7 +55,7 @@ def review_blocked_reason(pr: dict[str, Any]) -> str | None:
 
 def refresh_pr_analysis_flags(pr: dict[str, Any]) -> dict[str, Any]:
     """
-    Best-effort live refresh of state / draft / merge-queue onto a PR dict.
+    Best-effort live refresh of state / draft / merge flags onto a PR dict.
 
     On GitHub errors, returns the original ``pr`` unchanged.
     """
@@ -76,4 +76,6 @@ def refresh_pr_analysis_flags(pr: dict[str, Any]) -> dict[str, Any]:
         out["is_draft"] = live["is_draft"]
     if "in_merge_queue" in live:
         out["in_merge_queue"] = live["in_merge_queue"]
+    if "has_merge_conflicts" in live:
+        out["has_merge_conflicts"] = live["has_merge_conflicts"]
     return out

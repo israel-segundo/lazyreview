@@ -2536,6 +2536,14 @@ body:has(.lr-consol) > footer {
   background: color-mix(in oklab, var(--color-indigo-900, #312e81) 40%, transparent);
   color: var(--color-indigo-200, #c7d2fe);
 }
+.lr-pr-meta__pill--conflicts {
+  background: var(--color-rose-100, #ffe4e6);
+  color: var(--color-rose-900, #881337);
+}
+.dark .lr-pr-meta__pill--conflicts {
+  background: color-mix(in oklab, var(--color-rose-900, #881337) 40%, transparent);
+  color: var(--color-rose-200, #fecdd3);
+}
 .lr-pr-meta__pill--muted {
   background: var(--color-slate-200, #e2e8f0);
   color: var(--color-slate-800, #1e293b);

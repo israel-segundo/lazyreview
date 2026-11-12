@@ -21,8 +21,20 @@ confirm before posting.
 - `findings-by-run.json` — array of `{ run, findings[] }` from selected review runs
   (`run.agent`, `run.model`, `run.effort`; findings have `severity` 1|2|3 plus optional
   `category` / `labels` from the closed taxonomy below)
-- `pr.json` — PR metadata (`url`, `owner`, `repo`, `number`, `title`, `head_sha`, …)
+- `pr.json` — PR metadata (`url`, `owner`, `repo`, `number`, `title`, `head_sha`,
+  `has_merge_conflicts`, `in_merge_queue`, …)
 - `pr-comments.json` — optional snapshot of comments (may be stale or empty)
+
+### Merge conflicts (required when flagged)
+
+When `pr.json.has_merge_conflicts` is `true`:
+
+1. Keep (or add) exactly one **High (S1)** finding that the branch must resolve merge
+   conflicts with the base before merge. Title should clearly say merge conflicts /
+   unmergeable. Disposition `_Fix before merge._`. Category `correctness`, label `bug`.
+   Do **not** invent a second duplicate conflict finding if one already exists.
+2. Set `recommended_action` to **`request_changes`** in `meta.json` (never `approve` or
+   `comment` while conflicts remain).
 
 ## Source review runs
 
@@ -97,7 +109,7 @@ Choose exactly one `recommended_action` for the human submit modal.
 
 | Choose | When |
 |--------|------|
-| `request_changes` | Any **High (S1)** kept finding; merge conflicts / unmergeable branch; security issue; build/CI red; ticket ACs unmet; disposition `_Fix before merge._`; or any other **real blocker** that compromises product functionality or safe merge. |
+| `request_changes` | Any **High (S1)** kept finding; `pr.json.has_merge_conflicts` / unmergeable branch; security issue; build/CI red; ticket ACs unmet; disposition `_Fix before merge._`; or any other **real blocker** that compromises product functionality or safe merge. |
 | `approve` | No blockers — findings are cosmetic, nits, quick docs tweaks, `_Fast-follow._` / `_Author's call._` Medium/Low only, or the list is empty. Product functionality is not compromised. |
 | `comment` | Rare. Use only when you would still ship (`approve`) but want the draft lead to read **Approved with comments.** Prefer `approve` or `request_changes` when either clearly fits. |
 

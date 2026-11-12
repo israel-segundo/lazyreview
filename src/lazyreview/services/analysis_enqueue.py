@@ -138,18 +138,20 @@ def ensure_analysis_for_pr(
 
 
 def _persist_analysis_flags(conn: sqlite3.Connection, pr: dict[str, Any]) -> None:
-    """Write state/draft/merge-queue without going through upsert_pr lifecycle hooks."""
+    """Write state/draft/merge flags without going through upsert_pr lifecycle hooks."""
     pr_id = int(pr["id"])
     conn.execute(
         """
         UPDATE prs
-        SET state = ?, is_draft = ?, in_merge_queue = ?, updated_at = datetime('now')
+        SET state = ?, is_draft = ?, in_merge_queue = ?, has_merge_conflicts = ?,
+            updated_at = datetime('now')
         WHERE id = ?
         """,
         (
             (pr.get("state") or "open"),
             1 if pr.get("is_draft") else 0,
             1 if pr.get("in_merge_queue") else 0,
+            1 if pr.get("has_merge_conflicts") else 0,
             pr_id,
         ),
     )

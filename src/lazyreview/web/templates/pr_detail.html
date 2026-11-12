@@ -11,6 +11,7 @@
 
   {% set pr_label = 'draft' if pr.is_draft else (pr.state or 'open') %}
   {% set in_merge_queue = pr.in_merge_queue %}
+  {% set has_merge_conflicts = pr.has_merge_conflicts %}
   {% set istatus = pr.internal_status or 'needs_review' %}
   {% set is_rereview = istatus == 'needs_review' and pr.previously_approved %}
   {% set review_label = pr.internal_status_label or ('needs re-review' if is_rereview else 'needs review') %}
@@ -53,6 +54,11 @@
         <span class="lr-pr-meta__dot" aria-hidden="true">·</span>
         <span class="lr-pr-meta__pill lr-pr-meta__pill--queue"
               title="GitHub has this PR in a merge queue">merge queue</span>
+        {% endif %}
+        {% if has_merge_conflicts %}
+        <span class="lr-pr-meta__dot" aria-hidden="true">·</span>
+        <span class="lr-pr-meta__pill lr-pr-meta__pill--conflicts"
+              title="GitHub reports merge conflicts with the base branch">conflicts</span>
         {% endif %}
         <span class="lr-pr-meta__dot" aria-hidden="true">·</span>
         <span class="lr-pr-meta__pill
@@ -99,6 +105,13 @@
             title="GitHub has this PR in a merge queue">
         <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Queue</span>
         <span class="bg-indigo-100 px-2 py-1 font-medium text-indigo-900 dark:bg-indigo-900/40 dark:text-indigo-200">merge queue</span>
+      </span>
+      {% endif %}
+      {% if has_merge_conflicts %}
+      <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600"
+            title="GitHub reports merge conflicts with the base branch">
+        <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Merge</span>
+        <span class="bg-rose-100 px-2 py-1 font-medium text-rose-900 dark:bg-rose-900/40 dark:text-rose-200">conflicts</span>
       </span>
       {% endif %}
       <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
@@ -1592,6 +1605,7 @@ function reviewForm() {
     mermaidExpandHtml: '',
     _mermaidSeq: 0,
     inMergeQueue: {{ 1 if in_merge_queue else 0 }},
+    hasMergeConflicts: {{ 1 if has_merge_conflicts else 0 }},
     get analysisReady() { return this.analysisStatus === 'succeeded'; },
     get canStartReview() { return this.analysisReady && !this.inMergeQueue; },
     reviewBlockedTitle() {
@@ -2213,6 +2227,8 @@ function reviewForm() {
       return this.feedbackActionClass(a);
     },
     verdictFromRecommendation(rec) {
+      // Live merge conflicts always pre-select request_changes in the submit modal.
+      if (this.hasMergeConflicts) return 'request_changes';
       // Draft lead "Approved with comments." maps from recommended_action=comment;
       // pre-select Approve in the submit dropdown.
       if (rec === 'request_changes') return 'request_changes';
