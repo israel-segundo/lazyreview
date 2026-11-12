@@ -182,16 +182,25 @@ def test_head_change_cancels_without_enqueue_when_called_directly(tmp_path: Path
     jobs = MagicMock()
     consolidations = MagicMock()
     analyses = MagicMock()
-    lifecycle.bind(settings=MagicMock(), jobs=jobs, consolidations=consolidations, analyses=analyses)
+    sessions = MagicMock()
+    lifecycle.bind(
+        settings=MagicMock(),
+        jobs=jobs,
+        consolidations=consolidations,
+        analyses=analyses,
+        sessions=sessions,
+    )
 
     try:
         with patch(
             "lazyreview.services.analysis_enqueue.ensure_analysis_for_pr"
         ) as ensure:
             lifecycle.on_pr_head_changed(conn, 42)
-            jobs.cancel_for_pr.assert_called_once_with(42)
-            consolidations.cancel_for_pr.assert_called_once_with(42)
-            analyses.cancel_for_pr.assert_called_once_with(42)
+            reason = lifecycle.HEAD_MOVED_CANCEL_REASON
+            jobs.cancel_for_pr.assert_called_once_with(42, reason=reason)
+            consolidations.cancel_for_pr.assert_called_once_with(42, reason=reason)
+            analyses.cancel_for_pr.assert_called_once_with(42, reason=reason)
+            sessions.cancel_for_pr.assert_called_once_with(42, reason=reason)
             ensure.assert_not_called()
     finally:
         lifecycle.unbind()

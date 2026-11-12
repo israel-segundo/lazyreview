@@ -117,7 +117,7 @@ class JobRunner:
     def enqueue(self, run_id: int) -> None:
         self._queue.put(run_id)
 
-    def cancel(self, run_id: int) -> dict[str, Any]:
+    def cancel(self, run_id: int, *, reason: str = "Cancelled by user") -> dict[str, Any]:
         """Cancel a queued or running review. Returns the updated run row."""
         with self._lock:
             self._cancel_requested.add(run_id)
@@ -128,12 +128,13 @@ class JobRunner:
         status = run["status"]
         if status not in ("queued", "running"):
             raise ValueError(f"Run is {status}, cannot cancel")
+        msg = (reason or "Cancelled by user").strip() or "Cancelled by user"
         updated = update_run(
             self.conn,
             run_id,
             status="cancelled",
             finished_at=utcnow(),
-            error_message="Cancelled by user",
+            error_message=msg,
         )
         if proc is not None and proc.poll() is None:
             try:
@@ -144,8 +145,9 @@ class JobRunner:
         self._notify_run_finished(run_id)
         return updated
 
-
-    def cancel_for_pr(self, pr_id: int) -> list[int]:
+    def cancel_for_pr(
+        self, pr_id: int, *, reason: str = "Cancelled by user"
+    ) -> list[int]:
         rows = self.conn.execute(
             """
             SELECT id FROM review_runs
@@ -158,7 +160,7 @@ class JobRunner:
         for r in rows:
             rid = int(r["id"])
             try:
-                self.cancel(rid)
+                self.cancel(rid, reason=reason)
                 cancelled.append(rid)
             except (KeyError, ValueError):
                 continue

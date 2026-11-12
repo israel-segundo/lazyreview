@@ -353,6 +353,36 @@ class SessionRunner:
             "cancel_requested": True,
         }
 
+    def cancel_for_pr(
+        self, pr_id: int, *, reason: str = "Cancelled by user"
+    ) -> list[int]:
+        """Cancel in-flight chat rounds for every session on this PR."""
+        del reason  # rounds have no persisted cancel message today
+        from lazyreview.db import list_chat_sessions_for_pr
+
+        want = int(pr_id)
+        candidates: set[int] = set()
+        for session in list_chat_sessions_for_pr(self._conn, want, limit=200):
+            candidates.add(int(session["id"]))
+        with self._lock:
+            for sid in list(self._busy) + list(self._procs):
+                candidates.add(int(sid))
+        cancelled: list[int] = []
+        for sid in sorted(candidates):
+            session = get_chat_session(self._conn, sid)
+            if not session or int(session.get("pr_id") or 0) != want:
+                continue
+            with self._lock:
+                active = sid in self._busy or sid in self._procs
+            if not active:
+                continue
+            try:
+                self.cancel_round(sid)
+                cancelled.append(sid)
+            except ValueError:
+                continue
+        return cancelled
+
     @staticmethod
     def _terminate_proc(proc: subprocess.Popen[str]) -> None:
         try:

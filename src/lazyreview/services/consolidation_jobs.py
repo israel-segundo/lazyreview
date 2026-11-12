@@ -714,7 +714,9 @@ class ConsolidationRunner:
         finally:
             conn.close()
 
-    def cancel(self, consolidation_id: int) -> dict[str, Any]:
+    def cancel(
+        self, consolidation_id: int, *, reason: str = "Cancelled by user"
+    ) -> dict[str, Any]:
         with self._lock:
             self._cancel_requested.add(consolidation_id)
             proc = self._procs.get(consolidation_id)
@@ -724,13 +726,17 @@ class ConsolidationRunner:
         status = row["status"]
         if status not in ("dormant", "queued", "running"):
             raise ValueError(f"Consolidation is {status}, cannot cancel")
-        updated = update_consolidation(
-            self.conn,
-            consolidation_id,
-            status="cancelled",
-            finished_at=utcnow(),
-            error_message="Cancelled by user",
-        )
+        msg = (reason or "Cancelled by user").strip() or "Cancelled by user"
+        fields: dict[str, Any] = {
+            "status": "cancelled",
+            "finished_at": utcnow(),
+            "error_message": msg,
+        }
+        if (row.get("publish_status") or "") in ("queued", "running"):
+            fields["publish_status"] = "cancelled"
+            fields["publish_finished_at"] = utcnow()
+            fields["ready_to_post"] = 0
+        updated = update_consolidation(self.conn, consolidation_id, **fields)
         if proc is not None and proc.poll() is None:
             try:
                 proc.terminate()
@@ -739,8 +745,43 @@ class ConsolidationRunner:
         assert updated is not None
         return updated
 
+    def cancel_publish(
+        self, consolidation_id: int, *, reason: str = "Cancelled by user"
+    ) -> dict[str, Any]:
+        """Stop an in-flight / queued publish-only transform on a finished consolidation."""
+        cid = int(consolidation_id)
+        with self._lock:
+            self._cancel_requested.add(cid)
+            self._publish_only.discard(cid)
+            proc = self._procs.get(cid)
+        row = get_consolidation(self.conn, cid)
+        if not row:
+            raise KeyError(cid)
+        pub = (row.get("publish_status") or "").strip()
+        if pub not in ("queued", "running"):
+            raise ValueError(f"Publish is {pub or 'idle'}, cannot cancel")
+        msg = (reason or "Cancelled by user").strip() or "Cancelled by user"
+        updated = update_consolidation(
+            self.conn,
+            cid,
+            publish_status="cancelled",
+            publish_finished_at=utcnow(),
+            ready_to_post=0,
+            error_message=msg,
+        )
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except OSError:
+                logger.exception(
+                    "failed to terminate publish for consolidation %s", cid
+                )
+        assert updated is not None
+        return updated
 
-    def cancel_for_pr(self, pr_id: int) -> list[int]:
+    def cancel_for_pr(
+        self, pr_id: int, *, reason: str = "Cancelled by user"
+    ) -> list[int]:
         rows = self.conn.execute(
             """
             SELECT id FROM consolidations
@@ -750,10 +791,31 @@ class ConsolidationRunner:
             (pr_id,),
         ).fetchall()
         cancelled: list[int] = []
+        seen: set[int] = set()
         for r in rows:
             cid = int(r["id"])
             try:
-                self.cancel(cid)
+                self.cancel(cid, reason=reason)
+                cancelled.append(cid)
+                seen.add(cid)
+            except (KeyError, ValueError):
+                continue
+        # Publish-only jobs ride on already-succeeded consolidations.
+        pub_rows = self.conn.execute(
+            """
+            SELECT id FROM consolidations
+            WHERE pr_id = ?
+              AND publish_status IN ('queued', 'running')
+            ORDER BY id ASC
+            """,
+            (pr_id,),
+        ).fetchall()
+        for r in pub_rows:
+            cid = int(r["id"])
+            if cid in seen:
+                continue
+            try:
+                self.cancel_publish(cid, reason=reason)
                 cancelled.append(cid)
             except (KeyError, ValueError):
                 continue
@@ -1605,7 +1667,7 @@ class ConsolidationRunner:
             update_consolidation(
                 conn,
                 consolidation_id,
-                publish_status="failed",
+                publish_status="cancelled",
                 publish_finished_at=utcnow(),
                 ready_to_post=0,
             )

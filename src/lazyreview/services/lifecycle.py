@@ -7,9 +7,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+HEAD_MOVED_CANCEL_REASON = "Cancelled: PR head moved"
+
 _jobs: Any | None = None
 _consolidations: Any | None = None
 _analyses: Any | None = None
+_sessions: Any | None = None
 _settings: Any | None = None
 
 
@@ -19,39 +22,49 @@ def bind(
     jobs: Any,
     consolidations: Any,
     analyses: Any,
+    sessions: Any | None = None,
 ) -> None:
-    global _jobs, _consolidations, _analyses, _settings
+    global _jobs, _consolidations, _analyses, _sessions, _settings
     _settings = settings
     _jobs = jobs
     _consolidations = consolidations
     _analyses = analyses
+    _sessions = sessions
 
 
 def unbind() -> None:
-    global _jobs, _consolidations, _analyses, _settings
+    global _jobs, _consolidations, _analyses, _sessions, _settings
     _jobs = None
     _consolidations = None
     _analyses = None
+    _sessions = None
     _settings = None
 
 
 def on_pr_head_changed(conn: Any, pr_id: int) -> None:
     """Cancel in-flight work for a new head. Does not auto-start PR analysis."""
+    del conn  # runners use their own connections
+    reason = HEAD_MOVED_CANCEL_REASON
     if _jobs is not None and hasattr(_jobs, "cancel_for_pr"):
         try:
-            _jobs.cancel_for_pr(pr_id)
+            _jobs.cancel_for_pr(pr_id, reason=reason)
         except Exception:
-            pass
+            logger.exception("failed cancelling review runs for pr_id=%s", pr_id)
     if _consolidations is not None and hasattr(_consolidations, "cancel_for_pr"):
         try:
-            _consolidations.cancel_for_pr(pr_id)
+            _consolidations.cancel_for_pr(pr_id, reason=reason)
         except Exception:
-            pass
+            logger.exception("failed cancelling consolidations for pr_id=%s", pr_id)
     if _analyses is not None:
         try:
-            _analyses.cancel_for_pr(pr_id)
+            _analyses.cancel_for_pr(pr_id, reason=reason)
         except Exception:
-            pass
+            logger.exception("failed cancelling analyses for pr_id=%s", pr_id)
+    if _sessions is not None and hasattr(_sessions, "cancel_for_pr"):
+        try:
+            _sessions.cancel_for_pr(pr_id, reason=reason)
+        except Exception:
+            logger.exception("failed cancelling chat rounds for pr_id=%s", pr_id)
 
 
 def _cancel_analyses(pr_id: int, reason: str) -> None:
@@ -87,15 +100,21 @@ def on_pr_upserted(
         # Drafts only cancel analysis (manual review is still allowed).
         from lazyreview.services.analysis_eligibility import in_merge_queue
 
+        stop_reason = f"Skipped: {skip}"
         if in_merge_queue(pr) or state in ("closed", "merged"):
             if _jobs is not None and hasattr(_jobs, "cancel_for_pr"):
                 try:
-                    _jobs.cancel_for_pr(pr_id)
+                    _jobs.cancel_for_pr(pr_id, reason=stop_reason)
                 except Exception:
                     pass
             if _consolidations is not None and hasattr(_consolidations, "cancel_for_pr"):
                 try:
-                    _consolidations.cancel_for_pr(pr_id)
+                    _consolidations.cancel_for_pr(pr_id, reason=stop_reason)
+                except Exception:
+                    pass
+            if _sessions is not None and hasattr(_sessions, "cancel_for_pr"):
+                try:
+                    _sessions.cancel_for_pr(pr_id, reason=stop_reason)
                 except Exception:
                     pass
         return

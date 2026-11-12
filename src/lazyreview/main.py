@@ -123,6 +123,7 @@ def create_app() -> FastAPI:
             jobs=runner,
             consolidations=consolidation_runner,
             analyses=analysis_runner,
+            sessions=session_runner,
         )
         analysis_runner.start()
         workspace_pruner.start()
