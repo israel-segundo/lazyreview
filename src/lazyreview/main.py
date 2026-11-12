@@ -413,9 +413,28 @@ def create_app() -> FastAPI:
 
     @app.get("/activity", response_class=HTMLResponse)
     async def activity_page(request: Request):
-        from lazyreview.db import count_global_activity_running, list_global_activity
+        from lazyreview.db import (
+            ACTIVITY_STATUS_FILTERS,
+            count_global_activity_running,
+            list_global_activity,
+        )
 
-        running_only = str(request.query_params.get("running") or "") in ("1", "true", "yes")
+        raw_status = str(request.query_params.get("status") or "").strip().lower()
+        legacy_running = str(request.query_params.get("running") or "") in (
+            "1",
+            "true",
+            "yes",
+        )
+        if raw_status in ACTIVITY_STATUS_FILTERS:
+            status_filter: str | None = raw_status
+            running_only = False
+        elif legacy_running:
+            # Old ?running=1 bookmarks → in-flight (queued + running).
+            status_filter = None
+            running_only = True
+        else:
+            status_filter = "all"
+            running_only = False
         try:
             page = max(1, int(request.query_params.get("page") or 1))
         except ValueError:
@@ -430,6 +449,7 @@ def create_app() -> FastAPI:
             request.app.state.db,
             limit=page_size,
             offset=(page - 1) * page_size,
+            status_filter=status_filter,
             running_only=running_only,
         )
         total = int(result["total"])
@@ -440,8 +460,13 @@ def create_app() -> FastAPI:
                 request.app.state.db,
                 limit=page_size,
                 offset=(page - 1) * page_size,
+                status_filter=status_filter,
                 running_only=running_only,
             )
+            total = int(result["total"])
+            pages = max(1, (total + page_size - 1) // page_size) if total else 1
+        # Dropdown value: legacy inflight has no dedicated option — show All.
+        ui_status = status_filter or "all"
         return TEMPLATES.TemplateResponse(
             request,
             "activity.html",
@@ -453,7 +478,7 @@ def create_app() -> FastAPI:
                 "pages": pages,
                 "page_sizes": [25, 50, 100],
                 "running_count": count_global_activity_running(request.app.state.db),
-                "running_only": running_only,
+                "status_filter": ui_status,
                 "version": __version__,
             },
         )

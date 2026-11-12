@@ -498,6 +498,54 @@ def pr_activity_summary(
 
 
 _ACTIVITY_IN_FLIGHT_SQL = "('queued', 'running')"
+_ACTIVITY_QUEUED_SQL = "('queued', 'dormant')"
+_ACTIVITY_COMPLETED_SQL = "('succeeded', 'failed', 'cancelled')"
+_ACTIVITY_PUBLISH_ANY_SQL = "('queued', 'running', 'succeeded', 'failed', 'cancelled')"
+_ACTIVITY_PUBLISH_COMPLETED_SQL = "('succeeded', 'failed', 'cancelled')"
+ACTIVITY_STATUS_FILTERS = frozenset({"all", "running", "queued", "completed"})
+
+
+def _normalize_activity_status_filter(
+    status_filter: str | None = None, *, running_only: bool = False
+) -> str:
+    """Resolve activity status filter; ``running_only`` maps to queued+running."""
+    raw = (status_filter or "").strip().lower()
+    if running_only and (not raw or raw == "all"):
+        # Legacy checkbox / ?running=1: both queued and running.
+        return "inflight"
+    if raw in ACTIVITY_STATUS_FILTERS:
+        return raw
+    return "all"
+
+
+def _activity_job_status_sql(alias: str, status_filter: str) -> str:
+    if status_filter == "all":
+        return ""
+    if status_filter == "inflight":
+        return f"AND {alias}.status IN {_ACTIVITY_IN_FLIGHT_SQL}"
+    if status_filter == "running":
+        return f"AND {alias}.status = 'running'"
+    if status_filter == "queued":
+        if alias == "c":
+            return f"AND {alias}.status IN {_ACTIVITY_QUEUED_SQL}"
+        return f"AND {alias}.status = 'queued'"
+    if status_filter == "completed":
+        return f"AND {alias}.status IN {_ACTIVITY_COMPLETED_SQL}"
+    return ""
+
+
+def _activity_publish_status_sql(status_filter: str) -> str:
+    if status_filter == "all":
+        return f"AND c.publish_status IN {_ACTIVITY_PUBLISH_ANY_SQL}"
+    if status_filter == "inflight":
+        return f"AND c.publish_status IN {_ACTIVITY_IN_FLIGHT_SQL}"
+    if status_filter == "running":
+        return "AND c.publish_status = 'running'"
+    if status_filter == "queued":
+        return "AND c.publish_status = 'queued'"
+    if status_filter == "completed":
+        return f"AND c.publish_status IN {_ACTIVITY_PUBLISH_COMPLETED_SQL}"
+    return f"AND c.publish_status IN {_ACTIVITY_IN_FLIGHT_SQL}"
 
 
 def list_global_activity(
@@ -506,6 +554,7 @@ def list_global_activity(
     limit: int = 25,
     offset: int = 0,
     running_only: bool = False,
+    status_filter: str | None = None,
 ) -> dict[str, Any]:
     """
     Cross-PR timeline of analyses, review runs, consolidations, and publish drafts.
@@ -513,20 +562,18 @@ def list_global_activity(
     Sorted newest-first by COALESCE(finished_at, started_at, created_at).
     Returns {items, total, limit, offset}.
 
-    Publish-only regenerations appear as kind ``publish`` while
-    ``publish_status`` is queued/running (consolidation status stays succeeded).
+    ``status_filter`` is one of all / running / queued / completed.
+    Legacy ``running_only=True`` keeps the old queued+running behavior.
     """
     limit = max(1, min(int(limit or 25), 500))
     offset = max(0, int(offset or 0))
-    a_filter = f"AND a.status IN {_ACTIVITY_IN_FLIGHT_SQL}" if running_only else ""
-    r_filter = f"AND r.status IN {_ACTIVITY_IN_FLIGHT_SQL}" if running_only else ""
-    c_filter = f"AND c.status IN {_ACTIVITY_IN_FLIGHT_SQL}" if running_only else ""
-    # Publish rows are only meaningful while in flight (no separate history table).
-    pub_filter = (
-        f"AND c.publish_status IN {_ACTIVITY_IN_FLIGHT_SQL}"
-        if running_only
-        else f"AND c.publish_status IN {_ACTIVITY_IN_FLIGHT_SQL}"
+    filt = _normalize_activity_status_filter(
+        status_filter, running_only=running_only
     )
+    a_filter = _activity_job_status_sql("a", filt)
+    r_filter = _activity_job_status_sql("r", filt)
+    c_filter = _activity_job_status_sql("c", filt)
+    pub_filter = _activity_publish_status_sql(filt)
     union_sql = f"""
           SELECT
             'analysis' AS kind,

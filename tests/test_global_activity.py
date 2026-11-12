@@ -163,7 +163,7 @@ def test_list_global_activity_includes_publish_regen(tmp_path: Path):
     assert item["status"] == "queued"
     assert count_global_activity_running(conn) == 1
 
-    # Completed publish regenerations drop off the feed (no history row).
+    # Completed publish regenerations leave the in-flight feed but stay in all/completed.
     update_consolidation(
         conn,
         int(c["id"]),
@@ -172,3 +172,60 @@ def test_list_global_activity_includes_publish_regen(tmp_path: Path):
     )
     assert list_global_activity(conn, running_only=True)["total"] == 0
     assert count_global_activity_running(conn) == 0
+    completed = list_global_activity(conn, status_filter="completed")
+    assert any(i["kind"] == "publish" and i["status"] == "succeeded" for i in completed["items"])
+    assert any(i["kind"] == "consolidation" and i["status"] == "succeeded" for i in completed["items"])
+
+
+def test_list_global_activity_status_filters(tmp_path: Path):
+    conn = _conn(tmp_path)
+    pr = _pr(conn)
+    a_ok = create_pr_analysis(
+        conn, pr_id=pr["id"], head_sha="abc", agent="claude", model="haiku", effort="low"
+    )
+    update_pr_analysis(conn, int(a_ok["id"]), status="succeeded", brief_markdown="# ok")
+    # Separate head so create_pr_analysis inserts a new row (one analysis per head).
+    a_cancel = create_pr_analysis(
+        conn, pr_id=pr["id"], head_sha="def", agent="claude", model="haiku", effort="low"
+    )
+    update_pr_analysis(conn, int(a_cancel["id"]), status="cancelled")
+    run = create_run(
+        conn,
+        pr_id=pr["id"],
+        agent="claude",
+        model="haiku",
+        effort="low",
+        skill="",
+        head_sha="abc",
+        workdir_path="/tmp/r1",
+    )
+    update_run(conn, int(run["id"]), status="running")
+    create_consolidation(
+        conn,
+        pr_id=pr["id"],
+        head_sha="abc",
+        source_run_ids=[int(run["id"])],
+        agent="claude",
+        model="haiku",
+        effort="low",
+        workdir_path="/tmp/c1",
+        status="queued",
+    )
+
+    all_items = list_global_activity(conn, status_filter="all")
+    assert all_items["total"] == 4
+    assert any(i["status"] == "cancelled" for i in all_items["items"])
+
+    running = list_global_activity(conn, status_filter="running")
+    assert running["total"] == 1
+    assert running["items"][0]["kind"] == "run"
+    assert running["items"][0]["status"] == "running"
+
+    queued = list_global_activity(conn, status_filter="queued")
+    assert queued["total"] == 1
+    assert queued["items"][0]["kind"] == "consolidation"
+    assert queued["items"][0]["status"] == "queued"
+
+    completed = list_global_activity(conn, status_filter="completed")
+    assert completed["total"] == 2
+    assert {i["status"] for i in completed["items"]} == {"succeeded", "cancelled"}

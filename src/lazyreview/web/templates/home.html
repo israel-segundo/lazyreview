@@ -97,41 +97,19 @@
         <a class="lr-home-pr-card" :href="'/prs/' + pr.id">
           <div class="lr-home-pr-card__top">
             <span class="lr-home-pr-card__id" x-text="pr.repo + '#' + pr.number"></span>
-            <span class="lr-home-pr-card__age" :title="pr.head_updated_at || ''"
-                  x-text="ageLabel(pr)"></span>
+            <span class="lr-home-pr-card__author" x-text="pr.author || '—'"></span>
           </div>
           <p class="lr-home-pr-card__title" x-text="pr.title"></p>
-          <div class="lr-home-pr-card__meta">
-            <span class="lr-home-pr-card__author" x-text="pr.author || '—'"></span>
-            <span class="lr-home-pr-card__diff tabular-nums" :title="diffTitle(pr)">
-              <template x-if="hasDiff(pr)">
-                <span class="inline-flex items-center gap-1">
-                  <span class="text-emerald-700 dark:text-emerald-400"
-                        x-text="'+' + Number(pr.additions || 0)"></span>
-                  <span class="text-red-700 dark:text-red-400"
-                        x-text="'−' + Number(pr.deletions || 0)"></span>
-                  <span class="text-slate-500 dark:text-slate-400"
-                        x-text="diffFilesLabel(pr)"></span>
-                </span>
-              </template>
-              <template x-if="!hasDiff(pr)">
-                <span class="text-slate-400 dark:text-slate-500">—</span>
-              </template>
-            </span>
-          </div>
           <div class="lr-home-pr-card__badges">
             <span class="rounded-full px-2 py-0.5 text-xs"
                   :class="prStatusClass(pr)"
                   x-text="prStatusLabel(pr)"></span>
-            <span x-show="!!pr.in_merge_queue" x-cloak
-                  class="rounded-full px-2 py-0.5 text-xs bg-indigo-100 text-indigo-900 dark:bg-indigo-900/40 dark:text-indigo-200"
-                  title="GitHub has this PR in a merge queue">merge queue</span>
-            <span x-show="!!pr.has_merge_conflicts" x-cloak
-                  class="rounded-full px-2 py-0.5 text-xs bg-rose-100 text-rose-900 dark:bg-rose-900/40 dark:text-rose-200"
-                  title="GitHub reports merge conflicts with the base branch">conflicts</span>
-            <template x-for="lab in (pr.labels || [])" :key="'card-lab-' + pr.id + '-' + lab.name">
-              <span class="rounded-full px-2 py-0.5 text-xs bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200"
-                    :title="'GitHub label: ' + lab.name"
+            <template x-for="lab in displayLabels(pr)" :key="'card-lab-' + pr.id + '-' + lab.name">
+              <span class="rounded-full px-2 py-0.5 text-xs"
+                    :class="lab.kind === 'conflicts'
+                      ? 'bg-rose-100 text-rose-900 dark:bg-rose-900/40 dark:text-rose-200'
+                      : 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200'"
+                    :title="lab.title"
                     x-text="lab.name"></span>
             </template>
             <span class="rounded-full px-2 py-0.5 text-xs"
@@ -161,13 +139,12 @@
             <th class="px-4 py-3 whitespace-nowrap">PR</th>
             <th class="px-4 py-3 whitespace-nowrap">Title</th>
             <th class="px-4 py-3 whitespace-nowrap">Author</th>
-            <th class="px-4 py-3 whitespace-nowrap"
-                title="Additions, deletions, and files changed on the PR">Diff</th>
             <th class="px-4 py-3 whitespace-nowrap">PR status</th>
+            <th class="px-4 py-3 whitespace-nowrap"
+                title="GitHub labels; conflicts appears when the PR cannot merge cleanly">Labels</th>
             <th class="px-4 py-3 whitespace-nowrap">Review status</th>
             <th class="px-4 py-3 whitespace-nowrap"
                 title="Any PR analysis, review run, or consolidation activity">Activity</th>
-            <th class="px-4 py-3 whitespace-nowrap" title="Days since the current head started awaiting review">Age</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
@@ -180,39 +157,25 @@
               </td>
               <td class="px-4 py-3 text-slate-700 dark:text-slate-300" x-text="pr.title"></td>
               <td class="px-4 py-3 whitespace-nowrap text-slate-600 dark:text-slate-300" x-text="pr.author || '—'"></td>
-              <td class="px-4 py-3 whitespace-nowrap tabular-nums text-xs"
-                  :title="diffTitle(pr)">
-                <template x-if="hasDiff(pr)">
-                  <span class="inline-flex items-center gap-1 whitespace-nowrap">
-                    <span class="text-emerald-700 dark:text-emerald-400"
-                          x-text="'+' + Number(pr.additions || 0)"></span>
-                    <span class="text-red-700 dark:text-red-400"
-                          x-text="'−' + Number(pr.deletions || 0)"></span>
-                    <span class="text-slate-500 dark:text-slate-400"
-                          x-text="diffFilesLabel(pr)"></span>
-                  </span>
-                </template>
-                <template x-if="!hasDiff(pr)">
-                  <span class="text-slate-400 dark:text-slate-500">—</span>
-                </template>
-              </td>
               <td class="px-4 py-3 whitespace-nowrap">
-                <span class="inline-flex flex-wrap items-center gap-1.5">
-                  <span class="rounded-full px-2 py-0.5 text-xs"
-                        :class="prStatusClass(pr)"
-                        x-text="prStatusLabel(pr)"></span>
-                  <span x-show="!!pr.in_merge_queue" x-cloak
-                        class="rounded-full px-2 py-0.5 text-xs bg-indigo-100 text-indigo-900 dark:bg-indigo-900/40 dark:text-indigo-200"
-                        title="GitHub has this PR in a merge queue">merge queue</span>
-                  <span x-show="!!pr.has_merge_conflicts" x-cloak
-                        class="rounded-full px-2 py-0.5 text-xs bg-rose-100 text-rose-900 dark:bg-rose-900/40 dark:text-rose-200"
-                        title="GitHub reports merge conflicts with the base branch">conflicts</span>
-                  <template x-for="lab in (pr.labels || [])" :key="'row-lab-' + pr.id + '-' + lab.name">
-                    <span class="rounded-full px-2 py-0.5 text-xs bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200"
-                          :title="'GitHub label: ' + lab.name"
+                <span class="rounded-full px-2 py-0.5 text-xs"
+                      :class="prStatusClass(pr)"
+                      x-text="prStatusLabel(pr)"></span>
+              </td>
+              <td class="px-4 py-3">
+                <span class="inline-flex flex-wrap items-center gap-1.5"
+                      x-show="displayLabels(pr).length">
+                  <template x-for="lab in displayLabels(pr)" :key="'row-lab-' + pr.id + '-' + lab.name">
+                    <span class="rounded-full px-2 py-0.5 text-xs"
+                          :class="lab.kind === 'conflicts'
+                            ? 'bg-rose-100 text-rose-900 dark:bg-rose-900/40 dark:text-rose-200'
+                            : 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200'"
+                          :title="lab.title"
                           x-text="lab.name"></span>
                   </template>
                 </span>
+                <span class="text-slate-400 dark:text-slate-500"
+                      x-show="!displayLabels(pr).length">—</span>
               </td>
               <td class="px-4 py-3 whitespace-nowrap">
                 <span class="inline-flex flex-wrap items-center gap-1.5">
@@ -231,13 +194,10 @@
                         :class="activityBallClass(pr.activity_status)"></span>
                 </span>
               </td>
-              <td class="px-4 py-3 whitespace-nowrap text-slate-700 dark:text-slate-300"
-                  :title="pr.head_updated_at || ''"
-                  x-text="ageLabel(pr)"></td>
             </tr>
           </template>
           <tr x-show="filteredPrs.length === 0">
-            <td colspan="8" class="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+            <td colspan="7" class="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
               No PRs match the current filters.
             </td>
           </tr>
@@ -386,39 +346,46 @@ function homePage() {
       } catch (_) { /* keep last known state */ }
       this.syncActivityPolling();
     },
-    ageLabel(pr) {
-      if (pr.age_days == null || pr.age_days === '') return '—';
-      const n = Number(pr.age_days);
-      if (Number.isNaN(n)) return '—';
-      return n === 1 ? '1 day' : n + ' days';
-    },
-    hasDiff(pr) {
-      return pr.additions != null || pr.deletions != null || pr.changed_files != null;
-    },
-    diffFilesLabel(pr) {
-      const files = pr.changed_files;
-      if (files == null || files === '') return '';
-      const n = Number(files);
-      if (Number.isNaN(n)) return '';
-      return '· ' + n + (n === 1 ? ' file' : ' files');
-    },
-    diffTitle(pr) {
-      if (!this.hasDiff(pr)) return '';
-      const base = '+' + Number(pr.additions || 0) + ' / −' + Number(pr.deletions || 0);
-      const files = this.diffFilesLabel(pr);
-      return files ? (base + ' ' + files.replace(/^·\s*/, '')) : base;
+    displayLabels(pr) {
+      const out = [];
+      const seen = {};
+      for (const lab of (pr && pr.labels) || []) {
+        const name = String((lab && lab.name) || '').trim();
+        if (!name) continue;
+        const key = name.toLowerCase();
+        if (seen[key]) continue;
+        seen[key] = true;
+        out.push({
+          name,
+          kind: 'github',
+          title: 'GitHub label: ' + name,
+        });
+      }
+      if (pr && pr.has_merge_conflicts) {
+        const key = 'conflicts';
+        if (!seen[key]) {
+          out.push({
+            name: 'conflicts',
+            kind: 'conflicts',
+            title: 'GitHub reports merge conflicts with the base branch',
+          });
+        }
+      }
+      return out;
     },
     isReReview(pr) {
       const s = pr.internal_status || 'needs_review';
       return s === 'needs_review' && !!pr.previously_approved;
     },
     prStatusLabel(pr) {
-      if (pr.is_draft) return 'draft';
-      return (pr.state || 'open').toLowerCase();
+      if (pr && pr.in_merge_queue) return 'merge-queued';
+      if (pr && pr.is_draft) return 'draft';
+      return String((pr && pr.state) || 'open').toLowerCase();
     },
     prStatusClass(pr) {
       const label = this.prStatusLabel(pr);
       if (label === 'draft') return 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200';
+      if (label === 'merge-queued') return 'bg-indigo-100 text-indigo-900 dark:bg-indigo-900/40 dark:text-indigo-200';
       if (label === 'open') return 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200';
       if (label === 'merged') return 'bg-purple-100 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200';
       if (label === 'closed') return 'bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200';

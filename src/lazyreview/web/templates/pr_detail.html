@@ -1174,68 +1174,79 @@
 
           <section class="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
             <h2 class="border-b border-slate-100 px-4 py-3 text-sm font-semibold dark:border-slate-800">Timeline</h2>
-            <ul class="divide-y divide-slate-100 text-sm dark:divide-slate-800">
-              <template x-for="item in historyItems" :key="item.key">
-                <li class="flex flex-wrap items-center gap-2 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                  <span class="inline-flex items-center gap-1">
-                    <span class="lr-status-ball h-2.5 w-2.5"
-                          :class="item.kind === 'event'
-                            ? analysisBallClass(item.status)
-                            : statusBallClass(item.status, {consolidating: item.kind === 'consolidation'})"
-                          role="img"
-                          :aria-label="item.status || item.label"
-                          :title="item.status || item.label"></span>
-                    <template x-if="item.deprecated">
-                      <span class="lr-status-ball lr-status-ball--deprecated h-2.5 w-2.5" title="Deprecated" role="img" aria-label="Deprecated"></span>
-                    </template>
-                    <template x-if="item.consolidated">
-                      <span class="lr-status-ball lr-status-ball--consolidated h-2.5 w-2.5" title="Consolidated" role="img" aria-label="Consolidated"></span>
-                    </template>
-                  </span>
-                  <template x-if="item.kind === 'run' || item.kind === 'consolidation'">
-                    <button type="button" class="font-mono text-blue-600 hover:underline dark:text-blue-400"
-                            @click="item.kind === 'run' ? openSidebarRun(item.id) : openSidebarConsolidation(item.id)"
-                            x-text="'#' + item.id"></button>
+            <template x-for="section in historySections" :key="section.key">
+              <div x-show="section.items.length" x-cloak>
+                <h3 class="border-b border-slate-100 bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-400"
+                    x-text="section.title"></h3>
+                <ul class="divide-y divide-slate-100 text-sm dark:divide-slate-800">
+                  <template x-for="item in section.items" :key="item.key">
+                    <li class="flex flex-wrap items-center gap-2 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                      <span class="inline-flex items-center gap-1">
+                        <span class="lr-status-ball h-2.5 w-2.5"
+                              :class="item.kind === 'event' || item.kind === 'analysis'
+                                ? analysisBallClass(item.status)
+                                : statusBallClass(item.status, {consolidating: item.kind === 'consolidation' || item.kind === 'publish'})"
+                              role="img"
+                              :aria-label="item.status || item.label"
+                              :title="item.status || item.label"></span>
+                        <template x-if="item.deprecated">
+                          <span class="lr-status-ball lr-status-ball--deprecated h-2.5 w-2.5" title="Deprecated" role="img" aria-label="Deprecated"></span>
+                        </template>
+                        <template x-if="item.consolidated">
+                          <span class="lr-status-ball lr-status-ball--consolidated h-2.5 w-2.5" title="Consolidated" role="img" aria-label="Consolidated"></span>
+                        </template>
+                      </span>
+                      <template x-if="item.kind === 'run' || item.kind === 'consolidation' || item.kind === 'publish'">
+                        <button type="button" class="font-mono text-blue-600 hover:underline dark:text-blue-400"
+                                @click="item.kind === 'run' ? openSidebarRun(item.id) : openSidebarConsolidation(item.id)"
+                                x-text="'#' + item.id"></button>
+                      </template>
+                      <template x-if="item.kind === 'analysis'">
+                        <button type="button" class="font-mono text-blue-600 hover:underline dark:text-blue-400"
+                                @click="openSidebarAnalysis(item.id)"
+                                x-text="'#' + item.id"></button>
+                      </template>
+                      <span class="text-slate-500" x-text="item.label"></span>
+                      <span class="inline-flex min-w-0 items-center gap-1.5 text-slate-700 dark:text-slate-300"
+                            x-show="item.agent">
+                        <img x-show="agentKey(item.agent) === LR.AgentName.CLAUDE" x-cloak
+                             src="/static/img/agents/claude.webp" alt="" width="14" height="14"
+                             class="h-3.5 w-3.5 shrink-0 object-contain" />
+                        <img x-show="agentKey(item.agent) === LR.AgentName.AGY" x-cloak
+                             src="/static/img/agents/agy.png" alt="" width="14" height="14"
+                             class="h-3.5 w-3.5 shrink-0 object-contain" />
+                        <img x-show="agentKey(item.agent) === LR.AgentName.CODEX" x-cloak
+                             src="/static/img/agents/codex.svg" alt="" width="14" height="14"
+                             class="h-3.5 w-3.5 shrink-0 object-contain" />
+                        <img x-show="agentKey(item.agent) === LR.AgentName.CURSOR" x-cloak
+                             src="/static/img/agents/cursor-light.png" alt="" width="14" height="14"
+                             class="h-3.5 w-3.5 shrink-0 object-contain dark:hidden" />
+                        <img x-show="agentKey(item.agent) === LR.AgentName.CURSOR" x-cloak
+                             src="/static/img/agents/cursor-dark.png" alt="" width="14" height="14"
+                             class="h-3.5 w-3.5 shrink-0 object-contain hidden dark:inline" />
+                        <span class="shrink-0" x-text="agentTitle(item.agent)"></span>
+                        <template x-if="item.model">
+                          <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
+                            <span class="shrink-0 text-slate-400" aria-hidden="true">/</span>
+                            <span class="min-w-0 truncate" x-text="item.model"></span>
+                          </span>
+                        </template>
+                        <template x-if="item.effort">
+                          <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
+                            <span class="shrink-0 text-slate-400" aria-hidden="true">/</span>
+                            <span class="min-w-0 truncate" x-text="item.effort"></span>
+                          </span>
+                        </template>
+                      </span>
+                      <span class="ml-auto text-xs text-slate-400"
+                            :title="formatAbsolute(item.whenIso) || ''"
+                            x-text="timeAgo(item.whenIso) || ''"></span>
+                    </li>
                   </template>
-                  <span class="text-slate-500" x-text="item.label"></span>
-                  <span class="inline-flex min-w-0 items-center gap-1.5 text-slate-700 dark:text-slate-300"
-                        x-show="item.agent">
-                    <img x-show="agentKey(item.agent) === LR.AgentName.CLAUDE" x-cloak
-                         src="/static/img/agents/claude.webp" alt="" width="14" height="14"
-                         class="h-3.5 w-3.5 shrink-0 object-contain" />
-                    <img x-show="agentKey(item.agent) === LR.AgentName.AGY" x-cloak
-                         src="/static/img/agents/agy.png" alt="" width="14" height="14"
-                         class="h-3.5 w-3.5 shrink-0 object-contain" />
-                    <img x-show="agentKey(item.agent) === LR.AgentName.CODEX" x-cloak
-                         src="/static/img/agents/codex.svg" alt="" width="14" height="14"
-                         class="h-3.5 w-3.5 shrink-0 object-contain" />
-                    <img x-show="agentKey(item.agent) === LR.AgentName.CURSOR" x-cloak
-                         src="/static/img/agents/cursor-light.png" alt="" width="14" height="14"
-                         class="h-3.5 w-3.5 shrink-0 object-contain dark:hidden" />
-                    <img x-show="agentKey(item.agent) === LR.AgentName.CURSOR" x-cloak
-                         src="/static/img/agents/cursor-dark.png" alt="" width="14" height="14"
-                         class="h-3.5 w-3.5 shrink-0 object-contain hidden dark:inline" />
-                    <span class="shrink-0" x-text="agentTitle(item.agent)"></span>
-                    <template x-if="item.model">
-                      <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
-                        <span class="shrink-0 text-slate-400" aria-hidden="true">/</span>
-                        <span class="min-w-0 truncate" x-text="item.model"></span>
-                      </span>
-                    </template>
-                    <template x-if="item.effort">
-                      <span class="inline-flex min-w-0 items-center gap-1 overflow-hidden">
-                        <span class="shrink-0 text-slate-400" aria-hidden="true">/</span>
-                        <span class="min-w-0 truncate" x-text="item.effort"></span>
-                      </span>
-                    </template>
-                  </span>
-                  <span class="ml-auto text-xs text-slate-400"
-                        :title="formatAbsolute(item.whenIso) || ''"
-                        x-text="timeAgo(item.whenIso) || ''"></span>
-                </li>
-              </template>
-              <li x-show="!historyItems.length" class="px-4 py-8 text-center text-slate-500">No history yet.</li>
-            </ul>
+                </ul>
+              </div>
+            </template>
+            <p x-show="!historyItems.length" class="px-4 py-8 text-center text-sm text-slate-500">No history yet.</p>
           </section>
         </div>
       </div>
@@ -2330,27 +2341,25 @@ function reviewForm() {
         if (!iso) return '';
         return String(iso).replace('T', ' ').slice(0, 19);
       };
+      const pushItem = (item) => {
+        items.push({
+          ...item,
+          whenExact: exactWhen(item.whenIso),
+          sort: item.whenIso || '',
+        });
+      };
+      // Skip analysis_* events — analyses[] is the job source of truth
+      // (includes cancelled / evicted / queued without duplicating timeline rows).
       for (const e of (this.prEvents || [])) {
+        if (e.kind === 'analysis_triggered' || e.kind === 'analysis_finished') continue;
         const whenIso = e.created_at || '';
         let status = '';
         let label = e.message || e.kind || 'event';
         if (e.kind === 'pr_created') {
           status = 'succeeded';
           label = e.message || 'Added to LazyReview';
-        } else if (e.kind === 'analysis_triggered') {
-          // Historical event — static ball, never pulse (pulse is for in-flight only).
-          status = 'triggered';
-          label = e.message || 'PR analysis triggered';
-        } else if (e.kind === 'analysis_finished') {
-          const meta = e.meta || {};
-          const msg = e.message || '';
-          if (meta.status) status = meta.status;
-          else if (/failed/i.test(msg)) status = 'failed';
-          else if (/cancelled/i.test(msg)) status = 'cancelled';
-          else status = 'succeeded';
-          label = msg || 'PR analysis finished';
         }
-        items.push({
+        pushItem({
           key: 'event-' + e.id,
           kind: 'event',
           eventKind: e.kind,
@@ -2361,13 +2370,25 @@ function reviewForm() {
           model: e.model || '',
           effort: e.effort || '',
           whenIso,
-          whenExact: exactWhen(whenIso),
-          sort: whenIso,
+        });
+      }
+      for (const a of (this.analyses || [])) {
+        const whenIso = a.finished_at || a.started_at || a.created_at || '';
+        pushItem({
+          key: 'analysis-' + a.id,
+          kind: 'analysis',
+          id: a.id,
+          status: a.status,
+          label: 'analysis',
+          agent: a.agent || '',
+          model: a.model || '',
+          effort: a.effort || '',
+          whenIso,
         });
       }
       for (const r of (this.runsForHistory || [])) {
         const whenIso = r.finished_at || r.started_at || r.created_at || '';
-        items.push({
+        pushItem({
           key: 'run-' + r.id,
           kind: 'run',
           id: r.id,
@@ -2379,13 +2400,11 @@ function reviewForm() {
           model: r.model || '',
           effort: r.effort || '',
           whenIso,
-          whenExact: exactWhen(whenIso),
-          sort: whenIso,
         });
       }
       for (const c of (this.consolidations || [])) {
         const whenIso = c.finished_at || c.started_at || c.created_at || '';
-        items.push({
+        pushItem({
           key: 'consol-' + c.id,
           kind: 'consolidation',
           id: c.id,
@@ -2395,12 +2414,46 @@ function reviewForm() {
           model: c.model || '',
           effort: c.effort || '',
           whenIso,
-          whenExact: exactWhen(whenIso),
-          sort: whenIso,
         });
+        const pub = c.publish_status;
+        if (pub) {
+          const pubWhen = c.publish_finished_at || c.publish_started_at || c.created_at || '';
+          pushItem({
+            key: 'publish-' + c.id,
+            kind: 'publish',
+            id: c.id,
+            status: pub,
+            label: 'GitHub draft',
+            agent: c.agent || '',
+            model: c.model || '',
+            effort: c.effort || '',
+            whenIso: pubWhen,
+          });
+        }
       }
       items.sort((a, b) => String(b.sort).localeCompare(String(a.sort)));
       return items;
+    },
+    historySectionForStatus(status) {
+      const s = String(status || '');
+      if (s === 'queued' || s === 'dormant') return 'queued';
+      if (s === 'running') return 'running';
+      return 'completed';
+    },
+    get historySections() {
+      const buckets = {
+        queued: [],
+        running: [],
+        completed: [],
+      };
+      for (const item of (this.historyItems || [])) {
+        buckets[this.historySectionForStatus(item.status)].push(item);
+      }
+      return [
+        { key: 'queued', title: 'Queued', items: buckets.queued },
+        { key: 'running', title: 'Running', items: buckets.running },
+        { key: 'completed', title: 'Completed', items: buckets.completed },
+      ];
     },
     openSidebarAnalysis(id) {
       this.setTab('overview');
