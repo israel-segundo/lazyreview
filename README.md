@@ -2,10 +2,12 @@
 
 A local, human-in-the-loop desk for agentic pull-request review.
 
-It finds PRs waiting on you, orients with an analysis brief, lets you run one or
-more review agents (Cursor / Claude / Agy / Codex), consolidates them into one
-consensus, verifies those findings against the PR worktree, drafts the
-GitHub-facing comment — and stops. Nothing posts until you say so.
+It finds PRs waiting on you, orients with an analysis brief, runs one or more
+review agents (Cursor / Claude / Agy / Codex), consolidates them into one
+consensus, verifies those findings against the PR worktree, and drafts the
+GitHub-facing comment. By default nothing posts until you say so. Optional
+Settings can auto-kick the batch after analysis and auto-submit the recommended
+verdict (all PRs, only labeled ones, or never).
 
 History, costs, and feedback live in SQLite. Worktrees and run logs stay on your
 machine. When the PR head moves, stale runs are flagged so you don’t ship a
@@ -13,14 +15,16 @@ review for the wrong commit.
 
 ## Workflow
 
-After the analysis brief, you kick off one or more agentic reviews. Those runs
-feed consolidate → verify findings against the PR worktree → publish draft; you
-iterate on that draft until it is ready, then post to GitHub yourself.
+After the analysis brief, you start reviews yourself — or enable **Auto-kick
+reviews** so a succeeded analysis starts the batch defaults (optionally
+randomizing model/effort per agent). Those runs feed consolidate → verify →
+publish draft. You can challenge the draft locally, then post yourself — or
+enable **Auto-submit** to post the recommended verdict when the mode allows.
 
 ```mermaid
 flowchart TD
   sync[PR sync] --> analysis[PR analysis brief]
-  analysis --> order[Human starts reviews]
+  analysis --> order[Start reviews]
   order --> r1[Claude review]
   order --> r2[Cursor review]
   order --> r3[Agy review]
@@ -33,6 +37,7 @@ flowchart TD
   verify --> publish[Publish draft]
   publish <--> challenge[Human challenges]
   challenge --> github[Post to GitHub]
+  publish -->|auto-submit if enabled| github
 ```
 
 ## Local architecture
@@ -73,9 +78,9 @@ flowchart TB
 - **One worktree per PR** — created lazily, held while analysis, review, verify, or interactive chat sessions run, reused across agents for the same head.
 - **SQLite is the handoff into consolidate** — brief and per-run findings are staged into `consolidations/{id}/` (no worktree for that merge pass).
 - **Verify uses the worktree** — after consolidate, a separate agent pass holds the shared PR worktree, reproduces or refutes each consensus finding, drops false alarms, and rewrites `body.md` / `findings.json` / `meta.json` before publish.
-- **Interactive chat** — right-rail Explore (PR Q&A) and Challenge (adversarial rounds over consolidation findings, report tone, and publish guidance). Turns + working findings live in SQLite; **Apply findings** (button or chat command) writes findings/action/body into the consolidation and re-runs the publish transform. Never auto-posts.
+- **Interactive chat** — right-rail Explore (PR Q&A) and Challenge (adversarial rounds over consolidation findings, report tone, and publish guidance). Turns + working findings live in SQLite; **Apply findings** (button or chat command) writes findings/action/body into the consolidation and re-runs the publish transform. Chat itself never posts to GitHub.
 - **Chat safety (defense in depth)** — scoped to one PR; hard preflight blocks host recon, secret/env extraction, jailbreaks, and clear off-topic asks before any agent runs; prompts state an allowlist and refuse template; tools stay in the worktree allowlist; replies redact credential-shaped tokens and foreign `/home/…` paths. Not a multi-tenant ACL — for trusted local use.
-- **Human challenges stay local** — edit, chat, or regenerate the draft until you post.
+- **Human challenges stay local** — edit, chat, or regenerate the draft; posting is still your call unless Auto-submit is enabled.
 
 ```mermaid
 flowchart LR
@@ -104,19 +109,19 @@ flowchart TD
   p3["Consolidator prompt produces body.md and meta.json"]
   p4["Verify prompt rewrites findings against worktree"]
   p5["Publish prompt produces GitHub draft"]
-  p6["You edit and submit via gh"]
+  p6["Submit via gh"]
   p1 --> p2 --> p3 --> p4 --> p5 --> p6
-  p4 -->|recommended_action| ui[Submit modal preselect]
+  p4 -->|recommended_action| ui[Submit modal / auto-submit]
   p5 -->|ready_to_post| ui
 ```
 
 1. **Analysis** — orientation brief for the current head (intent, coverage, blast radius).
-2. **Reviews** — independent agentic passes; findings stored per run.
+2. **Reviews** — independent agentic passes (manual start, or auto-kick from batch defaults after analysis); findings stored per run.
 3. **Consolidate** — dedupe across runs and existing PR comments; emit an internal report plus `meta.json`.
 4. **Verify** — reproduce or refute each consensus finding in the shared PR worktree; drop false alarms; recompute `recommended_action`.
-5. **Publish** — rewrite the verified report into concise GitHub-facing markdown (still local).
-6. **Chat (optional)** — Explore the PR worktree, or Challenge findings / recommended action / draft tone in rounds (hard preflight + sandbox + reply redaction). Apply findings syncs the working draft into the consolidation and regenerates the GitHub draft.
-7. **Submit** — you choose the action (`approve` / `request_changes` / `comment`), edit the draft, and post via `gh`. Never auto-posted.
+5. **Publish** — rewrite the verified report into concise GitHub-facing markdown (still local until submit).
+6. **Chat (optional)** — Explore the PR worktree, or Challenge findings / recommended action / draft tone in rounds (hard preflight + sandbox + reply redaction). Apply findings syncs the working draft into the consolidation and regenerates the GitHub draft; chat never posts to GitHub.
+7. **Submit** — you choose the action (`approve` / `request_changes` / `comment`), edit the draft, and post via `gh` — or Auto-submit posts the recommended verdict when mode is **all** or **labels** (PR has a configured label).
 
 ## Prerequisites
 
@@ -212,10 +217,12 @@ stay readable on the host.
 ## PR analysis & shared workspaces
 
 lazyreview runs a **PR Analysis** job (orientation brief) when a PR is first
-added to the system (and whenever you click **Run analysis** / **Retry**). New
-commits on an existing PR do **not** auto-retrigger analysis. At most
+added to the system (and whenever you click **Run analysis** / **Retry**). By
+default, a new head on a synced PR also re-queues analysis (toggle under
+**Settings → Agents & Prompts → PR Analysis**). At most
 **`max_concurrent_analyses`** (default `2`) analyses run at once; the rest stay
-queued.
+queued. When **Auto-kick reviews** is on, a succeeded analysis for the current
+head starts the configured batch defaults (and a dormant consolidation).
 
 Checkouts live under `{data_dir}/workspaces/` (bare mirrors + per-PR worktrees)
 and are reused by analysis and reviews. When a PR is closed or merged, its
@@ -281,3 +288,8 @@ lazyreview serve
 `/settings` — default agents/models/effort (including interactive chat defaults),
 editable analysis / consolidator / verify / publish prompts, and retention for finished runs
 **and** chat sessions (default 1 week). Hourly daemon sweep + **Purge old runs now**.
+
+Notable automation toggles:
+
+- **Reviews** — **Auto-kick reviews** starts the batch defaults after analysis succeeds; **Randomize models and effort** keeps each default row’s agent but picks a random model/effort from that agent’s catalog.
+- **Publish** — **Auto-submit** mode: enabled for all, only for PRs with configured labels (chip list), or disabled.

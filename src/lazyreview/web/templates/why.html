@@ -8,8 +8,10 @@
       lazyreview is a local, human-in-the-loop desk for agentic pull-request review.
       It finds the PRs waiting on you, orients with an analysis brief, runs several
       review agents in parallel, consolidates them into one consensus, verifies those
-      findings against the PR worktree, drafts the GitHub-facing comment — and stops.
-      Nothing posts until you say so.
+      findings against the PR worktree, and drafts the GitHub-facing comment.
+      By default nothing posts until you say so. Optional Settings can auto-kick the
+      batch after analysis and auto-submit the recommended verdict (all PRs, only
+      labeled ones, or never).
     </p>
   </header>
 
@@ -29,6 +31,9 @@
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Batch multi-agent reviews</strong>
         (Claude, Cursor, Agy, Codex) with your default models and effort from Settings.
+        Optional <strong class="font-medium text-slate-900 dark:text-slate-100">Auto-kick reviews</strong>
+        starts that batch after analysis succeeds; optional randomization keeps each
+        default row’s agent but picks a random model/effort.
       </li>
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Consolidates into one report</strong>
@@ -44,13 +49,15 @@
       </li>
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Publish transform</strong>
-        turns the verified internal report into a GitHub draft you can edit, then submit yourself.
+        turns the verified internal report into a GitHub draft you can edit, then submit
+        yourself — or let <strong class="font-medium text-slate-900 dark:text-slate-100">Auto-submit</strong>
+        post the recommended verdict (all PRs, only labeled ones, or disabled).
       </li>
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Interactive chat</strong>
         — Explore a PR (worktree Q&amp;A) or Challenge a consolidation (evolve findings,
         recommended action, report tone, and publish guidance). Right-rail chat, sandboxed
-        to that PR only; Apply findings writes the working draft into the consolidation and regenerates the GitHub draft. Never auto-posts to GitHub.
+        to that PR only; Apply findings writes the working draft into the consolidation and regenerates the GitHub draft. Chat itself never posts to GitHub.
       </li>
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Chat safety</strong>
@@ -70,10 +77,10 @@
     <div class="space-y-2">
       <h2 class="text-lg font-semibold">Workflow</h2>
       <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
-        After the analysis brief, you kick off one or more agentic reviews.
-        Those runs feed consolidate → verify findings against the PR worktree →
-        publish draft; you iterate on that draft until it is ready, then post to
-        GitHub yourself.
+        After the analysis brief, you start reviews yourself — or enable Auto-kick so a
+        succeeded analysis starts the batch defaults. Those runs feed consolidate →
+        verify → publish draft. You can challenge the draft locally, then post yourself —
+        or enable Auto-submit when the mode allows.
       </p>
     </div>
     <figure class="lr-mermaid lr-mermaid--fit">
@@ -83,7 +90,7 @@
       </div>
       <pre class="lr-mermaid-src" hidden>flowchart TD
   sync[PR sync] --> analysis[PR analysis brief]
-  analysis --> order[Human starts reviews]
+  analysis --> order[Start reviews]
   order --> r1[Claude review]
   order --> r2[Cursor review]
   order --> r3[Agy review]
@@ -95,7 +102,8 @@
   consol --> verify[Verify findings]
   verify --> publish[Publish draft]
   publish &lt;--&gt; chat[Chat challenge]
-  chat --> github[Post to GitHub]</pre>
+  chat --> github[Post to GitHub]
+  publish -->|auto-submit if enabled| github</pre>
       <div class="lr-mermaid-host" aria-busy="true">Rendering…</div>
     </figure>
   </section>
@@ -163,7 +171,8 @@
       </li>
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Human challenges stay local</strong>
-        — edit, chat, or regenerate the draft against that consolidation dir + DB until you post.
+        — edit, chat, or regenerate the draft against that consolidation dir + DB; posting is
+        still your call unless Auto-submit is enabled.
       </li>
       <li>
         <strong class="font-medium text-slate-900 dark:text-slate-100">Chat stays on the PR</strong>
@@ -214,28 +223,29 @@
   p3["Consolidate → body.md + meta.json"]
   p4["Verify findings against worktree"]
   p5["Publish → GitHub draft"]
-  p6["You edit and submit via gh"]
+  p6["Submit via gh"]
   p1 --> p2 --> p3 --> p4 --> p5 --> p6
-  p4 -->|recommended_action| ui[Submit modal preselect]
+  p4 -->|recommended_action| ui[Submit modal / auto-submit]
   p5 -->|ready_to_post| ui</pre>
       <div class="lr-mermaid-host" aria-busy="true">Rendering…</div>
     </figure>
     <ol class="list-decimal space-y-2 pl-5 text-slate-700 dark:text-slate-300 leading-relaxed">
       <li><strong class="font-medium text-slate-900 dark:text-slate-100">Analysis</strong> — orientation brief for the current head (intent, coverage, blast radius).</li>
-      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Reviews</strong> — independent agentic passes; findings stored per run.</li>
+      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Reviews</strong> — independent agentic passes (manual start, or auto-kick from batch defaults after analysis); findings stored per run.</li>
       <li><strong class="font-medium text-slate-900 dark:text-slate-100">Consolidate</strong> — dedupe across runs and existing PR comments; emit an internal report plus <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">meta.json</code>.</li>
       <li><strong class="font-medium text-slate-900 dark:text-slate-100">Verify</strong> — reproduce or refute each consensus finding in the shared PR worktree; drop false alarms; recompute <code class="rounded bg-slate-100 px-1 text-sm dark:bg-slate-800">recommended_action</code>.</li>
-      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Publish</strong> — rewrite the verified report into concise GitHub-facing markdown (still local).</li>
-      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Chat (optional)</strong> — Explore the PR worktree, or Challenge findings / recommended action / draft tone (hard preflight + sandbox + reply redaction); Apply findings writes the working draft into the consolidation and regenerates the GitHub draft.</li>
-      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Submit</strong> — you choose the action, edit the draft, and post. Never auto-posted.</li>
+      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Publish</strong> — rewrite the verified report into concise GitHub-facing markdown (still local until submit).</li>
+      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Chat (optional)</strong> — Explore the PR worktree, or Challenge findings / recommended action / draft tone (hard preflight + sandbox + reply redaction); Apply findings writes the working draft into the consolidation and regenerates the GitHub draft. Chat never posts to GitHub.</li>
+      <li><strong class="font-medium text-slate-900 dark:text-slate-100">Submit</strong> — you choose the action, edit the draft, and post — or Auto-submit posts the recommended verdict when mode is all or labels.</li>
     </ol>
   </section>
 
   <section class="space-y-3">
     <h2 class="text-lg font-semibold">Not another auto-review bot</h2>
     <p class="text-slate-700 dark:text-slate-300 leading-relaxed">
-      Generic AI PR bots drop comments straight onto GitHub. lazyreview is the opposite:
-      multi-agent signal in, verified consensus out, human still owns the write.
+      Generic AI PR bots drop comments straight onto GitHub. lazyreview keeps the
+      multi-agent → verify → draft pipeline local: human-in-the-loop by default,
+      with optional auto-kick and auto-submit when you turn them on in Settings.
       Worktrees, logs, and history stay on your machine. When the head moves, stale work
       is marked so you don’t ship a review for the wrong commit.
     </p>
