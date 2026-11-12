@@ -88,7 +88,11 @@ def test_batch_rejects_merge_queue_pr(tmp_path: Path):
         app = create_app()
         with TestClient(app) as client:
             with (
-                patch("lazyreview.api.runs.get_adapter", return_value=fake),
+                patch("lazyreview.services.batch_review.get_adapter", return_value=fake),
+                patch(
+                    "lazyreview.services.batch_review.require_selectable_agent",
+                    return_value={},
+                ),
                 patch.object(app.state.jobs, "enqueue") as enqueue,
             ):
                 res = client.post(
@@ -137,7 +141,11 @@ def test_batch_creates_multiple_runs(tmp_path: Path):
         app = create_app()
         with TestClient(app) as client:
             with (
-                patch("lazyreview.api.runs.get_adapter", return_value=fake),
+                patch("lazyreview.services.batch_review.get_adapter", return_value=fake),
+                patch(
+                    "lazyreview.services.batch_review.require_selectable_agent",
+                    return_value={},
+                ),
                 patch.object(app.state.jobs, "enqueue"),
             ):
                 res = client.post(
@@ -188,7 +196,11 @@ def test_batch_creates_dormant_consolidation_by_default(tmp_path: Path):
         app = create_app()
         with TestClient(app) as client:
             with (
-                patch("lazyreview.api.runs.get_adapter", return_value=fake),
+                patch("lazyreview.services.batch_review.get_adapter", return_value=fake),
+                patch(
+                    "lazyreview.services.batch_review.require_selectable_agent",
+                    return_value={},
+                ),
                 patch.object(app.state.jobs, "enqueue"),
                 patch.object(app.state.consolidations, "enqueue") as consol_enqueue,
             ):

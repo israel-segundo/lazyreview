@@ -122,68 +122,29 @@ def create_review_run(body: CreateRunBody, request: Request):
 
 @router.post("/runs/batch")
 def create_review_runs_batch(body: BatchCreateBody, request: Request):
+    from lazyreview.services.batch_review import create_batch_review
+
     conn = request.app.state.db
     settings = request.app.state.settings
     pr = get_pr(conn, body.pr_id)
     if not pr:
         raise HTTPException(status_code=404, detail="PR not found")
-    settings.ensure_dirs()
-
-    from lazyreview.services.settings import get_consolidator_config
-
-    consolidator_cfg = get_consolidator_config(conn)
+    require_reviewable_pr(conn, body.pr_id)
+    require_succeeded_analysis(conn, body.pr_id)
     try:
-        get_adapter(consolidator_cfg["agent"])
-    except KeyError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    try:
-        require_selectable_agent(settings, conn, consolidator_cfg["agent"])
+        return create_batch_review(
+            conn,
+            settings,
+            request.app.state.jobs,
+            pr_id=body.pr_id,
+            runs=[item.model_dump() for item in body.runs],
+            skill=body.skill,
+            # Manual starts use the models the client sent; randomization is for
+            # auto-kick / defaults resolution only.
+            apply_randomize=False,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-
-    created = []
-    for item in body.runs:
-        created.append(
-            _create_one_run(
-                conn,
-                settings,
-                request.app.state.jobs,
-                pr=pr,
-                agent=item.agent,
-                model=item.model,
-                effort=item.effort,
-                skill=body.skill,
-            )
-        )
-
-    from lazyreview.db import create_consolidation, update_consolidation
-    from lazyreview.services.consolidation_jobs import consolidations_dir
-
-    consolidation = create_consolidation(
-        conn,
-        pr_id=int(pr["id"]),
-        head_sha=pr.get("head_sha") or "",
-        source_run_ids=[int(r["id"]) for r in created],
-        agent=consolidator_cfg["agent"],
-        model=consolidator_cfg["model"],
-        effort=consolidator_cfg["effort"] or None,
-        workdir_path="",
-        status="dormant",
-    )
-    work_dir = consolidations_dir(settings) / str(consolidation["id"])
-    work_dir.mkdir(parents=True, exist_ok=True)
-    consolidation = (
-        update_consolidation(
-            conn, int(consolidation["id"]), workdir_path=str(work_dir)
-        )
-        or consolidation
-    )
-
-    return {
-        "runs": created,
-        "count": len(created),
-        "consolidation": consolidation,
-    }
 
 
 @router.get("/runs/{run_id}")

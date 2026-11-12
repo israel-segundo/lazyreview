@@ -16,14 +16,13 @@ from lazyreview.db import (
 from lazyreview.services.analysis_eligibility import review_blocked_reason
 from lazyreview.services.gh import GhError, post_pr_comment, submit_pr_review, view_pr
 from lazyreview.services.pr_diff import commentable_lines_by_path, list_pr_file_patches
-from lazyreview.services.pr_labels import pr_has_any_label
 from lazyreview.services.review_post import (
     build_review_comments,
     merge_summary_findings_into_review_body,
     parse_findings_list,
     partition_findings_for_github_post,
 )
-from lazyreview.services.settings import get_auto_submit_labels
+from lazyreview.services.settings import auto_submit_applies
 
 logger = logging.getLogger(__name__)
 
@@ -252,15 +251,11 @@ def maybe_auto_submit_consolidation(
     if not int(row.get("ready_to_post") or 0):
         return None
 
-    configured = get_auto_submit_labels(conn)
-    if not configured:
-        return None
-
     pr = get_pr(conn, int(row["pr_id"]))
     if not pr:
         return None
     pr = _refresh_pr_labels(conn, pr)
-    if not pr_has_any_label(pr, configured):
+    if not auto_submit_applies(conn, pr):
         return None
 
     action = str(row.get("recommended_action") or "comment").strip()
@@ -276,13 +271,12 @@ def maybe_auto_submit_consolidation(
             auto_submitted=True,
         )
         logger.info(
-            "Auto-submitted consolidation %s for PR %s/%s#%s as %s (labels=%s)",
+            "Auto-submitted consolidation %s for PR %s/%s#%s as %s",
             consolidation_id,
             pr.get("owner"),
             pr.get("repo"),
             pr.get("number"),
             action,
-            configured,
         )
         return result
     except ConsolidationSubmitError as e:

@@ -126,3 +126,18 @@ def on_pr_upserted(
             is_new,
             head_moved,
         )
+
+
+def on_analysis_succeeded(conn: Any, analysis: dict[str, Any]) -> None:
+    """After analysis succeeds, optionally auto-kick batch review + consolidation."""
+    if _settings is None or _jobs is None:
+        return
+    pr_id = int(analysis.get("pr_id") or 0)
+    if not pr_id:
+        return
+    from lazyreview.services.batch_review import maybe_auto_kick_reviews
+
+    try:
+        maybe_auto_kick_reviews(conn, _settings, _jobs, pr_id)
+    except Exception:
+        logger.exception("auto-kick after analysis failed for pr_id=%s", pr_id)

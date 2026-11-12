@@ -318,8 +318,14 @@ DEFAULT_SETTINGS = {
     # pr_analysis_prompt seeded in init_db from prompts/pr_analysis.md
     # When true, sync re-queues PR analysis after a new head_sha.
     "pr_analysis_on_head_change": "true",
-    # Comma-separated GitHub labels that auto-submit the consolidation verdict.
+    # Auto-submit mode: all | labels | disabled (labels uses auto_submit_labels).
+    "auto_submit_mode": "labels",
+    # Comma-separated GitHub labels that auto-submit when mode is labels.
     "auto_submit_labels": "agent-verdict",
+    # When true, start batch review+consolidation after analysis succeeds.
+    "auto_kick_reviews": "false",
+    # When true, randomize model/effort from each default row's agent catalog.
+    "batch_randomize_models_effort": "false",
     # batch_review_defaults seeded in init_db (JSON list of {agent,model,effort})
     # Interactive chat (Explore / Challenge) — defaults Claude / Opus / high
     "session_agent": AgentName.CLAUDE.value,
@@ -328,7 +334,7 @@ DEFAULT_SETTINGS = {
     # agent_enabled seeded in init_db (JSON map of agent → bool; default all true)
 }
 
-SCHEMA_VERSION = 33
+SCHEMA_VERSION = 35
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -1042,6 +1048,34 @@ def init_db(conn: sqlite3.Connection) -> None:
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
             ("auto_submit_labels", "agent-verdict"),
+        )
+
+    if prev is not None and prev < 34:
+        # Auto-kick batch reviews after analysis; optional model/effort shuffle.
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+            ("auto_kick_reviews", "false"),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+            ("batch_randomize_models_effort", "false"),
+        )
+
+    if prev is not None and prev < 35:
+        # Explicit auto-submit mode; derive from existing labels list.
+        # Override the DEFAULT_SETTINGS seed above so empty labels → disabled.
+        labels_row = conn.execute(
+            "SELECT value FROM settings WHERE key = 'auto_submit_labels'"
+        ).fetchone()
+        labels_raw = labels_row["value"] if labels_row else "agent-verdict"
+        labels_text = "" if labels_raw is None else str(labels_raw).strip()
+        mode = "disabled" if not labels_text else "labels"
+        conn.execute(
+            """
+            INSERT INTO settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            ("auto_submit_mode", mode),
         )
 
     if prev is not None and prev < 10 and prompt_seed:

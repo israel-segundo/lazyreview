@@ -462,7 +462,7 @@ class AnalysisRunner:
                     )
                     return
 
-                self._mark_terminal(
+                updated = self._mark_terminal(
                     conn,
                     analysis_id,
                     status="succeeded",
@@ -472,6 +472,10 @@ class AnalysisRunner:
                     brief_path=str(brief_path),
                     error_message=None,
                 )
+                if updated:
+                    from lazyreview.services import lifecycle
+
+                    lifecycle.on_analysis_succeeded(conn, updated)
         except Exception as e:
             if self._is_cancel_requested(analysis_id, conn):
                 self._mark_terminal(

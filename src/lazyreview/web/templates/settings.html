@@ -220,10 +220,56 @@
       {# Reviews tab #}
       <div x-show="agentsTab === 'reviews'" x-cloak class="lr-settings-tab-body" role="tabpanel">
         <div class="lr-settings-card flex min-h-0 flex-1 flex-col">
-          <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Batch review defaults</h2>
+          <div class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/60">
+            <div class="min-w-0">
+              <span class="block text-sm font-medium text-slate-800 dark:text-slate-200"
+                    id="auto-kick-reviews-label">Auto-kick reviews</span>
+              <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                After PR analysis succeeds (new PR or new head), start a batch review using the defaults below and a dormant consolidation. Publish still follows auto-submit labels.
+              </p>
+              <p class="mt-1 text-xs text-slate-500 dark:text-slate-400"
+                 x-show="autoKickReviewsMsg" x-text="autoKickReviewsMsg"></p>
+            </div>
+            <button type="button"
+                    role="switch"
+                    aria-labelledby="auto-kick-reviews-label"
+                    :aria-checked="(!!autoKickReviews).toString()"
+                    :disabled="!!autoKickReviewsBusy"
+                    @click="toggleAutoKickReviews(!autoKickReviews)"
+                    class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full bg-slate-300 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-600"
+                    :class="autoKickReviews ? 'bg-blue-600 dark:bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'">
+              <span class="pointer-events-none inline-block h-5 w-5 translate-x-0.5 rounded-full bg-white shadow transition duration-200"
+                    :class="autoKickReviews ? 'translate-x-5' : 'translate-x-0.5'"></span>
+            </button>
+          </div>
+
+          <h2 class="mt-5 text-base font-semibold text-slate-900 dark:text-slate-100">Batch review defaults</h2>
           <p class="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
-            Default agent / model / effort rows used when you start a code review on a PR.
+            Default agent / model / effort rows used when you start a code review on a PR, and when auto-kick is enabled.
           </p>
+
+          <div class="mt-3 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-900/60">
+            <div class="min-w-0">
+              <span class="block text-sm font-medium text-slate-800 dark:text-slate-200"
+                    id="batch-randomize-label">Randomize models and effort</span>
+              <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                When auto-kicking, keep each default row's agent but pick a random model (and effort) from that agent's catalog.
+              </p>
+              <p class="mt-1 text-xs text-slate-500 dark:text-slate-400"
+                 x-show="batchRandomizeMsg" x-text="batchRandomizeMsg"></p>
+            </div>
+            <button type="button"
+                    role="switch"
+                    aria-labelledby="batch-randomize-label"
+                    :aria-checked="(!!batchRandomizeModelsEffort).toString()"
+                    :disabled="!!batchRandomizeBusy"
+                    @click="toggleBatchRandomize(!batchRandomizeModelsEffort)"
+                    class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full bg-slate-300 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-600"
+                    :class="batchRandomizeModelsEffort ? 'bg-blue-600 dark:bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'">
+              <span class="pointer-events-none inline-block h-5 w-5 translate-x-0.5 rounded-full bg-white shadow transition duration-200"
+                    :class="batchRandomizeModelsEffort ? 'translate-x-5' : 'translate-x-0.5'"></span>
+            </button>
+          </div>
 
           <div class="relative mt-4 min-h-0 flex-1" @click="cfgCloseCombo()">
             <div class="lr-batch-list !mt-0" @click.stop>
@@ -284,6 +330,7 @@
                              :aria-expanded="cfgCombo === row.key + ':model'"
                              :aria-label="'Default model ' + (idx + 1)"
                              x-model="row.modelQuery"
+                             :disabled="!!batchRandomizeModelsEffort"
                              @focus="cfgOpenCombo(idx, 'model', $event)"
                              @click.stop="cfgOpenCombo(idx, 'model', $event)"
                              @input="cfgOpenCombo(idx, 'model', $event)"
@@ -291,8 +338,9 @@
                              @keydown.arrow-up.prevent="cfgComboMove(idx, 'model', -1)"
                              @keydown.enter.prevent="cfgComboConfirm(idx, 'model')"
                              @keydown.escape.stop="cfgCloseCombo()"
-                             placeholder="Filter models…"
-                             class="lr-batch-field__input lr-batch-field__input--boxed" />
+                             :placeholder="batchRandomizeModelsEffort ? 'Random' : 'Filter models…'"
+                             :title="batchRandomizeModelsEffort ? 'Model is randomized when the toggle is on' : ''"
+                             class="lr-batch-field__input lr-batch-field__input--boxed disabled:opacity-50" />
                     </label>
                     <label class="lr-batch-field lr-batch-field--effort">
                       <span class="lr-batch-field__label">Effort</span>
@@ -301,7 +349,7 @@
                              :aria-expanded="cfgCombo === row.key + ':effort'"
                              :aria-label="'Default effort ' + (idx + 1)"
                              x-model="row.effortQuery"
-                             :disabled="!row.efforts.length"
+                             :disabled="!!batchRandomizeModelsEffort || !row.efforts.length"
                              @focus="cfgOpenCombo(idx, 'effort', $event)"
                              @click.stop="cfgOpenCombo(idx, 'effort', $event)"
                              @input="cfgOpenCombo(idx, 'effort', $event)"
@@ -309,8 +357,8 @@
                              @keydown.arrow-up.prevent="cfgComboMove(idx, 'effort', -1)"
                              @keydown.enter.prevent="cfgComboConfirm(idx, 'effort')"
                              @keydown.escape.stop="cfgCloseCombo()"
-                             :placeholder="row.efforts.length ? 'Filter…' : 'n/a'"
-                             :title="row.efforts.length ? '' : 'Effort is built into this model id'"
+                             :placeholder="batchRandomizeModelsEffort ? 'Random' : (row.efforts.length ? 'Filter…' : 'n/a')"
+                             :title="batchRandomizeModelsEffort ? 'Effort is randomized when the toggle is on' : (row.efforts.length ? '' : 'Effort is built into this model id')"
                              class="lr-batch-field__input lr-batch-field__input--boxed disabled:opacity-50" />
                     </label>
                   </div>
@@ -1021,23 +1069,83 @@
           <div class="lr-prompt-meta space-y-4">
             <p class="text-sm text-slate-600 dark:text-slate-400">
               Prompt that transforms the internal consolidation report into the GitHub-facing draft.
-              Uses the consolidator agent/model/effort. Humans still confirm before posting unless a
-              configured auto-submit label is present on the PR.
+              Uses the consolidator agent/model/effort. Auto-submit can post the recommended verdict
+              without a human confirmation when enabled below.
             </p>
-            <div>
-              <label class="block text-sm font-medium text-slate-800 dark:text-slate-200" for="auto-submit-labels">
-                Auto-submit labels
-              </label>
-              <input id="auto-submit-labels" type="text"
-                     x-model="autoSubmitLabels"
-                     placeholder="agent-verdict"
-                     class="mt-1 w-full max-w-xl rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
-              <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Comma-separated GitHub labels. When a finished consolidation is ready to post and the PR
-                has any of these labels, lazyreview posts the recommended verdict automatically.
-                Leave empty to disable. Default: <code x-text="autoSubmitLabelsDefault || 'agent-verdict'"></code>
+            <fieldset class="max-w-xl space-y-3">
+              <legend class="text-sm font-medium text-slate-800 dark:text-slate-200">Auto-submit</legend>
+              <p class="text-xs text-slate-500 dark:text-slate-400">
+                Choose one mode. When a consolidation is ready to post, lazyreview can submit the
+                recommended verdict automatically.
               </p>
-            </div>
+              <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 px-3 py-2.5 dark:border-slate-700"
+                     :class="autoSubmitMode === 'all' && 'border-blue-400 bg-blue-50/60 dark:border-blue-500/50 dark:bg-blue-950/30'">
+                <input type="radio" name="auto-submit-mode" value="all" class="mt-1"
+                       :checked="autoSubmitMode === 'all'"
+                       @change="autoSubmitMode = 'all'" />
+                <span class="min-w-0">
+                  <span class="block text-sm font-medium text-slate-800 dark:text-slate-200">Enabled for all</span>
+                  <span class="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                    Auto-submit every ready consolidation, regardless of PR labels.
+                  </span>
+                </span>
+              </label>
+              <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 px-3 py-2.5 dark:border-slate-700"
+                     :class="autoSubmitMode === 'labels' && 'border-blue-400 bg-blue-50/60 dark:border-blue-500/50 dark:bg-blue-950/30'">
+                <input type="radio" name="auto-submit-mode" value="labels" class="mt-1"
+                       :checked="autoSubmitMode === 'labels'"
+                       @change="autoSubmitMode = 'labels'" />
+                <span class="min-w-0 flex-1">
+                  <span class="block text-sm font-medium text-slate-800 dark:text-slate-200">Only for PRs with label</span>
+                  <span class="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                    Auto-submit when the PR has any of the labels below. At least one label is required.
+                  </span>
+                  <div class="mt-3 space-y-2" x-show="autoSubmitMode === 'labels'" x-cloak @click.stop>
+                    <div class="flex flex-wrap gap-1.5" x-show="autoSubmitLabels.length">
+                      <template x-for="(lab, lidx) in autoSubmitLabels" :key="lab + '-' + lidx">
+                        <span class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 py-0.5 text-xs text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">
+                          <span x-text="lab"></span>
+                          <button type="button"
+                                  class="rounded-full p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                                  :aria-label="'Remove label ' + lab"
+                                  @click="removeAutoSubmitLabel(lidx)">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3 w-3" aria-hidden="true">
+                              <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+                            </svg>
+                          </button>
+                        </span>
+                      </template>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <input id="auto-submit-label-draft" type="text"
+                             x-model="autoSubmitLabelDraft"
+                             @keydown.enter.prevent="addAutoSubmitLabel()"
+                             placeholder="Add label…"
+                             class="min-w-[10rem] flex-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
+                      <button type="button" @click="addAutoSubmitLabel()"
+                              class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700">
+                        Add
+                      </button>
+                    </div>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">
+                      Default: <code x-text="(autoSubmitLabelsDefault || []).join(', ') || 'agent-verdict'"></code>
+                    </p>
+                  </div>
+                </span>
+              </label>
+              <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 px-3 py-2.5 dark:border-slate-700"
+                     :class="autoSubmitMode === 'disabled' && 'border-blue-400 bg-blue-50/60 dark:border-blue-500/50 dark:bg-blue-950/30'">
+                <input type="radio" name="auto-submit-mode" value="disabled" class="mt-1"
+                       :checked="autoSubmitMode === 'disabled'"
+                       @change="autoSubmitMode = 'disabled'" />
+                <span class="min-w-0">
+                  <span class="block text-sm font-medium text-slate-800 dark:text-slate-200">Disabled</span>
+                  <span class="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                    Always require a human to confirm before posting to GitHub.
+                  </span>
+                </span>
+              </label>
+            </fieldset>
           </div>
 
           <div class="lr-prompt-editor">
@@ -1624,8 +1732,10 @@ function settingsPage() {
     analysisMsg: '',
     publishPrompt: {{ (settings.publish_prompt|default(''))|tojson }},
     defaultPublishPrompt: {{ (settings.publish_prompt_default|default(''))|tojson }},
-    autoSubmitLabels: {{ (settings.auto_submit_labels|default('agent-verdict'))|tojson }},
-    autoSubmitLabelsDefault: {{ (settings.auto_submit_labels_default|default('agent-verdict'))|tojson }},
+    autoSubmitMode: {{ (settings.auto_submit_mode|default('labels'))|tojson }},
+    autoSubmitLabels: {{ (settings.auto_submit_labels|default(['agent-verdict']))|tojson }},
+    autoSubmitLabelsDefault: {{ (settings.auto_submit_labels_default|default(['agent-verdict']))|tojson }},
+    autoSubmitLabelDraft: '',
     publishMsg: '',
     publishPromptMode: 'preview',
     analysisModels: [],
@@ -1635,6 +1745,12 @@ function settingsPage() {
     analysisModelQuery: '',
     analysisEffortQuery: '',
     analysisComboHighlight: -1,
+    autoKickReviews: {{ (settings.auto_kick_reviews|default(false))|tojson }},
+    autoKickReviewsBusy: false,
+    autoKickReviewsMsg: '',
+    batchRandomizeModelsEffort: {{ (settings.batch_randomize_models_effort|default(false))|tojson }},
+    batchRandomizeBusy: false,
+    batchRandomizeMsg: '',
     batchDefaultsSeed: {{ (settings.batch_review_defaults|default([]))|tojson }},
     cfgRows: [],
     cfgMsg: '',
@@ -1683,6 +1799,7 @@ function settingsPage() {
       this.cfgRows = this._cfgRowsFromDefaults(
         JSON.parse(JSON.stringify(this.batchDefaultsSeed || []))
       );
+      this._cfgSyncModelEffortDisplay();
     },
     _resolveModelId(models, wanted) {
       if (!wanted) return models[0] ? models[0].id : '';
@@ -1770,6 +1887,11 @@ function settingsPage() {
         const a = this.agents.find(x => x.name === row.agent);
         row.agentQuery = a ? (this.agentOptionLabel(a)) : (row.agent || '');
       }
+      if (this.batchRandomizeModelsEffort) {
+        row.modelQuery = '';
+        row.effortQuery = '';
+        return;
+      }
       if (open !== row.key + ':model') {
         const m = row.models.find(x => x.id === row.model);
         row.modelQuery = m ? m.label : (row.model || '');
@@ -1781,6 +1903,7 @@ function settingsPage() {
     cfgOpenCombo(idx, which, evt) {
       const row = this.cfgRows[idx];
       if (!row) return;
+      if (this.batchRandomizeModelsEffort && (which === 'model' || which === 'effort')) return;
       if (which === 'effort' && !row.efforts.length) return;
       const key = row.key + ':' + which;
       const alreadyOpen = this.cfgCombo === key;
@@ -2201,6 +2324,82 @@ function settingsPage() {
         this.analysisHeadChangeBusy = false;
       }
     },
+    async toggleAutoKickReviews(enabled) {
+      const prev = !!this.autoKickReviews;
+      this.autoKickReviews = !!enabled;
+      this.autoKickReviewsBusy = true;
+      this.autoKickReviewsMsg = '';
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ auto_kick_reviews: !!enabled }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          this.autoKickReviews = prev;
+          this.autoKickReviewsMsg = data.detail || `Save failed (${res.status})`;
+          return;
+        }
+        this.autoKickReviews = !!data.auto_kick_reviews;
+        this.autoKickReviewsMsg = this.autoKickReviews
+          ? 'Batch review will start after analysis succeeds.'
+          : 'Auto-kick disabled.';
+        setTimeout(() => { this.autoKickReviewsMsg = ''; }, 2500);
+      } catch (e) {
+        this.autoKickReviews = prev;
+        this.autoKickReviewsMsg = String(e);
+      } finally {
+        this.autoKickReviewsBusy = false;
+      }
+    },
+    _cfgSyncModelEffortDisplay() {
+      for (const row of this.cfgRows) {
+        if (this.batchRandomizeModelsEffort) {
+          row.modelQuery = '';
+          row.effortQuery = '';
+        } else {
+          this.cfgSyncQueriesForRow(row);
+        }
+      }
+    },
+    async toggleBatchRandomize(enabled) {
+      const prev = !!this.batchRandomizeModelsEffort;
+      this.batchRandomizeModelsEffort = !!enabled;
+      this.batchRandomizeBusy = true;
+      this.batchRandomizeMsg = '';
+      if (enabled) {
+        const which = this.cfgComboWhich();
+        if (which === 'model' || which === 'effort') this.cfgCloseCombo();
+      }
+      this._cfgSyncModelEffortDisplay();
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ batch_randomize_models_effort: !!enabled }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          this.batchRandomizeModelsEffort = prev;
+          this._cfgSyncModelEffortDisplay();
+          this.batchRandomizeMsg = data.detail || `Save failed (${res.status})`;
+          return;
+        }
+        this.batchRandomizeModelsEffort = !!data.batch_randomize_models_effort;
+        this._cfgSyncModelEffortDisplay();
+        this.batchRandomizeMsg = this.batchRandomizeModelsEffort
+          ? 'Auto-kick will randomize models and effort.'
+          : 'Auto-kick will use the saved model/effort rows.';
+        setTimeout(() => { this.batchRandomizeMsg = ''; }, 2500);
+      } catch (e) {
+        this.batchRandomizeModelsEffort = prev;
+        this._cfgSyncModelEffortDisplay();
+        this.batchRandomizeMsg = String(e);
+      } finally {
+        this.batchRandomizeBusy = false;
+      }
+    },
     async saveAnalysis() {
       const res = await fetch('/api/settings', {
         method: 'PUT',
@@ -2389,14 +2588,39 @@ function settingsPage() {
       }
     },
 
+    addAutoSubmitLabel() {
+      const name = String(this.autoSubmitLabelDraft || '').trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      const exists = (this.autoSubmitLabels || []).some(
+        (x) => String(x).toLowerCase() === key
+      );
+      if (!exists) {
+        this.autoSubmitLabels = [...(this.autoSubmitLabels || []), name];
+      }
+      this.autoSubmitLabelDraft = '';
+    },
+    removeAutoSubmitLabel(idx) {
+      const next = (this.autoSubmitLabels || []).slice();
+      next.splice(idx, 1);
+      this.autoSubmitLabels = next;
+    },
     async savePublish() {
+      if (this.autoSubmitMode === 'labels' && !(this.autoSubmitLabels || []).length) {
+        await lrAlert(
+          'Add at least one label for "Only for PRs with label", or choose another mode.',
+          { title: 'Save failed' },
+        );
+        return;
+      }
       this.publishMsg = 'Saving…';
       const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           publish_prompt: this.publishPrompt,
-          auto_submit_labels: this.autoSubmitLabels,
+          auto_submit_mode: this.autoSubmitMode,
+          auto_submit_labels: this.autoSubmitLabels || [],
         })
       });
       const data = await res.json().catch(() => ({}));
@@ -2406,7 +2630,10 @@ function settingsPage() {
         return;
       }
       this.publishPrompt = data.publish_prompt || '';
-      this.autoSubmitLabels = data.auto_submit_labels || '';
+      this.autoSubmitMode = data.auto_submit_mode || 'labels';
+      this.autoSubmitLabels = Array.isArray(data.auto_submit_labels)
+        ? data.auto_submit_labels
+        : [];
       this.publishMsg = 'Saved';
       setTimeout(() => { this.publishMsg = ''; }, 2500);
     },

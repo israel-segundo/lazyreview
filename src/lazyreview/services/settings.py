@@ -44,23 +44,30 @@ ALLOWED_SESSION_AGENTS = ALL_AGENT_NAMES
 ALLOWED_BATCH_AGENTS = ALL_AGENT_NAMES
 MAX_BATCH_DEFAULTS = 20
 DEFAULT_PR_ANALYSIS_ON_HEAD_CHANGE = True
+DEFAULT_AUTO_KICK_REVIEWS = False
+DEFAULT_BATCH_RANDOMIZE_MODELS_EFFORT = False
 
 
 DEFAULT_AUTO_SUBMIT_LABELS = ("agent-verdict",)
+AUTO_SUBMIT_MODES = frozenset({"all", "labels", "disabled"})
+DEFAULT_AUTO_SUBMIT_MODE = "labels"
 
 
-def parse_label_list_setting(raw: str | None, *, default: list[str] | None = None) -> list[str]:
-    """Parse comma/newline-separated label names; empty → no auto-submit."""
+def parse_label_list_setting(raw: Any, *, default: list[str] | None = None) -> list[str]:
+    """Parse label names from a list or comma/newline-separated string."""
     if raw is None:
         return list(default or [])
-    text = str(raw).strip()
-    if not text:
-        return []
-    parts = []
-    for chunk in text.replace("\n", ",").split(","):
-        name = chunk.strip()
-        if name:
-            parts.append(name)
+    if isinstance(raw, (list, tuple)):
+        parts = [str(x).strip() for x in raw if str(x).strip()]
+    else:
+        text = str(raw).strip()
+        if not text:
+            return []
+        parts = []
+        for chunk in text.replace("\n", ",").split(","):
+            name = chunk.strip()
+            if name:
+                parts.append(name)
     # Dedupe case-insensitively, preserve first spelling.
     seen: set[str] = set()
     out: list[str] = []
@@ -73,11 +80,50 @@ def parse_label_list_setting(raw: str | None, *, default: list[str] | None = Non
     return out
 
 
+def normalize_auto_submit_mode(raw: Any, *, default: str = DEFAULT_AUTO_SUBMIT_MODE) -> str:
+    if raw is None:
+        return default
+    mode = str(raw).strip().lower()
+    if mode not in AUTO_SUBMIT_MODES:
+        raise ValueError(
+            f"auto_submit_mode must be one of {sorted(AUTO_SUBMIT_MODES)}"
+        )
+    return mode
+
+
 def get_auto_submit_labels(conn: sqlite3.Connection) -> list[str]:
     raw = get_setting(conn, "auto_submit_labels")
     if raw is None:
         return list(DEFAULT_AUTO_SUBMIT_LABELS)
     return parse_label_list_setting(raw, default=list(DEFAULT_AUTO_SUBMIT_LABELS))
+
+
+def get_auto_submit_mode(conn: sqlite3.Connection) -> str:
+    raw = get_setting(conn, "auto_submit_mode")
+    if raw is None:
+        # Legacy: empty labels meant disabled.
+        if not get_auto_submit_labels(conn):
+            return "disabled"
+        return DEFAULT_AUTO_SUBMIT_MODE
+    try:
+        return normalize_auto_submit_mode(raw)
+    except ValueError:
+        return DEFAULT_AUTO_SUBMIT_MODE
+
+
+def auto_submit_applies(conn: sqlite3.Connection, pr: dict[str, Any] | None) -> bool:
+    """Whether auto-submit should post for this PR under the current mode."""
+    mode = get_auto_submit_mode(conn)
+    if mode == "disabled":
+        return False
+    if mode == "all":
+        return True
+    labels = get_auto_submit_labels(conn)
+    if not labels:
+        return False
+    from lazyreview.services.pr_labels import pr_has_any_label
+
+    return pr_has_any_label(pr, labels)
 
 
 def parse_bool_setting(raw: str | None, *, default: bool) -> bool:
@@ -94,6 +140,16 @@ def parse_bool_setting(raw: str | None, *, default: bool) -> bool:
 def get_pr_analysis_on_head_change(conn: sqlite3.Connection) -> bool:
     raw = get_setting(conn, "pr_analysis_on_head_change")
     return parse_bool_setting(raw, default=DEFAULT_PR_ANALYSIS_ON_HEAD_CHANGE)
+
+
+def get_auto_kick_reviews(conn: sqlite3.Connection) -> bool:
+    raw = get_setting(conn, "auto_kick_reviews")
+    return parse_bool_setting(raw, default=DEFAULT_AUTO_KICK_REVIEWS)
+
+
+def get_batch_randomize_models_effort(conn: sqlite3.Connection) -> bool:
+    raw = get_setting(conn, "batch_randomize_models_effort")
+    return parse_bool_setting(raw, default=DEFAULT_BATCH_RANDOMIZE_MODELS_EFFORT)
 
 _DEFAULT_CONSOLIDATOR_AGENT = AgentName.CLAUDE.value
 _DEFAULT_CONSOLIDATOR_MODEL = ClaudeModelAlias.HAIKU.value
@@ -207,8 +263,17 @@ def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
         ),
         "publish_prompt": publish_prompt,
         "publish_prompt_default": _default_publish_prompt() or "",
-        "auto_submit_labels": ", ".join(get_auto_submit_labels(conn)),
-        "auto_submit_labels_default": ", ".join(DEFAULT_AUTO_SUBMIT_LABELS),
+        "auto_submit_mode": get_auto_submit_mode(conn),
+        "auto_submit_labels": get_auto_submit_labels(conn),
+        "auto_submit_labels_default": list(DEFAULT_AUTO_SUBMIT_LABELS),
+        "auto_kick_reviews": parse_bool_setting(
+            raw.get("auto_kick_reviews"),
+            default=DEFAULT_AUTO_KICK_REVIEWS,
+        ),
+        "batch_randomize_models_effort": parse_bool_setting(
+            raw.get("batch_randomize_models_effort"),
+            default=DEFAULT_BATCH_RANDOMIZE_MODELS_EFFORT,
+        ),
         "batch_review_defaults": batch_defaults,
         "session_agent": raw.get("session_agent") or _DEFAULT_SESSION_AGENT,
         "session_model": raw.get("session_model") or _DEFAULT_SESSION_MODEL,
@@ -238,7 +303,10 @@ def update_app_settings(
     pr_analysis_prompt: str | None = None,
     pr_analysis_on_head_change: bool | None = None,
     publish_prompt: str | None = None,
-    auto_submit_labels: str | None = None,
+    auto_submit_mode: str | None = None,
+    auto_submit_labels: str | list[str] | None = None,
+    auto_kick_reviews: bool | None = None,
+    batch_randomize_models_effort: bool | None = None,
     batch_review_defaults: list[dict[str, Any]] | None = None,
     session_agent: str | None = None,
     session_model: str | None = None,
@@ -316,9 +384,37 @@ def update_app_settings(
         )
     if publish_prompt is not None:
         set_setting(conn, "publish_prompt", publish_prompt)
-    if auto_submit_labels is not None:
-        labels = parse_label_list_setting(auto_submit_labels, default=[])
-        set_setting(conn, "auto_submit_labels", ", ".join(labels))
+    if auto_submit_mode is not None or auto_submit_labels is not None:
+        next_labels = (
+            parse_label_list_setting(auto_submit_labels, default=[])
+            if auto_submit_labels is not None
+            else get_auto_submit_labels(conn)
+        )
+        next_mode = (
+            normalize_auto_submit_mode(auto_submit_mode)
+            if auto_submit_mode is not None
+            else get_auto_submit_mode(conn)
+        )
+        if next_mode == "labels" and not next_labels:
+            raise ValueError(
+                "At least one label is required when auto-submit mode is 'labels'"
+            )
+        if auto_submit_labels is not None:
+            set_setting(conn, "auto_submit_labels", ", ".join(next_labels))
+        if auto_submit_mode is not None:
+            set_setting(conn, "auto_submit_mode", next_mode)
+    if auto_kick_reviews is not None:
+        set_setting(
+            conn,
+            "auto_kick_reviews",
+            "true" if auto_kick_reviews else "false",
+        )
+    if batch_randomize_models_effort is not None:
+        set_setting(
+            conn,
+            "batch_randomize_models_effort",
+            "true" if batch_randomize_models_effort else "false",
+        )
     if batch_review_defaults is not None:
         normalized = normalize_batch_review_defaults(batch_review_defaults)
         set_setting(conn, "batch_review_defaults", json.dumps(normalized))
