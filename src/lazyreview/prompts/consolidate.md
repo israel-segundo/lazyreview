@@ -22,7 +22,7 @@ confirm before posting.
   (`run.agent`, `run.model`, `run.effort`; findings have `severity` 1|2|3 plus optional
   `category` / `labels` from the closed taxonomy below)
 - `pr.json` — PR metadata (`url`, `owner`, `repo`, `number`, `title`, `head_sha`,
-  `has_merge_conflicts`, `in_merge_queue`, …)
+  `has_merge_conflicts`, `in_merge_queue`, `labels`, …)
 - `pr-comments.json` — optional snapshot of comments (may be stale or empty)
 
 ### Merge conflicts (required when flagged)

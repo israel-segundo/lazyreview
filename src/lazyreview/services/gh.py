@@ -216,7 +216,8 @@ def view_pr(url_or_ref: str) -> dict[str, Any]:
             "--repo",
             f"{ref.owner}/{ref.repo}",
             "--json",
-            "number,title,url,baseRefName,headRefName,headRefOid,state,author,isDraft,additions,deletions,changedFiles,commits,reviews",
+            "number,title,url,baseRefName,headRefName,headRefOid,state,author,isDraft,"
+            "additions,deletions,changedFiles,commits,reviews,labels",
         ]
     )
     data = json.loads(raw)
@@ -235,6 +236,9 @@ def view_pr(url_or_ref: str) -> dict[str, Any]:
         flags = _pr_github_flags(ref.owner, ref.repo, int(data["number"]))
         in_merge_queue = flags["in_merge_queue"]
         has_merge_conflicts = flags["has_merge_conflicts"]
+    from lazyreview.services.pr_labels import normalize_pr_labels
+
+    labels = normalize_pr_labels(data.get("labels"))
     return {
         "owner": ref.owner,
         "repo": ref.repo,
@@ -250,6 +254,7 @@ def view_pr(url_or_ref: str) -> dict[str, Any]:
         "is_draft": bool(data.get("isDraft")),
         "in_merge_queue": in_merge_queue,
         "has_merge_conflicts": has_merge_conflicts,
+        "labels": labels,
         "additions": data.get("additions"),
         "deletions": data.get("deletions"),
         "changed_files": data.get("changedFiles"),

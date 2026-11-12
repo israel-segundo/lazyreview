@@ -65,6 +65,7 @@ def _upsert_from_view(
         is_draft=bool(data.get("is_draft")),
         in_merge_queue=bool(data.get("in_merge_queue")),
         has_merge_conflicts=bool(data.get("has_merge_conflicts")),
+        labels=data.get("labels") if "labels" in data else None,
         additions=data.get("additions"),
         deletions=data.get("deletions"),
         changed_files=data.get("changed_files"),

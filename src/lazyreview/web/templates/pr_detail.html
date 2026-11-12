@@ -12,6 +12,7 @@
   {% set pr_label = 'draft' if pr.is_draft else (pr.state or 'open') %}
   {% set in_merge_queue = pr.in_merge_queue %}
   {% set has_merge_conflicts = pr.has_merge_conflicts %}
+  {% set pr_labels = pr.labels or [] %}
   {% set istatus = pr.internal_status or 'needs_review' %}
   {% set is_rereview = istatus == 'needs_review' and pr.previously_approved %}
   {% set review_label = pr.internal_status_label or ('needs re-review' if is_rereview else 'needs review') %}
@@ -60,6 +61,11 @@
         <span class="lr-pr-meta__pill lr-pr-meta__pill--conflicts"
               title="GitHub reports merge conflicts with the base branch">conflicts</span>
         {% endif %}
+        {% for lab in pr_labels %}
+        <span class="lr-pr-meta__dot" aria-hidden="true">·</span>
+        <span class="lr-pr-meta__pill lr-pr-meta__pill--muted"
+              title="GitHub label: {{ lab.name }}">{{ lab.name }}</span>
+        {% endfor %}
         <span class="lr-pr-meta__dot" aria-hidden="true">·</span>
         <span class="lr-pr-meta__pill
           {% if istatus == 'approved' %}lr-pr-meta__pill--ok
@@ -112,6 +118,17 @@
             title="GitHub reports merge conflicts with the base branch">
         <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Merge</span>
         <span class="bg-rose-100 px-2 py-1 font-medium text-rose-900 dark:bg-rose-900/40 dark:text-rose-200">conflicts</span>
+      </span>
+      {% endif %}
+      {% if pr_labels %}
+      <span class="inline-flex flex-wrap items-center gap-1">
+        {% for lab in pr_labels %}
+        <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600"
+              title="GitHub label: {{ lab.name }}">
+          <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Label</span>
+          <span class="bg-slate-200 px-2 py-1 font-medium text-slate-800 dark:bg-slate-700 dark:text-slate-200">{{ lab.name }}</span>
+        </span>
+        {% endfor %}
       </span>
       {% endif %}
       <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">

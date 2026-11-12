@@ -129,6 +129,11 @@
             <span x-show="!!pr.has_merge_conflicts" x-cloak
                   class="rounded-full px-2 py-0.5 text-xs bg-rose-100 text-rose-900 dark:bg-rose-900/40 dark:text-rose-200"
                   title="GitHub reports merge conflicts with the base branch">conflicts</span>
+            <template x-for="lab in (pr.labels || [])" :key="'card-lab-' + pr.id + '-' + lab.name">
+              <span class="rounded-full px-2 py-0.5 text-xs bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200"
+                    :title="'GitHub label: ' + lab.name"
+                    x-text="lab.name"></span>
+            </template>
             <span class="rounded-full px-2 py-0.5 text-xs"
                   :class="internalStatusClass(pr)"
                   :title="internalStatusTitle(pr)"
@@ -202,6 +207,11 @@
                   <span x-show="!!pr.has_merge_conflicts" x-cloak
                         class="rounded-full px-2 py-0.5 text-xs bg-rose-100 text-rose-900 dark:bg-rose-900/40 dark:text-rose-200"
                         title="GitHub reports merge conflicts with the base branch">conflicts</span>
+                  <template x-for="lab in (pr.labels || [])" :key="'row-lab-' + pr.id + '-' + lab.name">
+                    <span class="rounded-full px-2 py-0.5 text-xs bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200"
+                          :title="'GitHub label: ' + lab.name"
+                          x-text="lab.name"></span>
+                  </template>
                 </span>
               </td>
               <td class="px-4 py-3 whitespace-nowrap">

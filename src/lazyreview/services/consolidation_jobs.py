@@ -964,6 +964,8 @@ class ConsolidationRunner:
             (work_dir / "pr-comments.json").write_text(
                 json.dumps(comments, indent=2), encoding="utf-8"
             )
+            from lazyreview.services.pr_labels import labels_from_pr
+
             (work_dir / "pr.json").write_text(
                 json.dumps(
                     {
@@ -978,6 +980,7 @@ class ConsolidationRunner:
                         "is_draft": bool(pr.get("is_draft")),
                         "in_merge_queue": bool(pr.get("in_merge_queue")),
                         "has_merge_conflicts": bool(pr.get("has_merge_conflicts")),
+                        "labels": labels_from_pr(pr),
                     },
                     indent=2,
                 ),

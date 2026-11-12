@@ -58,11 +58,14 @@ def upsert_pr(
     is_draft: bool | None = None,
     in_merge_queue: bool | None = None,
     has_merge_conflicts: bool | None = None,
+    labels: list[Any] | None = None,
     additions: int | None = None,
     deletions: int | None = None,
     changed_files: int | None = None,
     head_updated_at: str | None = None,
 ) -> dict[str, Any]:
+    from lazyreview.services.pr_labels import attach_pr_labels, labels_to_json, normalize_pr_labels
+
     now = utcnow()
     existing = conn.execute(
         "SELECT * FROM prs WHERE owner = ? AND repo = ? AND number = ?",
@@ -97,6 +100,15 @@ def upsert_pr(
     )
     merge_queue_v = _flag_col("in_merge_queue", in_merge_queue)
     conflicts_v = _flag_col("has_merge_conflicts", has_merge_conflicts)
+    if labels is not None:
+        labels_json_v = labels_to_json(normalize_pr_labels(labels))
+    elif existing is not None:
+        try:
+            labels_json_v = str(existing["labels_json"] or "[]")
+        except (KeyError, IndexError, TypeError):
+            labels_json_v = "[]"
+    else:
+        labels_json_v = "[]"
     additions_v = _keep("additions", additions)
     deletions_v = _keep("deletions", deletions)
     changed_v = _keep("changed_files", changed_files)
@@ -117,11 +129,11 @@ def upsert_pr(
         """
         INSERT INTO prs (
           owner, repo, number, url, title, author, base_ref, head_ref, head_sha,
-          state, is_draft, in_merge_queue, has_merge_conflicts,
+          state, is_draft, in_merge_queue, has_merge_conflicts, labels_json,
           additions, deletions, changed_files,
           review_requested, head_updated_at, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(owner, repo, number) DO UPDATE SET
           url = excluded.url,
           title = excluded.title,
@@ -133,6 +145,7 @@ def upsert_pr(
           is_draft = excluded.is_draft,
           in_merge_queue = excluded.in_merge_queue,
           has_merge_conflicts = excluded.has_merge_conflicts,
+          labels_json = excluded.labels_json,
           additions = excluded.additions,
           deletions = excluded.deletions,
           changed_files = excluded.changed_files,
@@ -154,6 +167,7 @@ def upsert_pr(
             draft_v,
             merge_queue_v,
             conflicts_v,
+            labels_json_v,
             additions_v,
             deletions_v,
             changed_v,
@@ -183,7 +197,7 @@ def upsert_pr(
     if head_moved:
         deprecate_runs_for_pr(conn, int(row["id"]))
     conn.commit()
-    pr = dict(row)
+    pr = attach_pr_labels(dict(row))
     if head_moved:
         from lazyreview.services.lifecycle import on_pr_head_changed
 
@@ -694,8 +708,10 @@ def list_prs(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         """
     ).fetchall()
     out: list[dict[str, Any]] = []
+    from lazyreview.services.pr_labels import attach_pr_labels
+
     for r in rows:
-        pr = _attach_internal_status(conn, dict(r))
+        pr = _attach_internal_status(conn, attach_pr_labels(dict(r)))
         pr["run_count"] = int(pr.get("run_count") or 0)
         pr["runs_stale"] = bool(int(pr.get("runs_stale") or 0))
         analysis = get_current_pr_analysis(conn, int(pr["id"]))
@@ -777,12 +793,14 @@ def analysis_display_for_pr(conn: sqlite3.Connection, pr: dict[str, Any]) -> dic
 
 
 def get_pr(conn: sqlite3.Connection, pr_id: int) -> dict[str, Any] | None:
+    from lazyreview.services.pr_labels import attach_pr_labels
+
     row = row_to_dict(
         conn.execute("SELECT * FROM prs WHERE id = ?", (pr_id,)).fetchone()
     )
     if row is None:
         return None
-    pr = _attach_internal_status(conn, row)
+    pr = _attach_internal_status(conn, attach_pr_labels(row))
     pr.update(analysis_display_for_pr(conn, pr))
     return pr
 
