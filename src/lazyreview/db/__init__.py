@@ -1086,11 +1086,13 @@ def mark_consolidation_feedback_provided(
     gh_action: str,
     gh_comment_url: str | None = None,
     gh_review_id: str | None = None,
+    auto_submitted: bool = False,
 ) -> dict[str, Any] | None:
     return update_consolidation(
         conn,
         consolidation_id,
         feedback_provided=1,
+        auto_submitted=1 if auto_submitted else 0,
         gh_action=gh_action,
         gh_comment_url=gh_comment_url,
         gh_review_id=str(gh_review_id) if gh_review_id is not None else None,
@@ -1243,11 +1245,15 @@ def create_feedback_action(
     gh_comment_url: str | None = None,
     gh_review_id: str | None = None,
     dedup_summary: str | None = None,
+    auto_submitted: bool = False,
 ) -> dict[str, Any]:
     cur = conn.execute(
         """
-        INSERT INTO feedback_actions (pr_id, action, source_run_ids, body, gh_comment_url, gh_review_id, dedup_summary)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO feedback_actions (
+          pr_id, action, source_run_ids, body, gh_comment_url, gh_review_id,
+          dedup_summary, auto_submitted
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             pr_id,
@@ -1257,6 +1263,7 @@ def create_feedback_action(
             gh_comment_url,
             gh_review_id,
             dedup_summary,
+            1 if auto_submitted else 0,
         ),
     )
     conn.commit()

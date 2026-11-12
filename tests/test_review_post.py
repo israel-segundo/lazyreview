@@ -571,11 +571,11 @@ def test_post_sends_inline_comments(tmp_path: Path):
     with (
         patch("lazyreview.main.get_settings", return_value=settings),
         patch(
-            "lazyreview.api.consolidations.list_pr_file_patches",
+            "lazyreview.services.consolidation_submit.list_pr_file_patches",
             return_value={"src/a.py": "@@ -1 +1,2 @@\n line\n+add\n"},
         ),
         patch(
-            "lazyreview.api.consolidations.submit_pr_review",
+            "lazyreview.services.consolidation_submit.submit_pr_review",
             side_effect=_fake_submit,
         ),
     ):
@@ -696,11 +696,11 @@ def test_post_appends_off_diff_finding_to_body(tmp_path: Path):
     with (
         patch("lazyreview.main.get_settings", return_value=settings),
         patch(
-            "lazyreview.api.consolidations.list_pr_file_patches",
+            "lazyreview.services.consolidation_submit.list_pr_file_patches",
             return_value={"src/a.py": "@@ -1 +1,3 @@\n line\n+one\n+two\n"},
         ),
         patch(
-            "lazyreview.api.consolidations.submit_pr_review",
+            "lazyreview.services.consolidation_submit.submit_pr_review",
             side_effect=_fake_submit,
         ),
     ):

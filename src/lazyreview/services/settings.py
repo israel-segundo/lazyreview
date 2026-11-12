@@ -46,6 +46,40 @@ MAX_BATCH_DEFAULTS = 20
 DEFAULT_PR_ANALYSIS_ON_HEAD_CHANGE = True
 
 
+DEFAULT_AUTO_SUBMIT_LABELS = ("agent-verdict",)
+
+
+def parse_label_list_setting(raw: str | None, *, default: list[str] | None = None) -> list[str]:
+    """Parse comma/newline-separated label names; empty → no auto-submit."""
+    if raw is None:
+        return list(default or [])
+    text = str(raw).strip()
+    if not text:
+        return []
+    parts = []
+    for chunk in text.replace("\n", ",").split(","):
+        name = chunk.strip()
+        if name:
+            parts.append(name)
+    # Dedupe case-insensitively, preserve first spelling.
+    seen: set[str] = set()
+    out: list[str] = []
+    for name in parts:
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+    return out
+
+
+def get_auto_submit_labels(conn: sqlite3.Connection) -> list[str]:
+    raw = get_setting(conn, "auto_submit_labels")
+    if raw is None:
+        return list(DEFAULT_AUTO_SUBMIT_LABELS)
+    return parse_label_list_setting(raw, default=list(DEFAULT_AUTO_SUBMIT_LABELS))
+
+
 def parse_bool_setting(raw: str | None, *, default: bool) -> bool:
     if raw is None:
         return default
@@ -173,6 +207,8 @@ def get_settings_view(conn: sqlite3.Connection) -> dict[str, Any]:
         ),
         "publish_prompt": publish_prompt,
         "publish_prompt_default": _default_publish_prompt() or "",
+        "auto_submit_labels": ", ".join(get_auto_submit_labels(conn)),
+        "auto_submit_labels_default": ", ".join(DEFAULT_AUTO_SUBMIT_LABELS),
         "batch_review_defaults": batch_defaults,
         "session_agent": raw.get("session_agent") or _DEFAULT_SESSION_AGENT,
         "session_model": raw.get("session_model") or _DEFAULT_SESSION_MODEL,
@@ -202,6 +238,7 @@ def update_app_settings(
     pr_analysis_prompt: str | None = None,
     pr_analysis_on_head_change: bool | None = None,
     publish_prompt: str | None = None,
+    auto_submit_labels: str | None = None,
     batch_review_defaults: list[dict[str, Any]] | None = None,
     session_agent: str | None = None,
     session_model: str | None = None,
@@ -279,6 +316,9 @@ def update_app_settings(
         )
     if publish_prompt is not None:
         set_setting(conn, "publish_prompt", publish_prompt)
+    if auto_submit_labels is not None:
+        labels = parse_label_list_setting(auto_submit_labels, default=[])
+        set_setting(conn, "auto_submit_labels", ", ".join(labels))
     if batch_review_defaults is not None:
         normalized = normalize_batch_review_defaults(batch_review_defaults)
         set_setting(conn, "batch_review_defaults", json.dumps(normalized))

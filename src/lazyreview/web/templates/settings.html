@@ -1018,11 +1018,26 @@
       {# Publish tab #}
       <div x-show="agentsTab === 'publish'" x-cloak class="lr-settings-tab-body lr-settings-tab-body--prompt" role="tabpanel">
         <div class="lr-prompt-shell">
-          <div class="lr-prompt-meta">
+          <div class="lr-prompt-meta space-y-4">
             <p class="text-sm text-slate-600 dark:text-slate-400">
               Prompt that transforms the internal consolidation report into the GitHub-facing draft.
-              Uses the consolidator agent/model/effort. Humans still confirm before posting.
+              Uses the consolidator agent/model/effort. Humans still confirm before posting unless a
+              configured auto-submit label is present on the PR.
             </p>
+            <div>
+              <label class="block text-sm font-medium text-slate-800 dark:text-slate-200" for="auto-submit-labels">
+                Auto-submit labels
+              </label>
+              <input id="auto-submit-labels" type="text"
+                     x-model="autoSubmitLabels"
+                     placeholder="agent-verdict"
+                     class="mt-1 w-full max-w-xl rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100" />
+              <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Comma-separated GitHub labels. When a finished consolidation is ready to post and the PR
+                has any of these labels, lazyreview posts the recommended verdict automatically.
+                Leave empty to disable. Default: <code x-text="autoSubmitLabelsDefault || 'agent-verdict'"></code>
+              </p>
+            </div>
           </div>
 
           <div class="lr-prompt-editor">
@@ -1609,6 +1624,8 @@ function settingsPage() {
     analysisMsg: '',
     publishPrompt: {{ (settings.publish_prompt|default(''))|tojson }},
     defaultPublishPrompt: {{ (settings.publish_prompt_default|default(''))|tojson }},
+    autoSubmitLabels: {{ (settings.auto_submit_labels|default('agent-verdict'))|tojson }},
+    autoSubmitLabelsDefault: {{ (settings.auto_submit_labels_default|default('agent-verdict'))|tojson }},
     publishMsg: '',
     publishPromptMode: 'preview',
     analysisModels: [],
@@ -2378,7 +2395,8 @@ function settingsPage() {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-          publish_prompt: this.publishPrompt
+          publish_prompt: this.publishPrompt,
+          auto_submit_labels: this.autoSubmitLabels,
         })
       });
       const data = await res.json().catch(() => ({}));
@@ -2388,6 +2406,7 @@ function settingsPage() {
         return;
       }
       this.publishPrompt = data.publish_prompt || '';
+      this.autoSubmitLabels = data.auto_submit_labels || '';
       this.publishMsg = 'Saved';
       setTimeout(() => { this.publishMsg = ''; }, 2500);
     },

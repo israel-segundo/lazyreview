@@ -502,7 +502,7 @@
                       : (c.ready_to_post
                         ? 'bg-blue-600 text-white hover:bg-blue-700'
                         : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800')"
-                    x-text="c.feedback_provided ? 'View' : (c.ready_to_post ? 'Review & submit' : 'View')"></button>
+                    x-text="c.feedback_provided ? (c.auto_submitted ? 'Auto-submitted' : 'View') : (c.ready_to_post ? 'Review & submit' : 'View')"></button>
           </div>
         </article>
       </template>
@@ -617,7 +617,7 @@
                             : (c.ready_to_post
                               ? 'bg-blue-600 text-white hover:bg-blue-700'
                               : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800')"
-                          x-text="c.feedback_provided ? 'View' : (c.ready_to_post ? 'Review & submit' : 'View')"></button>
+                          x-text="c.feedback_provided ? (c.auto_submitted ? 'Auto-submitted' : 'View') : (c.ready_to_post ? 'Review & submit' : 'View')"></button>
                 </div>
               </td>
             </tr>

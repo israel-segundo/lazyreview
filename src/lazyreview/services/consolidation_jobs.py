@@ -1334,6 +1334,11 @@ class ConsolidationRunner:
                 error_message=None,
             )
             mark_runs_consolidated(conn, [int(x) for x in source_ids])
+            from lazyreview.services.consolidation_submit import (
+                maybe_auto_submit_consolidation,
+            )
+
+            maybe_auto_submit_consolidation(conn, consolidation_id)
         except Exception as e:
             if self._is_cancel_requested(consolidation_id, conn):
                 duration_ms = int((time.monotonic() - started) * 1000)
@@ -1820,6 +1825,11 @@ class ConsolidationRunner:
             publish_status="succeeded",
             publish_finished_at=utcnow(),
         )
+        from lazyreview.services.consolidation_submit import (
+            maybe_auto_submit_consolidation,
+        )
+
+        maybe_auto_submit_consolidation(conn, consolidation_id)
 
     def _run_process(
         self,

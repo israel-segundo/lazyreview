@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS feedback_actions (
   gh_comment_url TEXT,
   gh_review_id TEXT,
   dedup_summary TEXT,
+  auto_submitted INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -144,6 +145,7 @@ CREATE TABLE IF NOT EXISTS consolidations (
   cli_command TEXT,
   error_message TEXT,
   feedback_provided INTEGER NOT NULL DEFAULT 0,
+  auto_submitted INTEGER NOT NULL DEFAULT 0,
   gh_action TEXT,
   gh_comment_url TEXT,
   gh_review_id TEXT,
@@ -316,6 +318,8 @@ DEFAULT_SETTINGS = {
     # pr_analysis_prompt seeded in init_db from prompts/pr_analysis.md
     # When true, sync re-queues PR analysis after a new head_sha.
     "pr_analysis_on_head_change": "true",
+    # Comma-separated GitHub labels that auto-submit the consolidation verdict.
+    "auto_submit_labels": "agent-verdict",
     # batch_review_defaults seeded in init_db (JSON list of {agent,model,effort})
     # Interactive chat (Explore / Challenge) — defaults Claude / Opus / high
     "session_agent": AgentName.CLAUDE.value,
@@ -324,7 +328,7 @@ DEFAULT_SETTINGS = {
     # agent_enabled seeded in init_db (JSON map of agent → bool; default all true)
 }
 
-SCHEMA_VERSION = 32
+SCHEMA_VERSION = 33
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -1015,6 +1019,29 @@ def init_db(conn: sqlite3.Connection) -> None:
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
             ("pr_analysis_on_head_change", "true"),
+        )
+
+    if prev is not None and prev < 33:
+        # Label-gated auto-submit of consolidation verdicts to GitHub.
+        consol_cols = {
+            r["name"]
+            for r in conn.execute("PRAGMA table_info(consolidations)").fetchall()
+        }
+        if "auto_submitted" not in consol_cols:
+            conn.execute(
+                "ALTER TABLE consolidations ADD COLUMN auto_submitted INTEGER NOT NULL DEFAULT 0"
+            )
+        fa_cols = {
+            r["name"]
+            for r in conn.execute("PRAGMA table_info(feedback_actions)").fetchall()
+        }
+        if "auto_submitted" not in fa_cols:
+            conn.execute(
+                "ALTER TABLE feedback_actions ADD COLUMN auto_submitted INTEGER NOT NULL DEFAULT 0"
+            )
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+            ("auto_submit_labels", "agent-verdict"),
         )
 
     if prev is not None and prev < 10 and prompt_seed:

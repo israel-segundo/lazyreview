@@ -12,13 +12,11 @@ from lazyreview.agents import get_adapter
 from lazyreview.db import (
     active_consolidation_run_ids,
     create_consolidation,
-    create_feedback_action,
     get_consolidation,
     get_pr,
     get_run,
     in_flight_consolidation_run_ids,
     list_consolidations_for_pr,
-    mark_consolidation_feedback_provided,
     run_is_selectable,
 )
 from lazyreview.services.agent_eligibility import require_selectable_agent
@@ -27,18 +25,9 @@ from lazyreview.services.analysis_gate import (
     require_succeeded_analysis,
 )
 from lazyreview.services.consolidation_jobs import consolidations_dir
-from lazyreview.services.gh import (
-    GhError,
-    list_pr_changed_paths,
-    post_pr_comment,
-    submit_pr_review,
-)
-from lazyreview.services.pr_diff import commentable_lines_by_path, list_pr_file_patches
-from lazyreview.services.review_post import (
-    build_review_comments,
-    merge_summary_findings_into_review_body,
-    parse_findings_list,
-    partition_findings_for_github_post,
+from lazyreview.services.consolidation_submit import (
+    ConsolidationSubmitError,
+    submit_consolidation_to_github,
 )
 from lazyreview.services.settings import get_consolidator_config
 
@@ -61,12 +50,6 @@ def _require_consolidator_selectable(request: Request) -> dict:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["consolidations"])
-
-_ACTION_TO_EVENT = {
-    "approve": "APPROVE",
-    "request_changes": "REQUEST_CHANGES",
-    "comment": "COMMENT",
-}
 
 
 class CreateConsolidationBody(BaseModel):
@@ -318,127 +301,13 @@ def regenerate_publish(consolidation_id: int, request: Request):
 
 @router.post("/consolidations/{consolidation_id}/post")
 def post_consolidation(consolidation_id: int, body: PostConsolidationBody, request: Request):
-    conn = request.app.state.db
-    row = get_consolidation(conn, consolidation_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="Consolidation not found")
-    if row["status"] != "succeeded":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Consolidation is {row['status']}, cannot post",
-        )
-    if int(row.get("feedback_provided") or 0):
-        raise HTTPException(status_code=400, detail="Feedback already provided")
-    if not int(row.get("ready_to_post") or 0) or not (row.get("publish_body") or "").strip():
-        raise HTTPException(
-            status_code=409,
-            detail="GitHub draft is not ready yet (publish transform incomplete)",
-        )
-
-    pr = require_reviewable_pr(conn, int(row["pr_id"]))
-
-    text = body.body if body.body is not None else (row.get("publish_body") or "")
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="Empty publish body")
-
-    from lazyreview.findings_taxonomy import coerce_findings_for_persist
-
-    findings = coerce_findings_for_persist(
-        parse_findings_list(row.get("findings_json") or row.get("findings")),
-        default_origin="model",
-    )
-    head_sha = str(pr.get("head_sha") or row.get("head_sha") or "").strip()
-
-    gh_url = None
-    gh_review_id = None
-    dropped: list = []
-    skipped_off_diff = 0
-    skipped_bad_line = 0
-    posted_inline = 0
-    appended_summary = 0
-    changed_paths: frozenset[str] | None = None
-    commentable_lines: dict[str, frozenset[int]] | None = None
     try:
-        patches = list_pr_file_patches(pr["owner"], pr["repo"], int(pr["number"]))
-        changed_paths = frozenset(patches.keys())
-        commentable_lines = commentable_lines_by_path(patches)
-    except GhError as e:
-        logger.warning("Could not list PR diff for inline filter: %s", e)
-
-    inline_findings, summary_only = partition_findings_for_github_post(
-        findings, changed_paths, commentable_lines
-    )
-    review_comments = build_review_comments(inline_findings)
-    text, appended_summary = merge_summary_findings_into_review_body(
-        text, summary_only, changed_paths=changed_paths
-    )
-
-    try:
-        event = _ACTION_TO_EVENT.get(body.action)
-        if event is None:
-            raise HTTPException(status_code=400, detail=f"Invalid action {body.action}")
-        # Summary-only comment action with no inlines: keep issue-comment behavior.
-        if body.action == "comment" and not review_comments:
-            res = post_pr_comment(pr["owner"], pr["repo"], int(pr["number"]), text)
-            gh_url = res.get("output")
-        else:
-            res = submit_pr_review(
-                pr["owner"],
-                pr["repo"],
-                int(pr["number"]),
-                text,
-                event,
-                commit_id=head_sha or None,
-                comments=review_comments or None,
-                changed_paths=changed_paths,
-                commentable_lines=commentable_lines,
-            )
-            gh_url = res.get("html_url")
-            gh_review_id = res.get("id")
-            dropped = list(res.get("dropped_comments") or [])
-            skipped_off_diff = int(res.get("skipped_off_diff_count") or 0)
-            skipped_bad_line = int(res.get("skipped_bad_line_count") or 0)
-            posted_inline = int(res.get("posted_inline_count") or 0)
-    except GhError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-    dedup = row.get("dedup_summary") or ""
-    if review_comments:
-        note = f"Posted {posted_inline} inline comment(s)"
-        if skipped_off_diff:
-            note += f"; skipped {skipped_off_diff} off-diff path(s)"
-        if skipped_bad_line:
-            note += f"; skipped {skipped_bad_line} non-diff line(s)"
-        attach_dropped = len(dropped) - skipped_off_diff - skipped_bad_line
-        if attach_dropped > 0:
-            note += f"; dropped {attach_dropped} bad line anchor(s)"
-        dedup = f"{dedup}; {note}".strip("; ")
-    if appended_summary:
-        extra = f"appended {appended_summary} finding(s) to review body"
-        dedup = f"{dedup}; {extra}".strip("; ")
-
-    updated = mark_consolidation_feedback_provided(
-        conn,
-        consolidation_id,
-        gh_action=body.action,
-        gh_comment_url=gh_url,
-        gh_review_id=gh_review_id,
-    )
-    action = create_feedback_action(
-        conn,
-        pr_id=int(row["pr_id"]),
-        action=body.action,
-        source_run_ids=list(row.get("source_run_ids") or []),
-        body=text,
-        gh_comment_url=gh_url,
-        gh_review_id=gh_review_id,
-        dedup_summary=dedup or None,
-    )
-    return {
-        "consolidation": updated,
-        "action": action,
-        "inline_comments": posted_inline,
-        "dropped_inline_comments": len(dropped),
-        "skipped_off_diff_comments": skipped_off_diff,
-        "skipped_bad_line_comments": skipped_bad_line,
-    }
+        return submit_consolidation_to_github(
+            request.app.state.db,
+            consolidation_id,
+            action=body.action,
+            body=body.body,
+            auto_submitted=False,
+        )
+    except ConsolidationSubmitError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message) from e
