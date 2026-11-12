@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from lazyreview.db import analysis_succeeded_for_current_head, get_current_pr_analysis, get_pr
+from lazyreview.services.analysis_eligibility import review_blocked_reason
 
 
 def require_succeeded_analysis(conn: sqlite3.Connection, pr_id: int) -> dict[str, Any]:
@@ -36,6 +37,24 @@ def require_succeeded_analysis(conn: sqlite3.Connection, pr_id: int) -> dict[str
             "head_sha": pr.get("head_sha"),
         },
     )
+
+
+def require_reviewable_pr(conn: sqlite3.Connection, pr_id: int) -> dict[str, Any]:
+    """Return the PR or raise HTTP 409 when merge-queue / closed / merged."""
+    pr = get_pr(conn, pr_id)
+    if not pr:
+        raise HTTPException(status_code=404, detail="PR not found")
+    blocked = review_blocked_reason(pr)
+    if blocked:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": blocked,
+                "in_merge_queue": bool(pr.get("in_merge_queue")),
+                "state": pr.get("state"),
+            },
+        )
+    return pr
 
 
 def analysis_ready(conn: sqlite3.Connection, pr_id: int) -> bool:

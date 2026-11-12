@@ -157,6 +157,27 @@ def try_activate_dormant_consolidation(
         if str(run.get("status") or "") not in _TERMINAL_RUN_STATUSES:
             return None
 
+    from lazyreview.services.analysis_eligibility import review_blocked_reason
+
+    pr = get_pr(conn, int(row["pr_id"]))
+    blocked = review_blocked_reason(pr or {})
+    if blocked:
+        cur = conn.execute(
+            """
+            UPDATE consolidations
+            SET status = 'cancelled', finished_at = ?, error_message = ?
+            WHERE id = ? AND status = 'dormant'
+            """,
+            (utcnow(), f"Skipped: {blocked}", consolidation_id),
+        )
+        conn.commit()
+        if not cur.rowcount:
+            return None
+        updated = get_consolidation(conn, consolidation_id)
+        if updated:
+            notify_consolidation_finished(conn, updated)
+        return updated
+
     # All known runs are terminal (or deleted). Prefer successful, eligible runs.
     succeeded_ids = [
         rid
@@ -741,6 +762,19 @@ class ConsolidationRunner:
                 status="failed",
                 finished_at=utcnow(),
                 error_message="PR not found",
+            )
+            return
+
+        from lazyreview.services.analysis_eligibility import review_blocked_reason
+
+        blocked = review_blocked_reason(pr)
+        if blocked:
+            update_consolidation(
+                conn,
+                consolidation_id,
+                status="cancelled",
+                finished_at=utcnow(),
+                error_message=f"Skipped: {blocked}",
             )
             return
 
@@ -1449,6 +1483,20 @@ class ConsolidationRunner:
                 consolidation_id,
                 ready_to_post=0,
                 error_message="PR not found",
+                publish_status="failed",
+                publish_finished_at=utcnow(),
+            )
+            return
+
+        from lazyreview.services.analysis_eligibility import review_blocked_reason
+
+        blocked = review_blocked_reason(pr)
+        if blocked:
+            update_consolidation(
+                conn,
+                consolidation_id,
+                ready_to_post=0,
+                error_message=f"Skipped: {blocked}",
                 publish_status="failed",
                 publish_finished_at=utcnow(),
             )

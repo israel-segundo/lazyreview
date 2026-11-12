@@ -22,7 +22,10 @@ from lazyreview.db import (
     run_is_selectable,
 )
 from lazyreview.services.agent_eligibility import require_selectable_agent
-from lazyreview.services.analysis_gate import require_succeeded_analysis
+from lazyreview.services.analysis_gate import (
+    require_reviewable_pr,
+    require_succeeded_analysis,
+)
 from lazyreview.services.consolidation_jobs import consolidations_dir
 from lazyreview.services.gh import (
     GhError,
@@ -107,6 +110,7 @@ def create_pr_consolidation(pr_id: int, body: CreateConsolidationBody, request: 
     if not pr:
         raise HTTPException(status_code=404, detail="PR not found")
 
+    require_reviewable_pr(conn, pr_id)
     require_succeeded_analysis(conn, pr_id)
 
     run_ids = _validate_run_ids(conn, pr_id, body.run_ids)
@@ -235,6 +239,7 @@ def regenerate_consolidation(consolidation_id: int, request: Request):
                 detail=f"Run #{rid} is already in an active consolidation",
             )
 
+    require_reviewable_pr(conn, int(row["pr_id"]))
     cfg = _require_consolidator_selectable(request)
 
     pr = get_pr(conn, int(row["pr_id"]))
@@ -298,6 +303,7 @@ def regenerate_publish(consolidation_id: int, request: Request):
             detail="No internal report to publish from",
         )
 
+    require_reviewable_pr(conn, int(row["pr_id"]))
     _require_consolidator_selectable(request)
 
     update_consolidation(
@@ -329,9 +335,7 @@ def post_consolidation(consolidation_id: int, body: PostConsolidationBody, reque
             detail="GitHub draft is not ready yet (publish transform incomplete)",
         )
 
-    pr = get_pr(conn, int(row["pr_id"]))
-    if not pr:
-        raise HTTPException(status_code=404, detail="PR not found")
+    pr = require_reviewable_pr(conn, int(row["pr_id"]))
 
     text = body.body if body.body is not None else (row.get("publish_body") or "")
     if not text.strip():

@@ -10,6 +10,7 @@
   <a href="/" class="inline-block text-sm text-blue-600 hover:underline dark:text-blue-400">← PRs</a>
 
   {% set pr_label = 'draft' if pr.is_draft else (pr.state or 'open') %}
+  {% set in_merge_queue = pr.in_merge_queue %}
   {% set istatus = pr.internal_status or 'needs_review' %}
   {% set is_rereview = istatus == 'needs_review' and pr.previously_approved %}
   {% set review_label = pr.internal_status_label or ('needs re-review' if is_rereview else 'needs review') %}
@@ -21,8 +22,8 @@
       <span class="ml-1.5 break-words text-slate-900 dark:text-slate-100">{{ pr.title }}</span>
     </h1>
     <button type="button" @click="openBatchModal()"
-            :disabled="!analysisReady"
-            :title="analysisReady ? 'Start a new review' : 'PR analysis must succeed before reviewing'"
+            :disabled="!canStartReview"
+            :title="reviewBlockedTitle()"
             class="lr-pr-new-review lr-pr-new-review--desktop">
       New Review
     </button>
@@ -48,6 +49,11 @@
           {% elif pr_label == 'open' %}lr-pr-meta__pill--ok
           {% elif pr_label == 'merged' %}lr-pr-meta__pill--merged
           {% else %}lr-pr-meta__pill--bad{% endif %}">{{ pr_label }}</span>
+        {% if in_merge_queue %}
+        <span class="lr-pr-meta__dot" aria-hidden="true">·</span>
+        <span class="lr-pr-meta__pill lr-pr-meta__pill--queue"
+              title="GitHub has this PR in a merge queue">merge queue</span>
+        {% endif %}
         <span class="lr-pr-meta__dot" aria-hidden="true">·</span>
         <span class="lr-pr-meta__pill
           {% if istatus == 'approved' %}lr-pr-meta__pill--ok
@@ -88,6 +94,13 @@
           {% elif pr_label == 'merged' %}bg-purple-100 text-purple-900 dark:bg-purple-900/40 dark:text-purple-200
           {% else %}bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200{% endif %}">{{ pr_label }}</span>
       </span>
+      {% if in_merge_queue %}
+      <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600"
+            title="GitHub has this PR in a merge queue">
+        <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Queue</span>
+        <span class="bg-indigo-100 px-2 py-1 font-medium text-indigo-900 dark:bg-indigo-900/40 dark:text-indigo-200">merge queue</span>
+      </span>
+      {% endif %}
       <span class="inline-flex items-center gap-0 rounded-md overflow-hidden border border-slate-200 dark:border-slate-600">
         <span class="bg-slate-100 px-2 py-1 font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">Review</span>
         <span class="px-2 py-1 font-medium
@@ -241,8 +254,8 @@
                     :aria-expanded="chatOpen"
                     x-text="chatOpen ? 'Hide chat' : 'Chat'"></button>
             <button type="button" @click="openBatchModal()"
-                    :disabled="!analysisReady"
-                    :title="analysisReady ? 'Start a new review' : 'PR analysis must succeed before reviewing'"
+                    :disabled="!canStartReview"
+                    :title="reviewBlockedTitle()"
                     class="lr-pr-new-review lr-pr-new-review--mobile">
               New Review
             </button>
@@ -861,7 +874,8 @@
                         <option value="request_changes">Request changes</option>
                       </select>
                       <button type="button" @click="postFindingsFeedback()"
-                              :disabled="findingsPosting || !activeFindingsConsolidation().ready_to_post || !(findingsPublishBody || '').trim()"
+                              :disabled="inMergeQueue || findingsPosting || !activeFindingsConsolidation().ready_to_post || !(findingsPublishBody || '').trim()"
+                              :title="inMergeQueue ? 'PR is in the merge queue' : ''"
                               class="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
                         <span x-text="findingsPosting ? 'Posting…' : 'Submit feedback'"></span>
                       </button>
@@ -1577,7 +1591,14 @@ function reviewForm() {
     mermaidExpandOpen: false,
     mermaidExpandHtml: '',
     _mermaidSeq: 0,
+    inMergeQueue: {{ 1 if in_merge_queue else 0 }},
     get analysisReady() { return this.analysisStatus === 'succeeded'; },
+    get canStartReview() { return this.analysisReady && !this.inMergeQueue; },
+    reviewBlockedTitle() {
+      if (this.inMergeQueue) return 'PR is in the merge queue';
+      if (this.analysisReady) return 'Start a new review';
+      return 'PR analysis must succeed before reviewing';
+    },
     stripAnalysisChrome(md) {
       // Drop title/meta the UI already shows in the PR header (legacy briefs).
       let s = String(md || '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -2741,6 +2762,10 @@ function reviewForm() {
     async postFindingsFeedback() {
       const c = this.activeFindingsConsolidation();
       if (!c) return;
+      if (this.inMergeQueue) {
+        this.findingsPostError = 'PR is in the merge queue';
+        return;
+      }
       this.findingsPostError = '';
       const action = this.findingsVerdict || 'comment';
       const labels = { comment: 'comment', approve: 'approve', request_changes: 'request changes' };
@@ -2773,6 +2798,10 @@ function reviewForm() {
       }
     },
     openBatchModal() {
+      if (this.inMergeQueue) {
+        lrAlert('This PR is in the merge queue. Reviews are disabled until it leaves the queue.', { title: 'Merge queue' });
+        return;
+      }
       if (!this.analysisReady) {
         lrAlert('Run PR analysis successfully before starting reviews.', { title: 'Analysis required' });
         return;

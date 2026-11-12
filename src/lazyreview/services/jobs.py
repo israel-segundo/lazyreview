@@ -262,6 +262,19 @@ class JobRunner:
             )
             return
 
+        from lazyreview.services.analysis_eligibility import review_blocked_reason
+
+        blocked = review_blocked_reason(pr)
+        if blocked:
+            update_run(
+                conn,
+                run_id,
+                status="cancelled",
+                finished_at=utcnow(),
+                error_message=f"Skipped: {blocked}",
+            )
+            return
+
         run_dir = Path(run["workdir_path"] or self.settings.runs_dir / str(run_id))
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "artifacts").mkdir(exist_ok=True)

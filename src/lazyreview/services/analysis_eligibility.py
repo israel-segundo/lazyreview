@@ -18,6 +18,11 @@ def _flag(value: Any) -> bool:
     return bool(value)
 
 
+def in_merge_queue(pr: dict[str, Any]) -> bool:
+    """True when the stored PR flag says GitHub has this PR in a merge queue."""
+    return _flag(pr.get("in_merge_queue"))
+
+
 def analysis_ineligible_reason(
     pr: dict[str, Any],
     *,
@@ -34,9 +39,18 @@ def analysis_ineligible_reason(
         return f"PR is {state}"
     if not allow_draft and _flag(pr.get("is_draft")):
         return "PR is a draft"
-    if _flag(pr.get("in_merge_queue")):
+    if in_merge_queue(pr):
         return "PR is in the merge queue"
     return None
+
+
+def review_blocked_reason(pr: dict[str, Any]) -> str | None:
+    """
+    Reason to refuse review runs, consolidations, or GitHub submit, or None.
+
+    Drafts may still be reviewed; merge-queue / closed / merged may not.
+    """
+    return analysis_ineligible_reason(pr, allow_draft=True)
 
 
 def refresh_pr_analysis_flags(pr: dict[str, Any]) -> dict[str, Any]:

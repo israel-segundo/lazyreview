@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from lazyreview.services.analysis_gate import require_succeeded_analysis
+from lazyreview.services.analysis_gate import (
+    require_reviewable_pr,
+    require_succeeded_analysis,
+)
 
 from pathlib import Path
 
@@ -46,6 +49,7 @@ def _create_one_run(conn, settings, jobs, *, pr, agent: str, model: str, effort:
         require_selectable_agent(settings, conn, agent)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    require_reviewable_pr(conn, int(pr["id"]))
     require_succeeded_analysis(conn, int(pr["id"]))
     run = create_run(
         conn,

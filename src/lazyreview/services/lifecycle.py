@@ -81,7 +81,23 @@ def on_pr_upserted(
     # Stop burning tokens once the PR is no longer reviewable.
     skip = analysis_ineligible_reason(pr, allow_draft=False)
     if skip:
-        _cancel_analyses(int(pr["id"]), f"Skipped: {skip}")
+        pr_id = int(pr["id"])
+        _cancel_analyses(pr_id, f"Skipped: {skip}")
+        # Merge-queue / closed / merged: also stop review runs and consolidations.
+        # Drafts only cancel analysis (manual review is still allowed).
+        from lazyreview.services.analysis_eligibility import in_merge_queue
+
+        if in_merge_queue(pr) or state in ("closed", "merged"):
+            if _jobs is not None and hasattr(_jobs, "cancel_for_pr"):
+                try:
+                    _jobs.cancel_for_pr(pr_id)
+                except Exception:
+                    pass
+            if _consolidations is not None and hasattr(_consolidations, "cancel_for_pr"):
+                try:
+                    _consolidations.cancel_for_pr(pr_id)
+                except Exception:
+                    pass
         return
 
     should_enqueue = is_new or (

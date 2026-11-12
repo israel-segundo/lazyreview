@@ -10,7 +10,10 @@ import pytest
 from lazyreview.db import create_pr_analysis, get_pr_analysis, upsert_pr
 from lazyreview.db.schema import connect, init_db
 from lazyreview.services import lifecycle
-from lazyreview.services.analysis_eligibility import analysis_ineligible_reason
+from lazyreview.services.analysis_eligibility import (
+    analysis_ineligible_reason,
+    review_blocked_reason,
+)
 from lazyreview.services.analysis_enqueue import AnalysisSkipped, ensure_analysis_for_pr
 
 
@@ -39,6 +42,15 @@ def test_analysis_ineligible_reason_cases():
         )
         == "PR is merged"
     )
+
+
+def test_review_blocked_reason_allows_draft_but_not_merge_queue():
+    assert review_blocked_reason({"state": "open", "is_draft": 1}) is None
+    assert (
+        review_blocked_reason({"state": "open", "in_merge_queue": True})
+        == "PR is in the merge queue"
+    )
+    assert review_blocked_reason({"state": "closed"}) == "PR is closed"
 
 
 def test_upsert_skips_analysis_for_draft(tmp_path: Path):
@@ -75,8 +87,10 @@ def test_upsert_skips_analysis_for_draft(tmp_path: Path):
 def test_upsert_skips_analysis_for_merge_queue(tmp_path: Path):
     conn = _conn(tmp_path)
     analyses = MagicMock()
+    jobs = MagicMock()
+    consolidations = MagicMock()
     lifecycle.bind(
-        settings=MagicMock(), jobs=MagicMock(), consolidations=MagicMock(), analyses=analyses
+        settings=MagicMock(), jobs=jobs, consolidations=consolidations, analyses=analyses
     )
     try:
         with patch(
@@ -97,6 +111,8 @@ def test_upsert_skips_analysis_for_merge_queue(tmp_path: Path):
             )
             ensure.assert_not_called()
             assert "merge queue" in analyses.cancel_for_pr.call_args.kwargs["reason"]
+            jobs.cancel_for_pr.assert_called()
+            consolidations.cancel_for_pr.assert_called()
     finally:
         lifecycle.unbind()
         conn.close()

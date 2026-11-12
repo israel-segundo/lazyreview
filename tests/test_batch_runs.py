@@ -59,6 +59,56 @@ def _settings(tmp_path: Path) -> Settings:
     )
 
 
+def test_batch_rejects_merge_queue_pr(tmp_path: Path):
+    from lazyreview.main import create_app
+
+    settings = _settings(tmp_path)
+    settings.ensure_dirs()
+    conn = connect(settings.db_path)
+    init_db(conn)
+    pr = upsert_pr(
+        conn,
+        owner="o",
+        repo="r",
+        number=71,
+        url="https://example.com/o/r/pull/71",
+        title="t",
+        base_ref="main",
+        head_ref="feat",
+        head_sha="mq1",
+        in_merge_queue=True,
+    )
+    _seed_succeeded_analysis(conn, pr)
+    conn.close()
+
+    fake = MagicMock()
+    fake.available.return_value = True
+
+    with patch("lazyreview.main.get_settings", return_value=settings):
+        app = create_app()
+        with TestClient(app) as client:
+            with (
+                patch("lazyreview.api.runs.get_adapter", return_value=fake),
+                patch.object(app.state.jobs, "enqueue") as enqueue,
+            ):
+                res = client.post(
+                    "/api/runs/batch",
+                    json={
+                        "pr_id": pr["id"],
+                        "runs": [
+                            {"agent": "claude", "model": "opus", "effort": "high"},
+                        ],
+                    },
+                )
+            assert res.status_code == 409, res.text
+            detail = res.json().get("detail") or {}
+            if isinstance(detail, dict):
+                assert "merge queue" in detail.get("message", "").lower()
+            else:
+                assert "merge queue" in str(detail).lower()
+            enqueue.assert_not_called()
+
+
 def test_batch_creates_multiple_runs(tmp_path: Path):
     from lazyreview.main import create_app
 
