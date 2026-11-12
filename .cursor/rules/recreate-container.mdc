@@ -1,0 +1,15 @@
+---
+description: Route recreate/regenerate container requests to the recreate-container skill
+alwaysApply: true
+---
+
+# Recreate container routing
+
+When the user asks to recreate, regenerate, rebuild, or restart the Docker
+container for this project (including Spanish phrasing such as "regenera
+container", "recrea el container", "reconstruye el contenedor", or English
+phrases like "recreate container", "regenerate container", "rebuild docker"),
+**read and follow** `.cursor/skills/recreate-container/SKILL.md` before acting.
+
+Do not improvise a different Compose workflow unless the user explicitly asks
+for a variant listed in that skill (build-only, restart-only, wipe volumes).
